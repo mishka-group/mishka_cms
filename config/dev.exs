@@ -1,4 +1,15 @@
 import Config
+config :ash, policies: [show_policy_breakdowns?: true]
+
+# Configure your database
+config :mishka_cms, MishkaCms.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: System.get_env("DB_HOST", "localhost"),
+  database: System.get_env("DB_NAME", "mishka_cms_dev"),
+  stacktrace: true,
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10
 
 # For development, we disable any cache and enable
 # debugging and code reloading.

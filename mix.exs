@@ -44,6 +44,21 @@ defmodule MishkaCms.MixProject do
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},
 
+      # Ash Stuff
+      {:ash_postgres, "~> 2.13"},
+      {:ash_phoenix, "~> 2.3"},
+      {:ash, "~> 3.33"},
+      {:ash_oban, "~> 0.8"},
+
+      # Queue Stuff
+      {:oban, "~> 2.24"},
+
+      # DataBase Stuff
+      {:phoenix_ecto, "~> 4.7"},
+      {:ecto_sql, "~> 3.14"},
+      {:decimal, "~> 3.1"},
+      {:postgrex, "~> 0.22"},
+
       # Req/Res Stuff
       {:bandit, "~> 1.12"},
       {:dns_cluster, "~> 0.3"},
@@ -75,12 +90,65 @@ defmodule MishkaCms.MixProject do
 
   defp aliases do
     [
+      setup: ["deps.get", "ash.setup", "run priv/repo/seeds.exs"],
+      "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
+      "ecto.reset": ["ecto.drop", "ecto.setup"],
+      test: ["ash.setup --quiet", "test"],
       precommit: [
         "compile --warnings-as-errors",
         "deps.unlock --unused",
         "format",
         "test --warnings-as-errors"
+      ],
+      dev_reset: [
+        &reset_generated/1,
+        "ecto.create",
+        "oban.install --yes",
+        "ash.codegen cms_with_extensions",
+        "ash.migrate"
       ]
     ]
+  end
+
+  # Everything `dev_reset` regenerates has to be gone BEFORE it runs, or `mix ash.codegen` diffs the
+  # resources against the surviving snapshots and appends an incremental migration describing a
+  # schema that is about to be dropped — which then fails to apply against an empty database.
+  #
+  # Both databases go: the dev one, and the TEST one, because a stale test schema outlives a dev
+  # reset and the next `mix test` migrates on top of it.
+  defp reset_generated(_args) do
+    File.rm_rf!("priv/resource_snapshots")
+
+    # `.formatter.exs` is real config, not generated, and must survive. `Path.wildcard/2` already
+    # skips it (dotfiles need `match_dot: true`), but that is a default someone could quietly undo —
+    # so the rejection is spelled out rather than relied upon.
+    "priv/repo/migrations/*.exs"
+    |> Path.wildcard()
+    |> Enum.reject(&(Path.basename(&1) == ".formatter.exs"))
+    |> Enum.each(&File.rm!/1)
+
+    Mix.Task.run("ecto.drop")
+    drop_test_database()
+  end
+
+  # The test repo's settings come straight from `config/test.exs` and its database is dropped from
+  # here, so a fresh clone needs nothing built for the test environment. A test database that
+  # cannot be dropped is reported and the reset goes on.
+  defp drop_test_database do
+    opts =
+      "config/test.exs"
+      |> Config.Reader.read!(env: :test)
+      |> get_in([:mishka_cms, MishkaCms.Repo])
+
+    case Ecto.Adapters.Postgres.storage_down(opts) do
+      :ok ->
+        Mix.shell().info("The database for MishkaCms.Repo (test) has been dropped")
+
+      {:error, :already_down} ->
+        :ok
+
+      {:error, reason} ->
+        Mix.shell().error("Could not drop the test database: #{inspect(reason)}")
+    end
   end
 end

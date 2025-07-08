@@ -6,7 +6,13 @@ defmodule MishkaCms.Application do
   def start(_type, _args) do
     children = [
       MishkaCmsWeb.Telemetry,
+      MishkaCms.Repo,
       {DNSCluster, query: Application.get_env(:mishka_cms, :dns_cluster_query) || :ignore},
+      {Oban,
+       AshOban.config(
+         Application.fetch_env!(:mishka_cms, :ash_domains),
+         Application.fetch_env!(:mishka_cms, Oban)
+       )},
       {Phoenix.PubSub, name: MishkaCms.PubSub},
       MishkaCmsWeb.Endpoint
     ]

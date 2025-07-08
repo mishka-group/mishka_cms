@@ -30,6 +30,8 @@ defmodule MishkaCmsWeb.Endpoint do
   # :code_reloader configuration of your endpoint.
   if code_reloading? do
     plug Phoenix.CodeReloader
+    plug AshPhoenix.Plug.CheckCodegenStatus
+    plug Phoenix.Ecto.CheckRepoStatus, otp_app: :mishka_cms
   end
 
   plug Plug.RequestId
