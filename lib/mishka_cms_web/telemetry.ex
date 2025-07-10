@@ -79,7 +79,19 @@ defmodule MishkaCmsWeb.Telemetry do
       summary("vm.memory.total", unit: {:byte, :kilobyte}),
       summary("vm.total_run_queue_lengths.total"),
       summary("vm.total_run_queue_lengths.cpu"),
-      summary("vm.total_run_queue_lengths.io")
+      summary("vm.total_run_queue_lengths.io"),
+
+      # Custom MishkaCMS RuntimeLive/Global Metrics
+      ### lib/mishka_cms_web/controllers/error_html.ex
+      counter("mishka_cms.error_page.render.count",
+        tags: [:status_code, :site],
+        description: "Error page render count"
+      ),
+      summary("mishka_cms.error_page.render.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:status_code, :path, :site],
+        description: "Error page render duration"
+      )
     ]
   end
 

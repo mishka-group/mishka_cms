@@ -116,7 +116,7 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [json: MishkaCmsWeb.ErrorJSON],
+    formats: [html: MishkaCmsWeb.ErrorHTML, json: MishkaCmsWeb.ErrorJSON],
     layout: false
   ],
   pubsub_server: MishkaCmsCore.PubSub,
