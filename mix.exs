@@ -8,6 +8,7 @@ defmodule MishkaCms.MixProject do
       version: @version,
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
+      test_paths: test_paths(),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
@@ -37,6 +38,16 @@ defmodule MishkaCms.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
+  # Every extension carries its own harness now — a repo, endpoint, router and case template under
+  # its `test/support` — and runs on its own with `cd __extensions/<ext> && mix test`. None of them
+  # may be listed here: Mix does not compile a path dependency's `test/support`, so those modules are
+  # invisible from this project and running their tests from here would only fail to compile.
+  #
+  # What stays in `test/` is what exists only here: the web layer, the installer, and the handful of
+  # assertions that need several extensions installed at once (see
+  # `MishkaCms.Activity.CrossExtensionDiscoveryTest`).
+  defp test_paths, do: ["test"]
+
   defp deps do
     [
       # Phoenix Prod Stuff
@@ -45,13 +56,27 @@ defmodule MishkaCms.MixProject do
       {:phoenix_live_view, "~> 1.2"},
 
       # Ash Stuff
+      {:ash_archival, "~> 2.0"},
+      {:ash_events, "~> 0.8"},
+      {:ash_state_machine, "~> 0.2"},
+      {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
+      {:ash_authentication, "~> 5.0.0-rc.14"},
+      {:jose, "~> 1.11", override: true},
       {:ash_postgres, "~> 2.13"},
       {:ash_phoenix, "~> 2.3"},
       {:ash, "~> 3.33"},
+      {:ash_paper_trail, "~> 0.7"},
+      {:ash_cloak, "~> 0.4"},
+      {:ash_slug, "~> 0.2"},
       {:ash_oban, "~> 0.8"},
 
       # Queue Stuff
       {:oban, "~> 2.24"},
+
+      # Global deps
+      {:sourceror, "~> 1.12", only: [:dev, :test]},
+      {:cloak, "~> 1.1"},
+      {:mishka_installer, "~> 0.1"},
 
       # DataBase Stuff
       {:phoenix_ecto, "~> 4.7"},
@@ -61,6 +86,8 @@ defmodule MishkaCms.MixProject do
 
       # Req/Res Stuff
       {:bandit, "~> 1.12"},
+      {:swoosh, "~> 1.28"},
+      {:req, "~> 0.7"},
       {:dns_cluster, "~> 0.3"},
 
       # Logger/Metrics Prod Stuff
@@ -78,13 +105,20 @@ defmodule MishkaCms.MixProject do
       # Extra Stuff
       {:jason, "~> 1.4"},
       {:gettext, "~> 1.0"},
+      {:bcrypt_elixir, "~> 3.3"},
       {:heroicons,
        github: "tailwindlabs/heroicons",
        tag: "v2.2.0",
        sparse: "optimized",
        app: false,
        compile: false,
-       depth: 1}
+       depth: 1},
+      {:html_sanitize_ex, "~> 1.5", override: true},
+      {:guarded_struct, "~> 0.1"},
+
+      # Extentions
+      {:mishka_cms_core, path: "__extensions/mishka_cms_core"},
+      {:mishka_gervaz, path: "__extensions/mishka_gervaz"}
     ]
   end
 

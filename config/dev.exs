@@ -49,6 +49,8 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
 # configured to run both http and https servers on
 # different ports.
 
+config :mishka_cms_core, token_signing_secret: "IlXwCFGnsZDTbDs7wqznijy8I22+U77i"
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 
@@ -66,3 +68,23 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
+
+# Swoosh's HTTP client, for a provider that sends over HTTP (Resend) when a site picks one here.
+config :swoosh, :api_client, Swoosh.ApiClient.Req
+
+# Email goes to /dev/mailbox until a scope picks a real provider — see `MishkaCmsCore.Mail`.
+config :mishka_cms_core, mail_dev_mailbox: true, mail_default_provider: "dev_mailbox"
+
+# mishka_installer — persist registered events & plugins on disk (Mnesia disc_copies) so they
+# survive `mix phx.server` restarts. Stored under <project>/.mnesia/dev.
+config :mishka_installer, MishkaInstaller.MnesiaRepo,
+  mnesia_dir: Path.expand(".mnesia/dev"),
+  essential: [MishkaInstaller.Event.Event, MishkaInstaller.Installer.Installer]
+
+config :mishka_cms_core, :env_dev?, true
+
+# The visual editor's Record history and Assistant rails show the prototype's sample transcript while
+# they are empty, so the panels can be judged before a page has any real history or conversation.
+# Scaffolding — see `MishkaCmsCore.Runtime.PageBuilder.Demo`; drop this line to see the real (empty)
+# rails, and delete the module once real data exists.
+config :mishka_cms_core, builder_demo_data: true

@@ -49,3 +49,7 @@ npm-debug.log
 
 # Ignore Claude files.
 /.claude
+/.mnesia
+__extensions/ash*/
+__extensions/mishka_gervaz/
+__extensions/.keep

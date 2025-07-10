@@ -2,13 +2,20 @@
   import_deps: [
     :ash_oban,
     :oban,
+    :ash_events,
+    :ash_state_machine,
+    :ash_authentication_phoenix,
+    :ash_authentication,
     :ash_postgres,
     :ash_phoenix,
     :ash,
     :reactor,
+    :ash_archival,
     :ecto,
     :ecto_sql,
-    :phoenix
+    :phoenix,
+    :guarded_struct,
+    :mishka_gervaz
   ],
   subdirectories: ["priv/*/migrations"],
   plugins: [Spark.Formatter, Phoenix.LiveView.HTMLFormatter],

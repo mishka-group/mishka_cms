@@ -9,12 +9,26 @@ import Config
 
 config :ash_oban, pro?: false
 
+# Settings providers — extension modules exporting `definitions/0` (a list of
+# `MishkaCmsCore.Settings.define/3` maps), aggregated into the settings store at boot. Extensions
+# append themselves here (or register at runtime via the `settings:register` hook). The core's own
+# settings live in `MishkaCmsCore.Settings` directly.
+config :mishka_cms_core, :settings_providers, []
+
+# Kept out of every request and LiveView event log: a parameter whose name holds one of these words
+# — an account password, a provider's API key (`mailer.resend.api_key`), a sign-in token.
+config :phoenix, :filter_parameters, ["password", "secret", "api_key", "token"]
+
+# MishkaGervaz gettext backend - use our app's Gettext for i18n in DSL labels
+config :mishka_gervaz, :gettext_backend, MishkaCmsCore.Gettext
+
 config :mishka_cms, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
   queues: [default: 5, modules: 8, assets: 2, sitemaps: 1, maintenance: 2, notify: 5, mail: 2],
   repo: MishkaCms.Repo,
   plugins: [
+    {Oban.Plugins.Cron, crontab: [{"0 4 * * *", MishkaCmsCore.Notify.Workers.PruneWorker}]},
     {Oban.Plugins.Pruner, max_age: 604_800}
   ]
 
@@ -74,10 +88,28 @@ config :spark,
     ]
   ]
 
+# Which repo the resources write through and which endpoint they broadcast on. Read with
+# `Application.compile_env!/2` inside `postgres do repo … end` and `pub_sub do module … end`, so the
+# resources name a setting instead of naming this application — that is what lets an extension be
+# compiled and tested outside the CMS. Resolved at compile time, so it costs nothing at run time.
+config :mishka_cms_core,
+  repo: MishkaCms.Repo,
+  endpoint: MishkaCmsWeb.Endpoint,
+  host_app: :mishka_cms,
+  # The base compiled runtime modules are built on, so templates can use this app's
+  # components and `~p` routes. See `MishkaCmsCore.Runtime.CompiledPageBase`.
+  web_module: MishkaCmsWeb,
+  core_components: MishkaCmsWeb.CoreComponents
+
 config :mishka_cms,
   ecto_repos: [MishkaCms.Repo],
   generators: [timestamp_type: :utc_datetime],
-  ash_domains: []
+  ash_domains: [
+    MishkaCmsCore.Runtime,
+    MishkaCmsCore.Accounts,
+    MishkaCmsCore.Notify,
+    MishkaCmsCore.Mail
+  ]
 
 # Configures the endpoint
 config :mishka_cms, MishkaCmsWeb.Endpoint,
@@ -87,8 +119,17 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
     formats: [json: MishkaCmsWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: MishkaCms.PubSub,
+  pubsub_server: MishkaCmsCore.PubSub,
   live_view: [signing_salt: "SUCSjzEp"]
+
+# Configures the mailer
+#
+# By default it uses the "Local" adapter which stores the emails
+# locally. You can see the emails in your browser, at "/dev/mailbox".
+#
+# For production it's recommended to configure a different adapter
+# at the `config/runtime.exs`.
+config :mishka_cms_core, MishkaCmsCore.Mailer, adapter: Swoosh.Adapters.Local
 
 # Configures Elixir's Logger
 config :logger, :default_formatter,
