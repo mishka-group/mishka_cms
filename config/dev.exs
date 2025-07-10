@@ -24,7 +24,12 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
   check_origin: false,
   code_reloader: true,
   debug_errors: false,
-  secret_key_base: "w745hNwPTNToyTAJMDZXQLdbCTGyscON2cz/qaH3QxlfvMMJl1PaHqP+MjdAhGyE"
+  secret_key_base: "w745hNwPTNToyTAJMDZXQLdbCTGyscON2cz/qaH3QxlfvMMJl1PaHqP+MjdAhGyE",
+  watchers: [
+    # esbuild: {Esbuild, :install_and_run, [:mishka_cms, ~w(--sourcemap=inline --watch)]},
+    # tailwind: {Tailwind, :install_and_run, [:mishka_cms, ~w(--watch)]},
+    esbuild_css: {Esbuild, :install_and_run, [:mishka_cms_css, ~w(--sourcemap=inline --watch)]}
+  ]
 
 # ## SSL Support
 #

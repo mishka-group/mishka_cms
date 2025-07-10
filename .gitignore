@@ -50,6 +50,14 @@ npm-debug.log
 # Ignore Claude files.
 /.claude
 /.mnesia
+/assets/js/packages
 __extensions/ash*/
 __extensions/mishka_gervaz/
 __extensions/.keep
+
+# Assets are a bun project. An npm lockfile beside bun.lock is not a second opinion, it is a second
+# answer: the one removed here pinned codemirror 5 while package.json asks for ^6 and bun installs
+# 6, so `npm ci` produced an editor built against an API two majors old.
+/assets/package-lock.json
+/assets/yarn.lock
+/assets/pnpm-lock.yaml

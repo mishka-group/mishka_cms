@@ -90,6 +90,10 @@ defmodule MishkaCms.MixProject do
       {:req, "~> 0.7"},
       {:dns_cluster, "~> 0.3"},
 
+      # Runtime Asset Stuff
+      {:esbuild, "~> 0.10"},
+      {:tailwind, "~> 0.5"},
+
       # Logger/Metrics Prod Stuff
       {:telemetry, "~> 1.4"},
       {:telemetry_metrics, "~> 1.2"},
@@ -124,10 +128,25 @@ defmodule MishkaCms.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get", "ash.setup", "run priv/repo/seeds.exs"],
+      setup: ["deps.get", "ash.setup", "assets.setup", "assets.build", "run priv/repo/seeds.exs"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ash.setup --quiet", "test"],
+      # `bun`, never npm: `assets/` is a bun project and the two do not agree. Nothing installed the
+      # JS dependencies at all before this, so a fresh clone ran `assets.build` against a missing
+      # `node_modules` and bundled an editor with no CodeMirror in it.
+      "assets.setup": [
+        "cmd --cd assets bun install --frozen-lockfile",
+        "tailwind.install --if-missing",
+        "esbuild.install --if-missing"
+      ],
+      "assets.build": ["tailwind mishka_cms", "esbuild mishka_cms", "admin_css"],
+      "assets.deploy": [
+        "tailwind mishka_cms --minify",
+        "esbuild mishka_cms --minify",
+        "admin_css --minify",
+        "phx.digest"
+      ],
       precommit: [
         "compile --warnings-as-errors",
         "deps.unlock --unused",

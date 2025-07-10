@@ -138,6 +138,40 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :mishka_cms_core, MishkaCmsCore.Mailer, adapter: Swoosh.Adapters.Local
 
+# Configure esbuild (the version is required)
+config :esbuild,
+  version: "0.28.2",
+  mishka_cms: [
+    args:
+      ~w(js/app.js js/site.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ],
+  mishka_cms_css: [
+    # CSS only
+    args: ~w(css/app.css --bundle --outdir=../priv/static/assets/css),
+    cd: Path.expand("../assets", __DIR__)
+  ],
+  mishka_cms_js: [
+    args: [],
+    env: %{"NODE_PATH" => Path.expand("../priv/static/temp/js_assets/node_modules", __DIR__)}
+  ]
+
+# Configure tailwind (the version is required)
+config :tailwind,
+  version: "4.3.3",
+  mishka_cms: [
+    args: ~w(
+    --input=assets/css/app.css
+    --output=priv/static/assets/css/app.css
+    ),
+    cd: Path.expand("..", __DIR__)
+  ],
+  mishka_cms_css: [
+    args: ~w(),
+    cd: Path.expand("..", __DIR__)
+  ]
+
 # Configures Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
