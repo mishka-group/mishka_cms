@@ -52,6 +52,13 @@ defmodule MishkaCmsWeb do
     quote do
       use Phoenix.LiveView
 
+      # EVERY LiveView, not every `live_session`. Several templates render a `<style>` of their own —
+      # the editor's canvas, the theme builder's live preview — and `style-src-elem` refuses one
+      # without a nonce. Attaching this to the `live_session`s missed the routes declared outside
+      # any, which is how `/theme-builder` came back as a 500. Here it reaches all of them, and
+      # `assign_new` makes it harmless where a session already supplied the value.
+      on_mount MishkaCmsCore.Runtime.CspNonce
+
       unquote(html_helpers())
     end
   end

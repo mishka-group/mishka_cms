@@ -82,6 +82,66 @@ defmodule MishkaCmsWeb.Telemetry do
       summary("vm.total_run_queue_lengths.io"),
 
       # Custom MishkaCMS RuntimeLive/Global Metrics
+      ### lib/mishka_cms_web/live/runtime_live.ex
+      summary("mishka_cms.runtime.mount.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:path, :site],
+        description: "Mount duration"
+      ),
+      counter("mishka_cms.runtime.mount.error.count",
+        tags: [:path, :site, :error_reason],
+        description: "Mount errors with detailed reason"
+      ),
+      summary("mishka_cms.runtime.compile.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:path, :site],
+        description: "Compile duration"
+      ),
+      summary("mishka_cms.runtime.render.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:path, :site],
+        description: "Render duration"
+      ),
+      counter("mishka_cms.runtime.render.error.count",
+        tags: [:path, :site, :error_reason],
+        description: "Render errors with detailed reason"
+      ),
+      summary("mishka_cms.runtime.handle_params.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:path, :site],
+        description: "Handle params duration"
+      ),
+      counter("mishka_cms.runtime.handle_params.error.count",
+        tags: [:path, :site, :error_reason],
+        description: "Handle params errors with detailed reason"
+      ),
+      summary("mishka_cms.runtime.handle_event.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:event, :path, :site],
+        description: "Handle event duration"
+      ),
+      counter("mishka_cms.runtime.handle_event.error.count",
+        tags: [:event, :path, :site, :error_reason],
+        description: "Handle event errors with detailed reason"
+      ),
+      summary("mishka_cms.runtime.handle_info.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:path, :site],
+        description: "Handle info duration"
+      ),
+      counter("mishka_cms.runtime.handle_info.error.count",
+        tags: [:path, :site, :error_reason],
+        description: "Handle info errors with detailed reason"
+      ),
+      summary("mishka_cms.runtime.runtime_layout.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:site, :has_layout],
+        description: "Runtime layout duration"
+      ),
+      counter("mishka_cms.runtime.runtime_layout.error.count",
+        tags: [:site, :error_reason],
+        description: "Runtime layout errors with detailed reason"
+      ),
       ### lib/mishka_cms_web/controllers/error_html.ex
       counter("mishka_cms.error_page.render.count",
         tags: [:status_code, :site],

@@ -1,0 +1,433 @@
+defmodule MishkaCmsWeb.RuntimeLive do
+  @moduledoc """
+  A Phoenix LiveView module that handles runtime rendering of dynamically compiled CMS pages.
+
+  This module serves as the main LiveView controller for the MishkaCMS runtime system, responsible for
+  dynamically compiling and rendering pages, layouts, and components based on database metadata. It manages
+  the complete lifecycle of runtime page rendering including path resolution, module compilation, security
+  validation, and error handling. The module supports multi-site configurations and provides fallback
+  mechanisms for layout rendering failures.
+  """
+  use MishkaCmsWeb, :live_view
+  alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
+  alias MishkaCmsCore.Runtime.Compilers.Helpers
+  alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
+  alias MishkaInstaller.Event.Hook
+
+  require Logger
+
+  def mount(%{"path" => path} = params, %{"current_site" => site} = session, socket) do
+    :telemetry.span(
+      [:mishka_cms, :runtime, :mount],
+      %{path: Enum.join(path, "/"), site: site.name},
+      fn ->
+        _ =
+          Hook.call("RuntimeLive.OnMount.BeforeMount", [params, session, socket],
+            return: false
+          )
+
+        socket =
+          if connected?(socket) do
+            Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, "site:#{site.name}:assets")
+            socket
+          else
+            socket
+          end
+
+        joined_path =
+          %{path: path, site: site}
+          |> then(&Hook.call("RuntimeLive.OnMount.BeforePathTransform", &1).path)
+          |> Enum.join("/")
+          |> then(fn path ->
+            if String.starts_with?(path, "/"), do: path, else: "/" <> path
+          end)
+
+        {found, _captured} =
+          WebRunTimeMetaDataState.resolve!("#{joined_path}", site.name, "Page")
+
+        page_module = Helpers.module_name(found.id, found.site, "Page")
+
+        new_socket =
+          :telemetry.span(
+            [:mishka_cms, :runtime, :compile],
+            %{path: joined_path, site: site.name, module: inspect(page_module)},
+            fn ->
+              compile_result =
+                page_module
+                |> ModuleCompilerHandler.compile_or_return_module(
+                  found.path,
+                  site.name,
+                  site.id
+                )
+                |> then(&Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1))
+                |> case do
+                  {:ok, _result} ->
+                    new_socket =
+                      socket
+                      |> assign(page_module: page_module)
+                      |> assign(page_module.__page_information__())
+                      |> assign_page_title()
+                      |> assign(current_site: site)
+                      |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
+
+                    Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
+
+                  {:error, reason} ->
+                    _ =
+                      Hook.call("RuntimeLive.OnMount.AfterCompileError", reason,
+                        return: false
+                      )
+
+                    :telemetry.execute(
+                      [:mishka_cms, :runtime, :mount, :error],
+                      %{count: 1},
+                      %{error_reason: inspect(reason), path: joined_path, site: site.name}
+                    )
+
+                    raise MishkaCmsCore.ErrorsExceptions.ServerError,
+                      message: "Sorry, unexpected error occurred. please try again later."
+                end
+
+              {compile_result, %{}}
+            end
+          )
+
+        # A DATABASE PAGE, so it takes the site's compiled bundle. Everything else public on this host
+        # is a marketing LiveView whose classes are known at build time and served by `public.css` —
+        # see the root layout. Marking the one runtime surface is cheaper and safer than annotating
+        # the other 44.
+        new_socket = Phoenix.Component.assign(new_socket, :runtime_page, true)
+
+        final_result =
+          {:ok, new_socket, layout: {MishkaCmsWeb.Layouts, :runtime}}
+          |> then(&Hook.call("RuntimeLive.OnMount.Return", &1))
+
+        {final_result, %{}}
+      end
+    )
+  end
+
+  def render(assigns) do
+    %{
+      page_module: page_module,
+      page: %{path: path},
+      private: %{site: site, site_id: site_id}
+    } = Hook.call("RuntimeLive.OnRender.BeforeRender", assigns)
+
+    :telemetry.span(
+      [:mishka_cms, :runtime, :render],
+      %{path: path, site: site},
+      fn ->
+        result =
+          ModuleCompilerHandler.compile_or_return_module(page_module, path, site, site_id)
+          |> case do
+            {:ok, _result} ->
+              # From beacon code to prevent overwritting site and avoid rendering a leaked page
+              %{private: %{site: ^site, page_module: ^page_module}} =
+                page_module.__page_information__()
+
+              Hook.call("RuntimeLive.OnRender.AfterCompile", page_module.render(assigns))
+
+            {:error, reason} ->
+              _ = Hook.call("RuntimeLive.OnRender.AfterCompileError", reason, return: false)
+
+              :telemetry.execute(
+                [:mishka_cms, :runtime, :render, :error],
+                %{count: 1},
+                %{error_reason: inspect(reason), path: path, site: site}
+              )
+
+              raise MishkaCmsCore.ErrorsExceptions.ServerError,
+                message: "Sorry, unexpected error occurred. please try again later."
+          end
+
+        {result, %{}}
+      end
+    )
+  end
+
+  def handle_params(%{"path" => path} = params, url, socket) do
+    :telemetry.span(
+      [:mishka_cms, :runtime, :handle_params],
+      %{path: Enum.join(path, "/"), site: socket.assigns.current_site.name},
+      fn ->
+        _ =
+          Hook.call("RuntimeLive.HandleParams.BeforeParams", [params, url, socket],
+            return: false
+          )
+
+        current_site = socket.assigns.current_site
+
+        joined_path =
+          %{path: path, site: current_site}
+          |> then(&Hook.call("RuntimeLive.HandleParams.BeforePathTransform", &1).path)
+          |> Enum.join("/")
+          |> then(fn path ->
+            if String.starts_with?(path, "/"), do: path, else: "/" <> path
+          end)
+
+        # if you use patch for navigate it shows pervious data not for this page if they are in same layout
+        %{private: %{site: site_name, site_id: site_id, host: expected_host}} = socket.assigns
+
+        uri = URI.parse(url)
+
+        if uri.host && uri.host != expected_host,
+          do:
+            raise(MishkaCmsCore.ErrorsExceptions.ForbiddenError,
+              message: "Invalid host for this site"
+            )
+
+        {found, _captured} = WebRunTimeMetaDataState.resolve!(joined_path, site_name, "Page")
+        page_module = Helpers.module_name(found.id, found.site, "Page")
+
+        result =
+          ModuleCompilerHandler.compile_or_return_module(
+            page_module,
+            found.path,
+            site_name,
+            site_id
+          )
+          |> then(&Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1))
+          |> case do
+            {:ok, _result} ->
+              # A LIVE NAVIGATION LANDS ON A DIFFERENT PAGE, and that page's uploads are not the
+              # ones mount registered. `allow_upload/3` refuses a name already registered, so
+              # `MishkaCmsCore.Runtime.PageUpload.allow/2` skips what is there and adds what the
+              # page this navigation arrived at asks for.
+              socket
+              |> assign(page_module: page_module)
+              |> assign(page_module.__page_information__())
+              |> assign(:current_path, joined_path)
+              |> then(fn socket ->
+                new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
+                {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
+              end)
+
+            {:error, reason} ->
+              _ =
+                Hook.call("RuntimeLive.HandleParams.AfterCompileError", reason, return: false)
+
+              :telemetry.execute(
+                [:mishka_cms, :runtime, :handle_params, :error],
+                %{count: 1},
+                %{error_reason: inspect(reason), path: joined_path, site: site_name}
+              )
+
+              raise MishkaCmsCore.ErrorsExceptions.ServerError,
+                message: "Sorry, unexpected error occurred. please try again later."
+          end
+
+        {result, %{}}
+      end
+    )
+  end
+
+  def handle_params(params, url, socket) do
+    _ =
+      Hook.call("RuntimeLive.HandleParams.BeforeAllParams", [params, url, socket], return: false)
+
+    # Catch-all for non-path params
+    # TODO: We can send logger here to dev and production report
+    {:noreply, socket}
+  end
+
+  def handle_event(event_name, event_params, socket) do
+    %{
+      page_module: page_module,
+      private: %{site: site},
+      page: %{path: path}
+    } = Hook.call("RuntimeLive.HandleEvent.BeforeEvent", socket.assigns)
+
+    :telemetry.span(
+      [:mishka_cms, :runtime, :handle_event],
+      %{event: event_name, path: path, site: site},
+      fn ->
+        %{private: %{site: ^site}} = page_module.__page_information__()
+
+        result =
+          apply(page_module, :handle_event, [event_name, event_params, socket])
+          |> then(&Hook.call("RuntimeLive.HandleEvent.AfterCallEvent", &1))
+
+        final_result =
+          case result do
+            {:noreply, %Phoenix.LiveView.Socket{} = socket} ->
+              {:noreply, Hook.call("RuntimeLive.HandleEvent.ReturnCallEvent", socket)}
+
+            other ->
+              _ =
+                Hook.call("RuntimeLive.HandleEvent.AfterCallEventError", other, return: false)
+
+              :telemetry.execute(
+                [:mishka_cms, :runtime, :handle_event, :error],
+                %{count: 1},
+                %{
+                  error_reason: "Invalid return value",
+                  event: event_name,
+                  path: path,
+                  site: site
+                }
+              )
+
+              raise MishkaCmsCore.ErrorsExceptions.ServerError,
+                message:
+                  "handle_event for #{path} expected return of {:noreply, %Phoenix.LiveView.Socket{}}, but got #{inspect(other)}"
+          end
+
+        {final_result, %{}}
+      end
+    )
+  end
+
+  # A COMPONENT FOUND NOTHING AT THE ADDRESS, and only it could know — the page is `/:lang/blog/:slug`
+  # and what a slug means belongs to whatever draws it. A LiveComponent has no `handle_params/3` and
+  # nothing to raise into, so it says so the way the guides say to, with `send/2`, and the answer is
+  # given here.
+  #
+  # A FULL LOAD, NOT A LIVE ONE. `redirect/2` puts the same address through the router again as an
+  # ordinary request; the component raises `NotFoundError` on that render and Phoenix draws the 404
+  # page with a 404 STATUS. Raising here instead would crash the view, and on a patch the client
+  # remounts into the same missing subject and crashes again — a loop where the visitor wanted a
+  # page. On the very first render there is no socket to redirect and the component raises outright,
+  # which is the same answer without the round trip.
+  def handle_info(:mishka_runtime_not_found, socket) do
+    {:noreply, redirect(socket, to: socket.assigns[:current_path] || "/")}
+  end
+
+  def handle_info({:css_updated, hash}, socket) do
+    site = socket.assigns.private.site
+
+    {:noreply,
+     push_event(socket, "mishka:css-updated", %{href: "/assets/css/#{site}/#{hash}.css"})}
+  end
+
+  def handle_info({:js_updated, _hash}, socket) do
+    {:noreply, push_event(socket, "mishka:js-updated", %{})}
+  end
+
+  def handle_info(message, socket) do
+    %{
+      page_module: page_module,
+      private: %{site: site},
+      page: %{path: path}
+    } = Hook.call("RuntimeLive.HandleInfo.BeforeInfo", socket.assigns)
+
+    :telemetry.span(
+      [:mishka_cms, :runtime, :handle_info],
+      %{path: path, site: site},
+      fn ->
+        %{private: %{site: ^site}} = page_module.__page_information__()
+
+        result =
+          apply(page_module, :handle_info, [message, socket])
+          |> then(&Hook.call("RuntimeLive.HandleInfo.AfterCallInfo", &1))
+
+        final_result =
+          case result do
+            {:noreply, %Phoenix.LiveView.Socket{} = socket} ->
+              {:noreply, Hook.call("RuntimeLive.HandleInfo.ReturnCallInfo", socket)}
+
+            other ->
+              _ = Hook.call("RuntimeLive.HandleInfo.AfterCallInfoError", other, return: false)
+
+              :telemetry.execute(
+                [:mishka_cms, :runtime, :handle_info, :error],
+                %{count: 1},
+                %{error_reason: "Invalid return value", path: path, site: site}
+              )
+
+              raise MishkaCmsCore.ErrorsExceptions.ServerError,
+                message:
+                  "handle_info for #{path} expected return of {:noreply, %Phoenix.LiveView.Socket{}}, but got #{inspect(other)}"
+          end
+
+        {final_result, %{}}
+      end
+    )
+  end
+
+  def runtime_layout(assigns) do
+    _ = Hook.call("RuntimeLive.RuntimeLayout.BeforeLayout", assigns, return: false)
+    layout = assigns.private.layout
+    site_name = assigns.private.site
+
+    :telemetry.span(
+      [:mishka_cms, :runtime, :runtime_layout],
+      %{site: site_name, has_layout: !is_nil(layout)},
+      fn ->
+        result =
+          if !is_nil(layout) do
+            {site, layout_path} = layout
+            {page_module, compiled} = compile_layout(layout, assigns.private.site_id)
+
+            case compiled do
+              {:ok, _result} ->
+                Hook.call("RuntimeLive.RuntimeLayout.AfterCompile", page_module.render(assigns))
+
+              {:error, reason} ->
+                _ =
+                  Hook.call("RuntimeLive.RuntimeLayout.AfterCompileError", reason, return: false)
+
+                :telemetry.execute(
+                  [:mishka_cms, :runtime, :runtime_layout, :error],
+                  %{count: 1},
+                  %{error_reason: inspect(reason), layout_path: layout_path, site: site}
+                )
+
+                Logger.warning("""
+                failed to render layout for #{layout_path}, fallback to default layout
+
+                Got:
+
+                #{inspect(reason)}
+                """)
+
+                default_layout(assigns)
+            end
+          else
+            default_layout(assigns)
+          end
+
+        {result, %{}}
+      end
+    )
+  rescue
+    error ->
+      Hook.call("RuntimeLive.RuntimeLayout.AfterCompileError", error, return: false)
+
+      :telemetry.execute(
+        [:mishka_cms, :runtime, :runtime_layout, :error],
+        %{count: 1},
+        %{error_reason: inspect(error), site: assigns.private.site}
+      )
+
+      Logger.warning("""
+      failed to render layout for #{inspect(assigns.private.layout)}, fallback to default layout
+
+      Got:
+
+      #{inspect(error)}
+      """)
+
+      default_layout(assigns)
+  end
+
+  # THE TAB READS WHAT THE PAGE IS CALLED. Assigned in `mount/3` for the first load.
+  defp assign_page_title(socket), do: assign(socket, :page_title, socket.assigns.page.title)
+
+  defp compile_layout({site, layout_path}, page_site_id) do
+    site_id = if(site == "Global", do: nil, else: page_site_id)
+    layout_meta = WebRunTimeMetaDataState.find_by_path_and_site!(layout_path, site, "Layout")
+    layout_module = Helpers.module_name(layout_meta.id, layout_meta.site, "Layout")
+
+    {layout_module,
+     ModuleCompilerHandler.compile_or_return_module(layout_module, layout_path, site, site_id)}
+  end
+
+  defp default_layout(assigns) do
+    ~H"""
+    <Layouts.app flash={assigns[:flash] || %{}}>
+      {assigns[:inner_content] || ""}
+    </Layouts.app>
+    """
+  end
+end

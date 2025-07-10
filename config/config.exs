@@ -111,6 +111,13 @@ config :mishka_cms,
     MishkaCmsCore.Mail
   ]
 
+# Extensions - each must have a .Routes submodule implementing ExtensionRouter behaviour.
+# Read by `MishkaCmsCore`, so it lives under that app's name rather than the host's.
+config :mishka_cms_core,
+  extensions: [
+    MishkaCmsCoreWeb
+  ]
+
 # Configures the endpoint
 config :mishka_cms, MishkaCmsWeb.Endpoint,
   url: [host: "localhost"],

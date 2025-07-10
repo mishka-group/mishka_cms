@@ -7,7 +7,22 @@
     <.live_title default="Mishka CMS">
       {assigns[:page_title]}
     </.live_title>
-    <script>
+    {raw(MishkaInstaller.Event.Hook.call("RootHtml.MetaTags", %{html: "", assigns: assigns}).html)}
+    <% css_href =
+      assigns[:current_site] &&
+        "/assets/css/#{assigns[:current_site][:name]}/#{MishkaCmsCore.Runtime.States.AssetsState.get!(assigns[:current_site][:name], "css")[:hash]}.css" %>
+    <% js_src =
+      assigns[:current_site] &&
+        "/assets/js/#{assigns[:current_site][:name]}/#{MishkaCmsCore.Runtime.States.AssetsState.get!(assigns[:current_site][:name], "js")[:hash]}.js" %>
+    <link
+      :if={css_href}
+      rel="stylesheet"
+      href={css_href}
+      id="mishka-runtime-css"
+    />
+    <script :if={js_src} defer src={js_src}>
+    </script>
+    <script nonce={assigns[:csp_nonce]}>
       (() => {
         const setTheme = (theme) => {
           if (theme === "system") {
