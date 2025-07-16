@@ -54,6 +54,7 @@ defmodule MishkaCms.MixProject do
       {:phoenix, "~> 1.8", override: true},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},
+      {:phoenix_live_dashboard, "~> 0.9"},
 
       # Ash Stuff
       {:ash_archival, "~> 2.0"},
@@ -103,6 +104,8 @@ defmodule MishkaCms.MixProject do
       {:telemetry_poller, "~> 1.3"},
 
       # Dev/Test Stuff
+      {:phoenix_live_reload, "~> 1.7", only: :dev},
+      {:file_system, "~> 1.1", only: [:test, :dev]},
       {:floki, "~> 0.38", only: :test},
       {:lazy_html, "~> 0.1", only: :test},
       {:igniter, "~> 0.8", only: :dev, override: true},

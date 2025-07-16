@@ -28,7 +28,20 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
   watchers: [
     # esbuild: {Esbuild, :install_and_run, [:mishka_cms, ~w(--sourcemap=inline --watch)]},
     # tailwind: {Tailwind, :install_and_run, [:mishka_cms, ~w(--watch)]},
-    esbuild_css: {Esbuild, :install_and_run, [:mishka_cms_css, ~w(--sourcemap=inline --watch)]}
+    esbuild_css: {Esbuild, :install_and_run, [:mishka_cms_css, ~w(--sourcemap=inline --watch)]},
+    mishka_cms_tailwind:
+      {MishkaCms.Dev.AssetsWatcher, :install_and_run,
+       [[site_names: ["localhost"], debounce_ms: 500]]},
+    # The two BUILD-TIME stylesheets. The watcher above compiles SITE assets, whose classes live in
+    # database rows; these two are `.ex` files fixed at build time and are a separate pipeline
+    # (`mix admin_css`). Serving compiled CSS means an edit to a template must rebuild it, or the
+    # developer adds a class, sees nothing, and has no reason to suspect the stylesheet.
+    #
+    # ONE ENTRY EACH, because Tailwind's `--watch` never returns: a single watcher that built the
+    # admin sheet first never reached the public one, and `public.css` went stale for days while
+    # `admin.css` rebuilt on every keystroke. Phoenix runs each entry in its own process.
+    admin_css: {Mix.Tasks.AdminCss, :watch, [[only: :admin]]},
+    public_css: {Mix.Tasks.AdminCss, :watch, [[only: :public]]}
   ]
 
 # ## SSL Support
@@ -54,6 +67,24 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
 # configured to run both http and https servers on
 # different ports.
 
+# Watch static and templates for browser reloading.
+config :mishka_cms, MishkaCmsWeb.Endpoint,
+  live_reload: [
+    web_console_logger: true,
+    # debounce: 1500,
+    patterns: [
+      ~r"priv/static/(?!uploads/|uploads_archived/|temp/).*\.(js|css|png|jpeg|jpg|gif|svg)$",
+      ~r"priv/gettext/.*(po)$",
+      ~r"lib/mishka_cms_web/(?:controllers|live|components|router)/?.*\.(ex|heex)$"
+    ],
+    exclude: [
+      ~r"priv/static/temp/.*$",
+      ~r".*\.tmp$"
+    ]
+  ]
+
+# Enable dev routes for dashboard and mailbox
+config :mishka_cms, dev_routes: true
 config :mishka_cms_core, token_signing_secret: "IlXwCFGnsZDTbDs7wqznijy8I22+U77i"
 
 # Do not include metadata nor timestamps in development logs

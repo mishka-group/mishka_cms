@@ -1,0 +1,63 @@
+# Run from the repository root:
+#   docker compose -f examples/docker/dev-docker-compose.yml up -d
+#   docker compose -f examples/docker/dev-docker-compose.yml exec app bash
+# Paths below are relative to this file, so the app mounts the repository root (../..).
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: examples/docker/Dockerfile.dev
+    container_name: elixir_dev
+    volumes:
+      - ../..:/app
+      - deps:/app/deps
+      - build:/app/_build
+      - ~/.hex:/root/.hex
+      - ~/.mix:/root/.mix
+    environment:
+      MIX_ENV: dev
+      # config/dev.exs reads DB_HOST and DB_NAME, and has its own secret key base.
+      DB_HOST: db
+      DB_NAME: mishka_cms_dev_docker
+      PORT: 4000
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - elixir_network
+    stdin_open: true
+    tty: true
+    command: tail -f /dev/null
+
+  db:
+    image: postgres:18-alpine
+    container_name: postgres_dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mishka_cms_dev_docker
+    # Postgres 18 keeps its data under /var/lib/postgresql, and cannot open a 16 data directory: the
+    # new volume name leaves an old postgres_data volume alone for a pg_dump and restore.
+    volumes:
+      - postgres_data_18:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+    networks:
+      - elixir_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data_18:
+  deps:
+  build:
+
+networks:
+  elixir_network:
+    driver: bridge
