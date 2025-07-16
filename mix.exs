@@ -93,6 +93,9 @@ defmodule MishkaCms.MixProject do
       # Runtime Asset Stuff
       {:esbuild, "~> 0.10"},
       {:tailwind, "~> 0.5"},
+      {:igniter_js, "~> 0.5"},
+      {:ex_brotli, "~> 0.6"},
+      {:picosat_elixir, "~> 0.2"},
 
       # Logger/Metrics Prod Stuff
       {:telemetry, "~> 1.4"},

@@ -170,6 +170,30 @@ config :tailwind,
   mishka_cms_css: [
     args: ~w(),
     cd: Path.expand("..", __DIR__)
+  ],
+  # THE ADMIN CHROME — the one stylesheet in this app that is NOT compiled at runtime.
+  #
+  # A site's CSS is built dynamically by `MishkaCmsCore.Runtime.Compilers.TailwindCompiler`, because
+  # a site's classes live in database rows that change without a deploy. The admin's classes do not:
+  # they are in templates, fixed at build time, and compiling them per request bought nothing. This
+  # profile is that split made explicit — `admin_*` is static and shipped, everything else is the
+  # runtime compiler's.
+  #
+  # It must stay out of `app.css`: the runtime compiler inlines that file into the static base every
+  # site's CSS is built on, so the dashboard's utilities would end up inside every public page.
+  # Args are supplied by `mix admin_css`, not here: the `@source` globs must be ABSOLUTE (Tailwind v4
+  # filters relative ones through .gitignore, which excludes several vendored extensions), so the
+  # input is generated. Configuring `--input` here would win over the task's and silently compile the
+  # wrong file — which is exactly what happened the first time.
+  admin_chrome: [
+    args: ~w(),
+    cd: Path.expand("..", __DIR__)
+  ],
+  # The host's public marketing pages. Static, known at build time, and deliberately NOT inside any
+  # site's runtime bundle — see `Mix.Tasks.AdminCss`.
+  public_pages: [
+    args: ~w(),
+    cd: Path.expand("..", __DIR__)
   ]
 
 # Configures Elixir's Logger
