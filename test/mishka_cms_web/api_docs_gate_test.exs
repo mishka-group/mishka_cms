@@ -1,6 +1,6 @@
 defmodule MishkaCmsWeb.ApiDocsGateTest do
   @moduledoc """
-  The OpenAPI spec and the SwaggerUI shell are schema introspection, not the API: between
+  The OpenAPI spec and the SwaggerUI/GraphiQL shells are schema introspection, not the API: between
   them they publish every route, filter and field of every resource in the CMS. They are open to any
   API admin — a bearer holding anything under `admin:api` — while `/api/json/*` itself stays open to
   any bearer token, because the resource policies are what authorize each call. A dashboard admin's
@@ -50,9 +50,14 @@ defmodule MishkaCmsWeb.ApiDocsGateTest do
 
   defp request(path, token \\ nil) do
     on_site()
+    |> as_browser(path)
     |> bearer(token)
     |> get(path)
   end
+
+  # As a browser asks: GraphiQL answers a request that does not accept HTML as a GraphQL query.
+  defp as_browser(conn, "/gql" <> _rest), do: put_req_header(conn, "accept", "text/html")
+  defp as_browser(conn, _path), do: conn
 
   defp bearer(conn, nil), do: conn
   defp bearer(conn, token), do: put_req_header(conn, "authorization", "Bearer " <> token)
@@ -117,21 +122,25 @@ defmodule MishkaCmsWeb.ApiDocsGateTest do
     refute request("/api/json/open_api").status == 200
   end
 
+  test "GraphiQL is refused to an anonymous caller" do
+    assert request("/gql/playground").status == 403
+  end
+
   # ANY AREA WILL DO, not one in particular: two admins of different areas, and a full API admin.
-  test "an API admin of any one area reads the spec and opens the browser", %{site: site} do
+  test "an API admin of any one area reads the spec and opens both browsers", %{site: site} do
     for names <- [["admin:api:runtime:page"], ["admin:api:user"], ["admin:api:*"]],
         token = token!(site, names),
-        path <- ["/api/json/open_api", "/api/json/swaggerui"] do
+        path <- ["/api/json/open_api", "/api/json/swaggerui", "/gql/playground"] do
       conn = request(path, token)
 
       assert conn.status == 200, "#{path} answered #{conn.status} to #{inspect(names)}"
     end
   end
 
-  test "a dashboard admin's token is refused both", %{site: site} do
+  test "a dashboard admin's token is refused all three", %{site: site} do
     token = token!(site, ["admin:dashboard:*"])
 
-    for path <- ["/api/json/open_api", "/api/json/swaggerui"] do
+    for path <- ["/api/json/open_api", "/api/json/swaggerui", "/gql/playground"] do
       conn = request(path, token)
 
       assert conn.status == 403, "#{path} answered #{conn.status} to a dashboard admin"

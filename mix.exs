@@ -65,6 +65,7 @@ defmodule MishkaCms.MixProject do
       {:jose, "~> 1.11", override: true},
       {:ash_postgres, "~> 2.13"},
       {:ash_json_api, "~> 1.7"},
+      {:ash_graphql, "~> 1.12"},
       {:ash_phoenix, "~> 2.3"},
       {:ash, "~> 3.33"},
       {:ash_paper_trail, "~> 0.7"},
@@ -76,6 +77,7 @@ defmodule MishkaCms.MixProject do
       {:oban, "~> 2.24"},
 
       # Global deps
+      {:absinthe_phoenix, "~> 2.0"},
       {:sourceror, "~> 1.12", only: [:dev, :test]},
       {:open_api_spex, "~> 3.22"},
       {:cloak, "~> 1.1"},

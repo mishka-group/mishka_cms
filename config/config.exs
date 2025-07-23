@@ -40,6 +40,8 @@ config :ash_json_api,
   show_public_calculations_when_loaded?: false,
   authorize_update_destroy_with_error?: true
 
+config :ash_graphql, authorize_update_destroy_with_error?: true
+
 config :ash,
   default_string_length_count: :codepoints,
   allow_forbidden_field_for_relationships_by_default?: true,

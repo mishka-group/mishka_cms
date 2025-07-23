@@ -51,6 +51,22 @@ defmodule MishkaCmsWeb.Router do
       on_denied: :json
   end
 
+  # The `:api` pipeline with GraphQL's answers: a /gql request runs with the tenant of its host's
+  # site, as the API, answers only the origins that site allows, and is refused while the site is
+  # switched off or offline to its caller. The surface is named before `AshGraphql.Plug`, which
+  # copies the context as it stands. The `/ws/gql` socket asks the same on connect — see
+  # `MishkaCmsWeb.GraphqlSocket`.
+  pipeline :graphql do
+    plug MishkaCmsCore.Runtime.Plugs.ApiTenantLookupPlug
+    plug MishkaCmsCore.Runtime.Plugs.ApiCorsPlug
+    plug :load_from_bearer
+    plug :confirm_bearer_tenant
+    plug :set_actor, :user
+    plug AdminSurfacePlug, surface: :api
+    plug MishkaCmsCore.Runtime.Plugs.ApiAvailabilityPlug, api: :graphql
+    plug AshGraphql.Plug
+  end
+
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:mishka_cms, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put
@@ -93,6 +109,22 @@ defmodule MishkaCmsWeb.Router do
     pipe_through [:api]
 
     forward "/", MishkaCmsWeb.AshJsonApiRouter
+  end
+
+  # Same reasoning as `/api/json/swaggerui`: GraphiQL is schema introspection, not the API.
+  scope "/gql" do
+    pipe_through [:graphql, :api_docs]
+
+    forward "/playground", Absinthe.Plug.GraphiQL,
+      schema: Module.concat(["MishkaCmsWeb.GraphqlSchema"]),
+      socket: Module.concat(["MishkaCmsWeb.GraphqlSocket"]),
+      interface: :simple
+  end
+
+  scope "/gql" do
+    pipe_through [:graphql]
+
+    forward "/", Absinthe.Plug, schema: Module.concat(["MishkaCmsWeb.GraphqlSchema"])
   end
 
   # Needs [] permissions

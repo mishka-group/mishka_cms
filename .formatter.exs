@@ -8,6 +8,8 @@
     :ash_authentication,
     :ash_postgres,
     :ash_json_api,
+    :ash_graphql,
+    :absinthe,
     :ash_phoenix,
     :ash,
     :reactor,
@@ -19,7 +21,7 @@
     :mishka_gervaz
   ],
   subdirectories: ["priv/*/migrations"],
-  plugins: [Spark.Formatter, Phoenix.LiveView.HTMLFormatter],
+  plugins: [Absinthe.Formatter, Spark.Formatter, Phoenix.LiveView.HTMLFormatter],
   inputs: [
     "*.{heex,ex,exs}",
     "{config,lib,test}/**/*.{heex,ex,exs}",

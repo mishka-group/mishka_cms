@@ -38,6 +38,7 @@ defmodule MishkaCms.Application do
       MishkaCmsWeb.Endpoint,
       # Start ETS for routing and finding page module, also is used for pagination
       MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState,
+      {Absinthe.Subscription, MishkaCmsWeb.Endpoint},
       MishkaCmsCore.Runtime.States.AssetsState,
       MishkaCmsCore.Runtime.States.CompileFailureState,
       # Rendered palette-card previews. Keyed on the template a card would drop, because a
@@ -52,6 +53,7 @@ defmodule MishkaCms.Application do
       # Co-editing avatars for the page builder, on the editing session's own PubSub topic
       MishkaCmsCore.Runtime.PageBuilder.Presence,
       MishkaCmsCore.Runtime.Handlers.CompileGate,
+      AshGraphql.Subscription.Batcher,
       {Registry, keys: :unique, name: MishkaCms.ModuleCompilerHandlerRegistry},
       {PartitionSupervisor,
        child_spec: DynamicSupervisor,

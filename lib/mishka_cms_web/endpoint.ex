@@ -1,5 +1,6 @@
 defmodule MishkaCmsWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :mishka_cms
+  use Absinthe.Phoenix.Endpoint
 
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
@@ -22,6 +23,17 @@ defmodule MishkaCmsWeb.Endpoint do
       connect_info: [session: @session_options],
       check_origin: {MishkaCmsCore.Runtime.OriginValidator, :verify_origin?, []}
     ]
+
+  # `:uri` names the host, which is the site the socket is bound to, and `auth_token` carries a bearer
+  # token in a header rather than the address; `error_handler` answers a connect refused for its
+  # site's state as `/gql` does — see `MishkaCmsWeb.GraphqlSocket`.
+  socket "/ws/gql", MishkaCmsWeb.GraphqlSocket,
+    websocket: [
+      connect_info: [:uri],
+      error_handler: {MishkaCmsWeb.GraphqlSocket, :handle_error, []}
+    ],
+    longpoll: [connect_info: [:uri]],
+    auth_token: true
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -52,7 +64,7 @@ defmodule MishkaCmsWeb.Endpoint do
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json, AshJsonApi.Plug.Parser],
+    parsers: [:urlencoded, :multipart, :json, Absinthe.Plug.Parser, AshJsonApi.Plug.Parser],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
 
