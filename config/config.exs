@@ -32,6 +32,14 @@ config :mishka_cms, Oban,
     {Oban.Plugins.Pruner, max_age: 604_800}
   ]
 
+config :mime,
+  extensions: %{"json" => "application/vnd.api+json"},
+  types: %{"application/vnd.api+json" => ["json"]}
+
+config :ash_json_api,
+  show_public_calculations_when_loaded?: false,
+  authorize_update_destroy_with_error?: true
+
 config :ash,
   default_string_length_count: :codepoints,
   allow_forbidden_field_for_relationships_by_default?: true,
