@@ -182,6 +182,30 @@ defmodule MishkaCmsWeb.AdminSurfaceTest do
     end
   end
 
+  # EVERY SITE'S JOBS: a master who is a full dashboard admin, and nobody narrower. A refusal is a
+  # 404, so the address is not found to exist.
+  describe "Oban Web" do
+    # PAST THE GATE, OBAN WEB ITSELF ANSWERS, and in the tests no Oban instance is running for it to
+    # show. Its complaint about that is how far the request got.
+    test "opens to a master holding admin:dashboard:*" do
+      conn = signed_in(holder!(nil, ["admin:dashboard:*"]))
+
+      assert_raise RuntimeError, ~r/no config registered for \[Oban/, fn -> get(conn, "/oban") end
+    end
+
+    test "is not found by a site's full admin, a narrower master or an API master", %{site: site} do
+      for {site, names} <- [
+            {site, ["admin:dashboard:*"]},
+            {nil, ["admin:dashboard:runtime:site"]},
+            {nil, ["admin:api:*"]}
+          ] do
+        conn = get(signed_in(holder!(site, names)), "/oban")
+
+        assert conn.status == 404, "#{inspect(names)} (site #{inspect(site && site.id)}) found it"
+      end
+    end
+  end
+
   describe "the API" do
     test "a JSON:API request runs as the API, beside what its pipeline put in the context before" do
       conn = get(on_site(), "/api/json/v1/tenant/admin/runtime/page")

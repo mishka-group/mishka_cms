@@ -1,12 +1,14 @@
 defmodule MishkaCmsWeb.Router do
   use MishkaCmsWeb, :router
 
+  import Oban.Web.Router
   use AshAuthentication.Phoenix.Router
 
   import MishkaCmsCore.ExtensionRouter
   import MishkaCmsCore.Runtime.Plugs.SiteLookupPlug, only: [confirm_tenant: 2]
   import MishkaCmsCore.Runtime.Plugs.ApiTenantLookupPlug, only: [confirm_bearer_tenant: 2]
 
+  alias MishkaCmsCore.Accounts.Helper
   alias MishkaCmsCore.Runtime.Plugs.AdminSurfacePlug
 
   # Html alone, but for a route that names what else it answers — robots.txt, sitemap.xml and the
@@ -23,6 +25,10 @@ defmodule MishkaCmsWeb.Router do
     plug :load_from_session
     plug :confirm_tenant
     plug MishkaCmsWeb.Runtime.Plugs.SecurityHeaders
+  end
+
+  pipeline :oban_admin do
+    plug :require_oban_admin
   end
 
   # The tenant lookup refuses a switched-off site before anybody is known; the availability plug
@@ -85,6 +91,14 @@ defmodule MishkaCmsWeb.Router do
       live_dashboard "/dashboard", metrics: MishkaCmsWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
+  end
+
+  # Oban Web has no per-tenant scoping, so it is open only to a master who is a full dashboard admin
+  # (`MishkaCmsCore.Accounts.Helper.oban_admin?/1`), in every environment.
+  scope "/" do
+    pipe_through [:browser, :oban_admin]
+
+    oban_dashboard("/oban")
   end
 
   # The interactive spec browser is separated from the API itself: it publishes every route, filter
@@ -186,5 +200,14 @@ defmodule MishkaCmsWeb.Router do
     live_session :authenticated_routes do
       live "/*path", RuntimeLive
     end
+  end
+
+  # Helpers
+
+  # 404 (not redirect) so the route isn't discoverable.
+  defp require_oban_admin(conn, _opts) do
+    if Helper.oban_admin?(conn.assigns[:current_user]),
+      do: conn,
+      else: conn |> send_resp(404, "Not found") |> halt()
   end
 end

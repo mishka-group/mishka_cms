@@ -75,6 +75,7 @@ defmodule MishkaCms.MixProject do
 
       # Queue Stuff
       {:oban, "~> 2.24"},
+      {:oban_web, "~> 2.13"},
 
       # Global deps
       {:absinthe_phoenix, "~> 2.0"},
