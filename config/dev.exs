@@ -124,3 +124,11 @@ config :mishka_cms_core, :env_dev?, true
 # Scaffolding — see `MishkaCmsCore.Runtime.PageBuilder.Demo`; drop this line to see the real (empty)
 # rails, and delete the module once real data exists.
 config :mishka_cms_core, builder_demo_data: true
+
+# NOTHING IN DEVELOPMENT LOADS FROM ANOTHER ORIGIN ANY MORE, so the policy here is the policy
+# production gets. `dev_origins` existed for `live_debugger`, which served its client and its
+# stylesheet from port 4007; with that dependency gone an allowance for it is a hole in the policy
+# that protects nothing. `SecurityHeaders` still accepts the key — see its `dev_origins/1` — so a
+# future dev tool on its own port can be let in deliberately rather than by inheritance.
+config :mishka_cms, MishkaCmsWeb.Runtime.Plugs.SecurityHeaders,
+  csp: [public: :enforce, admin: :enforce]

@@ -127,6 +127,56 @@ defmodule MishkaCmsWeb.Router do
     forward "/", Absinthe.Plug, schema: Module.concat(["MishkaCmsWeb.GraphqlSchema"])
   end
 
+  # THE DOOR: anyone holding anything under `admin:dashboard`. Each page then asks for its own area
+  # (`MishkaCmsCore.Sidebar.PageGuard`); an API admin holds nothing here and is sent to the site root.
+  scope "/admin/dashboard", MishkaCmsWeb.Admin do
+    pipe_through [:browser]
+
+    ash_authentication_live_session :authenticated_admin_routes,
+      on_mount: [
+        {MishkaCmsCore.LiveUserAuth, :live_user_required},
+        {MishkaCmsCore.LiveUserAuth, {:require_permission, [{:under, "admin:dashboard"}]}}
+      ] do
+      # Extension routes (compile-time, alias: false prevents MishkaCmsWeb.Admin prefix)
+      extension_routes(:admin)
+    end
+
+    # A SECOND SESSION, SO ENTERING THESE PAGES IS A FRESH DOCUMENT. Same pipeline, same guards, same
+    # hooks — the only thing this boundary buys is that LiveView will not live-navigate across it,
+    # and a full page load is the one thing that re-renders the root layout.
+    #
+    # `root.html.heex` decides what goes in `<head>` from the LiveView's own assigns, and a live
+    # navigation never re-renders it: the destination runs inside the document the source built. The
+    # page builder is the one place where that matters, because it is the only admin page whose head
+    # is not the admin's usual head — it carries the in-browser Tailwind JIT and, above it, the shim
+    # that marks every `<style>` those libraries create with the CSP nonce.
+    #
+    # Reached by `<.link navigate={…}>` from a list page, the builder therefore ran inside the LIST's
+    # document: no JIT, and no shim, so CodeMirror's own stylesheet was refused by `style-src-elem`
+    # and the code drawer opened onto an unstyled column of text. Reloading fixed it, because that is
+    # a dead render. Ten links led there and four more lead from one document to another INSIDE the
+    # builder, where live navigation is right and fast — a rule nobody can be expected to apply by
+    # hand at each `<.link>`, so the router applies it instead.
+    #
+    # It works in the other direction too: leaving the builder now sheds the JIT and the patched
+    # `document.createElement` rather than carrying them onto every admin page for the rest of the
+    # tab's life.
+    ash_authentication_live_session :authenticated_admin_standalone_routes,
+      on_mount: [
+        {MishkaCmsCore.LiveUserAuth, :live_user_required},
+        {MishkaCmsCore.LiveUserAuth, {:require_permission, [{:under, "admin:dashboard"}]}}
+      ] do
+      extension_routes(:admin_standalone)
+    end
+  end
+
+  # The visual editor is the native LiveView one, declared by `MishkaCmsCoreWeb.Routes` inside the
+  # admin `live_session` above. Nothing is routed here any more: the Inertia `template_creator` GETs
+  # matched the same paths and were shadowed the moment those LiveView routes landed, and
+  # `POST /render` was the React editor's server-render endpoint — an ungated `Code.eval_quoted/3`
+  # over client-supplied JSON, which the new canvas has no use for because it renders by calling
+  # already-compiled modules.
+
   # Needs [] permissions
   scope "/", MishkaCmsWeb do
     pipe_through :browser
