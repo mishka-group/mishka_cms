@@ -21,11 +21,27 @@ defmodule MishkaCmsWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
 
+    plug MishkaCms.Plugs.InstallGate
     plug MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
     plug :load_from_session
     plug :confirm_tenant
     plug MishkaCmsWeb.Runtime.Plugs.SecurityHeaders
     plug MishkaCms.Plugs.MaintenanceGate
+  end
+
+  # Like :browser but without SiteLookupPlug — a fresh deploy has no site to resolve, so the
+  # host-not-found 503 must not shadow the installer. InstallGate keeps it reachable only while
+  # the CMS is uninstalled (404 afterwards).
+  pipeline :installer do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {MishkaCmsWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+
+    plug MishkaCms.Plugs.InstallGate
+    plug :forget_site
   end
 
   pipeline :oban_admin do
@@ -192,6 +208,16 @@ defmodule MishkaCmsWeb.Router do
   # over client-supplied JSON, which the new canvas has no use for because it renders by calling
   # already-compiled modules.
 
+  # First-run installer — reachable only while uninstalled (InstallGate 404s it afterwards).
+  # Declared before the `/*path` catch-all below so it wins the match.
+  scope "/install", MishkaCmsWeb do
+    pipe_through :installer
+
+    live_session :install do
+      live "/", InstallLive
+    end
+  end
+
   # Needs [] permissions
   scope "/", MishkaCmsWeb do
     pipe_through :browser
@@ -204,6 +230,12 @@ defmodule MishkaCmsWeb.Router do
   end
 
   # Helpers
+
+  # Only runs before the CMS is installed: afterwards `/install` is a 404. There is no site yet, but
+  # a browser that visited before (a database reset, say) still has its old site in the cookie.
+  # Forget it, or the site check every LiveView runs (`SiteAvailability`) finds that site missing,
+  # treats it as closed and sends `/install` back to `/install` forever.
+  defp forget_site(conn, _opts), do: delete_session(conn, :current_site)
 
   # 404 (not redirect) so the route isn't discoverable.
   defp require_oban_admin(conn, _opts) do

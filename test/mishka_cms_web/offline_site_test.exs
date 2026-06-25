@@ -187,6 +187,12 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
     assert redirected_to(conn) =~ "/auth"
   end
 
+  test "the installer's address shows the maintenance page, not the site's own not-found page", %{
+    conn: conn
+  } do
+    assert conn |> get("/install") |> maintenance?()
+  end
+
   # A MASTER SIGNS IN ON THE MASTER SITE'S OWN ADDRESS AND NOWHERE ELSE, so any other site's page
   # offers only its own sign-in, and neither links to the master site nor names it.
   test "the maintenance page offers the site's own sign-in and no master sign-in", %{conn: conn} do

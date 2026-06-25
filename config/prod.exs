@@ -29,3 +29,9 @@ config :swoosh, local: false
 
 # Do not print debug messages in production
 config :logger, level: :info
+
+# `/install` is anonymous until the CMS is installed — whoever reaches it first creates the master
+# user. On a fresh deploy that is a race with whatever crawls the internet, so in production the
+# setup token is REQUIRED rather than optional: with `MISHKA_SETUP_TOKEN` unset, `/install` refuses
+# everyone instead of admitting anyone. Dev and test keep the optional behaviour.
+config :mishka_cms, require_setup_token: true

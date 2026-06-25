@@ -125,6 +125,12 @@ config :mishka_cms_core, :env_dev?, true
 # rails, and delete the module once real data exists.
 config :mishka_cms_core, builder_demo_data: true
 
+# A BUNDLE A DEVELOPER PLACED BY HAND WINS HERE, until a version is picked in the installer.
+# Production looks up the newest release instead, so a stale file in an image cannot stand in for it —
+# see `MishkaCmsCore.Runtime.Handlers.UiKitHandler.prefer_local?/0`. Both environments still fall
+# back to the other source, so neither dead-ends.
+config :mishka_cms_core, :prefer_local_ui_kits, true
+
 # NOTHING IN DEVELOPMENT LOADS FROM ANOTHER ORIGIN ANY MORE, so the policy here is the policy
 # production gets. `dev_origins` existed for `live_debugger`, which served its client and its
 # stylesheet from port 4007; with that dependency gone an allowance for it is a hole in the policy

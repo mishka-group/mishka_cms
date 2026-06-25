@@ -48,6 +48,11 @@
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
       })();
     </script>
+    <%!-- The installer runs before any site, so no runtime CSS/JS bundle exists yet — load the
+         prebuilt static LiveView client (`app.js`) directly for interactivity. The page styles itself
+         with its own inline <style> (pure CSS, no Tailwind), so no stylesheet is needed here. --%>
+    <script :if={assigns[:standalone_assets]} defer src={~p"/assets/js/app.js"}>
+    </script>
     <%!-- THREE INDEPENDENT DECISIONS, three assigns. `full_tailwind` used to gate all of them at once,
          which is why the editor's canvas iframe downloaded the entire 2.5 MB admin stylesheet in order
          to get the two web fonts its inline `font:` shorthand names. The canvas renders a SITE's
