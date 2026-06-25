@@ -9,7 +9,9 @@ defmodule MishkaCmsWeb.ComponentSiteScopeTest do
   its own site's components and the global ones, and draws nothing where another's was named:
 
     * a published page, on its first HTTP render and once its socket connects;
-    * the global layout around it, which reaches the components of the site it is drawn on.
+    * the global layout around it, which reaches the components of the site it is drawn on;
+    * the site's own error page, including one answered before any page named the site;
+    * a draft preview.
 
   See `MishkaCmsCore.Runtime.LiveViewHelpers.component/1`.
 
@@ -23,6 +25,7 @@ defmodule MishkaCmsWeb.ComponentSiteScopeTest do
   import Phoenix.LiveViewTest
 
   alias MishkaCmsCore.Runtime.Compilers.{Helpers, ModuleCompiler}
+  alias MishkaCmsCore.Runtime.ErrorPage
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
 
@@ -108,6 +111,36 @@ defmodule MishkaCmsWeb.ComponentSiteScopeTest do
     end
   end
 
+  describe "the site's error page" do
+    # A DRAFT PREVIEW'S UNKNOWN TOKEN IS REFUSED BEFORE ANY PAGE NAMES THE SITE, so the error page is
+    # the first thing in this request to render for it.
+    test "draws its own site's components and not another site's", ctx do
+      error_page!(ctx.site, tags(ctx))
+
+      {404, _headers, body} =
+        assert_error_sent(404, fn -> get(on_site(), "/_preview/page/no-such-token") end)
+
+      page = LazyHTML.from_document(body)
+
+      assert drawn?(page, "own")
+      assert drawn?(page, "shared")
+      refute drawn?(page, "foreign")
+    end
+  end
+
+  describe "a draft preview" do
+    test "draws its own site's components and not another site's", ctx do
+      page = create_page!(site_id: ctx.site.id, template: "<div>#{tags(ctx)}</div>")
+
+      {:ok, _view, html} = live(on_site(), "/_preview/page/#{page.preview_token}")
+      page = LazyHTML.from_document(html)
+
+      assert drawn?(page, "own")
+      assert drawn?(page, "shared")
+      refute drawn?(page, "foreign")
+    end
+  end
+
   defp tags(ctx) do
     tag(ctx.own, ctx.site) <> tag(ctx.foreign, ctx.other) <> tag(ctx.shared, nil)
   end
@@ -146,6 +179,33 @@ defmodule MishkaCmsWeb.ComponentSiteScopeTest do
 
     :ok = WebRunTimeMetaDataState.save(Map.put(route(page, site.name, "Page"), :language, nil))
     slug
+  end
+
+  defp error_page!(site, template) do
+    error_page =
+      ErrorPage
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          name: "Errors",
+          root_layout_template: nil,
+          format: :heex,
+          priority: 0,
+          error_pages: [%{"status" => 404, "template" => "<div>#{template}</div>"}],
+          helpers: [],
+          active: true,
+          precompile: false
+        },
+        tenant: site.id,
+        authorize?: false
+      )
+      |> Ash.create!(authorize?: false)
+
+    :ok = WebRunTimeMetaDataState.save(route(error_page, site.name, "ErrorPage"))
+
+    module = Helpers.module_name(error_page.id, site.name, "ErrorPage")
+    on_exit(fn -> ModuleCompiler.unload(module) end)
+    error_page
   end
 
   defp route(record, site_name, section) do

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html
+  lang={assigns[:language] || "en"}
+  dir={MishkaCmsCore.Runtime.Languages.direction(assigns[:language] || "en")}
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <meta name="robots" content="noindex, nofollow" />
+    <.live_title default={gettext("Draft preview")}>
+      {assigns[:page_title]}
+    </.live_title>
+    <link
+      :if={assigns[:preview_css]}
+      rel="stylesheet"
+      href={@preview_css}
+      id="mishka-preview-css"
+    />
+    <script :if={assigns[:preview_js]} defer src={@preview_js}>
+    </script>
+    <script defer src={~p"/assets/js/preview.js"}>
+    </script>
+  </head>
+  <body>
+    {@inner_content}
+  </body>
+</html>

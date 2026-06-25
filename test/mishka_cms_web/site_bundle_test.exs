@@ -13,9 +13,11 @@ defmodule MishkaCmsWeb.SiteBundleTest do
   @moduletag :capture_log
 
   import MishkaCms.Test.Factory
+  import Phoenix.LiveViewTest
 
   alias MishkaCmsCore.Accounts.Permission
   alias MishkaCmsCore.Install
+  alias MishkaCmsCore.Runtime.DraftPreviewAssets
   alias MishkaCmsCore.Runtime.States.{AssetsState, SettingsState, SiteState}
   alias MishkaCmsCore.Settings
 
@@ -206,6 +208,69 @@ defmodule MishkaCmsWeb.SiteBundleTest do
 
       assert conn.status == 200
       assert get_resp_header(conn, "cache-control") == ["private, max-age=31536000, immutable"]
+    end
+  end
+
+  describe "a preview link" do
+    # The preview page as a link holder opens it, on an address that is not the record's site.
+    defp preview_js!(page, host) do
+      on_exit(fn -> DraftPreviewAssets.purge(page) end)
+      {:ok, view, _html} = live(on_host(host), "/_preview/page/#{page.preview_token}")
+      :sys.get_state(view.pid).socket.assigns[:preview_js]
+    end
+
+    test "gets its site's bundle on any address, to whoever holds the link", %{
+      site: site,
+      other: other
+    } do
+      js =
+        site.id
+        |> then(&create_page!(site_id: &1, template: "<b>x</b>"))
+        |> preview_js!(other.host)
+
+      conn = other.host |> on_host() |> get(js)
+
+      assert conn.status == 200
+      assert conn.resp_body == "/* #{site.name} js */"
+      assert get_resp_header(conn, "cache-control") == ["private, max-age=31536000, immutable"]
+    end
+
+    test "a token of another site's preview, or a made-up one, gets nothing", %{
+      site: site,
+      other: other
+    } do
+      others_page = create_page!(site_id: other.id, template: "<b>x</b>")
+      _ = preview_js!(others_page, other.host)
+      path = href(site, "js")
+
+      assert other.host
+             |> on_host()
+             |> get(path <> "?preview=#{others_page.preview_token}")
+             |> refused?()
+
+      assert other.host |> on_host() |> get(path <> "?preview=made-up") |> refused?()
+    end
+
+    test "stops once the preview is purged, as publishing or discarding it does", %{
+      site: site,
+      other: other
+    } do
+      page = create_page!(site_id: site.id, template: "<b>x</b>")
+      js = preview_js!(page, other.host)
+      DraftPreviewAssets.purge(page)
+
+      assert other.host |> on_host() |> get(js) |> refused?()
+    end
+
+    test "follows its site's state", %{site: site, other: other} do
+      js =
+        site.id
+        |> then(&create_page!(site_id: &1, template: "<b>x</b>"))
+        |> preview_js!(other.host)
+
+      offline!(site)
+
+      assert other.host |> on_host() |> get(js) |> refused?()
     end
   end
 

@@ -224,6 +224,14 @@ defmodule MishkaCmsWeb.Router do
 
     extension_routes(:public)
 
+    # Shareable runtime preview — token-gated, must precede the `/*path` catch-all below. Served as
+    # a real LiveView (full lifecycle: per-site JS bundle + hooks) with its own temporary CSS bundle.
+    get "/_preview/:resource/:token/css", DraftPreviewController, :css
+
+    live_session :draft_preview, root_layout: {MishkaCmsWeb.Layouts, :preview} do
+      live "/_preview/:resource/:token", DraftPreviewLive
+    end
+
     live_session :authenticated_routes do
       live "/*path", RuntimeLive
     end
