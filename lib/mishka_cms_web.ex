@@ -59,6 +59,11 @@ defmodule MishkaCmsWeb do
       # `assign_new` makes it harmless where a session already supplied the value.
       on_mount MishkaCmsCore.Runtime.CspNonce
 
+      # Same reason, second rule: a live navigation runs no pipeline, so `MaintenanceGate` as a plug
+      # only ever sees the first render of a page load. This sees every navigation, every event, and
+      # the moment the site's state changes, so a tab left open stops being served at once.
+      on_mount MishkaCmsCore.Runtime.SiteAvailability
+
       unquote(html_helpers())
     end
   end

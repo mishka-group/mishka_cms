@@ -7,9 +7,9 @@ defmodule MishkaCmsWeb.ErrorHTML do
   use MishkaCmsWeb, :html
   require Logger
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
-  alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
-  alias MishkaCmsCore.Runtime.Compilers.Helpers
-  alias MishkaCmsCore.Runtime.Translations
+  alias MishkaCmsCore.Runtime.States.{CompileFailureState, WebRunTimeMetaDataState}
+  alias MishkaCmsCore.Runtime.Compilers.{ErrorCompiler, Helpers}
+  alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorStatus, Translations}
   alias MishkaInstaller.Event.Hook
 
   # If you want to customize your error pages,
@@ -158,4 +158,55 @@ defmodule MishkaCmsWeb.ErrorHTML do
     |> Phoenix.Controller.status_message_from_template()
     |> then(&Gettext.gettext(MishkaCmsWeb.Gettext, &1))
   end
+
+  @doc """
+  The site's own offline page, the `:offline` entry of its Error Page, as HTML.
+
+  `MishkaCms.Plugs.MaintenanceGate` answers an offline site with it, and with its built-in page on
+  `{:error, reason}`: `:no_error_page` when the site has none, `:no_offline_entry` when its Error
+  Page does not hold one, `{:compile, reason}` when it does not compile, `{:render, reason}` when
+  the entry raised as it was drawn at compile time.
+
+  The Error Page is found in `WebRunTimeMetaDataState` and its module is compiled once, as for a
+  404, so after the first request this reads ETS only. The template is handed `@status` as
+  `:offline` and `@conn` as it is, so set the conn's status first.
+  """
+  @spec offline_page(Plug.Conn.t()) :: {:ok, iodata()} | {:error, term()}
+  def offline_page(%Plug.Conn{assigns: %{current_site: %{name: name} = site}} = conn)
+      when is_binary(name) do
+    path = ErrorAddress.path(name)
+
+    with {:ok, module} <- error_module(path, site),
+         :ok <- offline_entry(module) do
+      {:ok, ErrorCompiler.render_page(module, conn, ErrorStatus.offline())}
+    end
+  end
+
+  def offline_page(_conn), do: {:error, :no_error_page}
+
+  defp error_module(path, site) do
+    case WebRunTimeMetaDataState.find_by_path_and_site(path, site.name) do
+      {:ok, %{section: "ErrorPage"} = entry} ->
+        module = Helpers.module_name(entry.id, entry.site, "ErrorPage")
+
+        case ModuleCompilerHandler.compile_or_return_module(module, path, site.name, site.id) do
+          {:ok, _compiled} -> {:ok, module}
+          {:error, reason} -> {:error, {:compile, reason}}
+        end
+
+      _no_error_page ->
+        {:error, :no_error_page}
+    end
+  end
+
+  # `ModuleCompilerHandler` draws the entry once when it compiles the module, and keeps a raise
+  # under `{module, :offline}`.
+  defp offline_entry(module) do
+    if ErrorCompiler.offline_entry?(module),
+      do: drawn(CompileFailureState.reason({module, :offline})),
+      else: {:error, :no_offline_entry}
+  end
+
+  defp drawn(nil), do: :ok
+  defp drawn(reason), do: {:error, {:render, reason}}
 end

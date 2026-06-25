@@ -25,6 +25,7 @@ defmodule MishkaCmsWeb.Router do
     plug :load_from_session
     plug :confirm_tenant
     plug MishkaCmsWeb.Runtime.Plugs.SecurityHeaders
+    plug MishkaCms.Plugs.MaintenanceGate
   end
 
   pipeline :oban_admin do
