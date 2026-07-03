@@ -12,5 +12,6 @@
 
 import { boot } from "./boot";
 import SharedHooks from "./shared_hooks";
+import AdminHooks from "./admin_hooks";
 
-boot({ ...SharedHooks });
+boot({ ...SharedHooks, ...AdminHooks });
