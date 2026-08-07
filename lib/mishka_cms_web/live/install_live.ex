@@ -88,7 +88,7 @@ defmodule MishkaCmsWeb.InstallLive do
      )
      |> assign(selected: MapSet.new(), required: MapSet.new(), query: "")
      |> assign(kits: [], kit_filter: nil)
-     |> assign(picker_open: false)
+     |> assign(picker_open: false, config_axes: %{}, open_config: nil)
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
      |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
@@ -182,6 +182,20 @@ defmodule MishkaCmsWeb.InstallLive do
 
   def handle_event("toggle_picker", _params, socket) do
     {:noreply, assign(socket, picker_open: !socket.assigns.picker_open)}
+  end
+
+  def handle_event("toggle_config", %{"name" => name}, socket) do
+    {:noreply,
+     assign(socket, open_config: if(socket.assigns.open_config == name, do: nil, else: name))}
+  end
+
+  def handle_event("toggle_axis", %{"name" => name, "axis" => axis, "opt" => value}, socket) do
+    {:noreply,
+     assign(socket, config_axes: toggle_axis(socket.assigns.config_axes, name, axis, value))}
+  end
+
+  def handle_event("reset_config", %{"name" => name}, socket) do
+    {:noreply, assign(socket, config_axes: Map.delete(socket.assigns.config_axes, name))}
   end
 
   def handle_event("rail_nav", %{"index" => index}, %{assigns: %{step: step}} = socket)
@@ -833,6 +847,68 @@ defmodule MishkaCmsWeb.InstallLive do
                         >
                           <.svg_lock /> {gettext("required")}
                         </span>
+                        <button
+                          :if={configurable?(entry, @selected, @required)}
+                          type="button"
+                          id={"config-#{entry.name}"}
+                          phx-click="toggle_config"
+                          phx-value-name={entry.name}
+                          title={gettext("Configure options")}
+                          class={[
+                            "inst-cfg-btn",
+                            (@open_config == entry.name or Map.has_key?(@config_axes, entry.name)) &&
+                              "act"
+                          ]}
+                        >
+                          <.svg_sliders />
+                        </button>
+                      </li>
+                      <li
+                        :if={@open_config == entry.name}
+                        id={"config-panel-#{entry.name}"}
+                        class="inst-optpanel"
+                      >
+                        <div class="oh">
+                          <.svg_sliders />
+                          <span>{entry.label}</span>
+                          <button
+                            type="button"
+                            class="rst"
+                            phx-click="reset_config"
+                            phx-value-name={entry.name}
+                          >
+                            {gettext("Reset defaults")}
+                          </button>
+                        </div>
+                        <div :for={{axis, cfg} <- ordered_config(entry)} class="inst-ogroup">
+                          <div class="gl">{axis}</div>
+                          <div class="inst-chips">
+                            <label
+                              :for={value <- cfg.values}
+                              class={[
+                                "inst-chip",
+                                axis_checked?(@config_axes, entry.name, axis, value, cfg.default) &&
+                                  "on",
+                                value == cfg.default && "def"
+                              ]}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={
+                                  axis_checked?(@config_axes, entry.name, axis, value, cfg.default)
+                                }
+                                disabled={value == cfg.default}
+                                phx-click="toggle_axis"
+                                phx-value-name={entry.name}
+                                phx-value-axis={axis}
+                                phx-value-opt={value}
+                              />
+                              {if value == cfg.default,
+                                do: gettext("%{value} · default", value: value),
+                                else: value}
+                            </label>
+                          </div>
+                        </div>
                       </li>
                     <% end %>
                   </ul>
@@ -1151,13 +1227,31 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-cbox:disabled{opacity:.5;cursor:not-allowed}
       .inst-required{display:inline-flex;align-items:center;gap:4px;border-radius:99px;
         background:#f1f5f9;color:var(--faint);padding:2px 8px;font-size:10.5px;font-weight:600;flex-shrink:0}
+      .inst-cfg-btn{margin-left:auto;color:var(--faint);background:none;border:none;cursor:pointer;
+        padding:3px;border-radius:6px;display:grid;place-items:center;opacity:.6;transition:all .15s}
+      .inst-cfg-btn:hover{color:var(--blue);background:var(--blue-l);opacity:1}
+      .inst-cfg-btn.act{color:var(--blue);opacity:1}
       .inst-empty{padding:20px 0;text-align:center;color:var(--faint);font-size:13.5px;margin:0}
+
+      /* per-component option panel */
+      .inst-optpanel{grid-column:1/-1;border:1.5px solid var(--line);border-radius:11px;
+        background:var(--bg-2);padding:14px 16px;margin:6px 0 10px;animation:inst-rise .25s}
+      .inst-optpanel .oh{font-weight:700;font-size:13.5px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+      .inst-optpanel .oh svg{color:var(--blue)}
+      .inst-optpanel .oh .rst{margin-left:auto;font-size:12px;font-weight:600;color:var(--blue);
+        background:none;border:none;cursor:pointer}
+      .inst-ogroup{margin-bottom:12px}
+      .inst-ogroup:last-child{margin-bottom:0}
+      .inst-ogroup .gl{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--faint);
+        margin-bottom:7px;text-transform:uppercase}
       .inst-chips{display:flex;flex-wrap:wrap;gap:6px}
       .inst-chip{font-size:12px;padding:5px 11px;border:1.5px solid var(--line);border-radius:99px;
         background:#fff;color:var(--ink-2);cursor:pointer;transition:all .12s;font-weight:500;
         display:inline-flex;align-items:center;position:relative}
       .inst-chip:hover{border-color:#cbd5e1}
       .inst-chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+      .inst-chip.def{border-style:dashed}
+      .inst-chip input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
 
       /* checkbox rows */
       .inst-smp-row{display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer;border-radius:10px}
@@ -1657,6 +1751,31 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  defp svg_sliders(assigns) do
+    ~H"""
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      aria-hidden="true"
+    >
+      <line x1="4" y1="21" x2="4" y2="14" />
+      <line x1="4" y1="10" x2="4" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12" y2="3" />
+      <line x1="20" y1="21" x2="20" y2="16" />
+      <line x1="20" y1="12" x2="20" y2="3" />
+      <line x1="1" y1="14" x2="7" y2="14" />
+      <line x1="9" y1="8" x2="15" y2="8" />
+      <line x1="17" y1="16" x2="23" y2="16" />
+    </svg>
+    """
+  end
+
   defp svg_chev(assigns) do
     ~H"""
     <svg
@@ -1848,7 +1967,8 @@ defmodule MishkaCmsWeb.InstallLive do
     selection =
       UiKitCatalog.install_selection_by_kit(
         socket.assigns.catalog,
-        socket.assigns.selected
+        socket.assigns.selected,
+        socket.assigns.config_axes
       )
 
     # THE CHECKBOX IS NOT A SETTING. It rides the same form because that is the screen it belongs
@@ -1959,6 +2079,42 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp group_selected_count(group, selected, required) do
     Enum.count(group.entries, &checked?(&1.name, selected, required))
+  end
+
+  defp configurable?(entry, selected, required),
+    do: entry_config(entry) != %{} and checked?(entry.name, selected, required)
+
+  # A SECOND COPY of Chelekom's seven axis names used to live here, and it did the filtering as well
+  # as the ordering — so a kit whose knobs are `tone`/`density` had a config the catalogue built and
+  # this step then dropped on the floor. The catalogue owns the order now; everything it offers is
+  # shown, in that order, with anything it has never heard of after.
+  defp ordered_config(entry) do
+    entry
+    |> entry_config()
+    |> UiKitCatalog.sort_axes()
+  end
+
+  defp entry_config(entry), do: Map.get(entry, :config, %{})
+
+  defp axis_checked?(config_axes, name, axis, value, default) do
+    value == default or
+      config_axes |> Map.get(name, %{}) |> Map.get(axis, MapSet.new()) |> MapSet.member?(value)
+  end
+
+  defp toggle_axis(config_axes, name, axis, value) do
+    axes = Map.get(config_axes, name, %{})
+    values = axes |> Map.get(axis, MapSet.new()) |> toggle_member(value)
+
+    axes =
+      if MapSet.size(values) == 0, do: Map.delete(axes, axis), else: Map.put(axes, axis, values)
+
+    if map_size(axes) == 0,
+      do: Map.delete(config_axes, name),
+      else: Map.put(config_axes, name, axes)
+  end
+
+  defp toggle_member(set, value) do
+    if MapSet.member?(set, value), do: MapSet.delete(set, value), else: MapSet.put(set, value)
   end
 
   # Two filters over one list: the search box and, once a second kit is on disk, the kit chips. They

@@ -612,6 +612,54 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     end
   end
 
+  describe "per-component variant config" do
+    test "a selected component shows a variant cog that opens a config panel", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      # button is selected by default and exposes variant/color axes, so it gets a cog.
+      assert has_element?(view, "#config-chelekom-button")
+      refute has_element?(view, "#config-panel-chelekom-button")
+
+      view |> element("#config-chelekom-button") |> render_click()
+
+      # The panel opens and the kit-default value is rendered locked (a disabled checkbox).
+      assert has_element?(view, "#config-panel-chelekom-button")
+      assert has_element?(view, "#config-panel-chelekom-button input[disabled]")
+    end
+
+    test "ticking a non-default variant persists it (regression: phx-value vs native 'on')", %{
+      conn: conn
+    } do
+      view = to_ui_kit(conn)
+      view |> element("#config-chelekom-button") |> render_click()
+
+      view
+      |> element("#config-panel-chelekom-button input[phx-value-opt='bordered']")
+      |> render_click()
+
+      assert has_element?(
+               view,
+               "#config-panel-chelekom-button input[phx-value-opt='bordered'][checked]"
+             )
+    end
+
+    test "Reset defaults clears the component's chosen variants", %{conn: conn} do
+      view = to_ui_kit(conn)
+      view |> element("#config-chelekom-button") |> render_click()
+
+      view
+      |> element("#config-panel-chelekom-button input[phx-value-opt='bordered']")
+      |> render_click()
+
+      view |> element("#config-panel-chelekom-button button.rst") |> render_click()
+
+      refute has_element?(
+               view,
+               "#config-panel-chelekom-button input[phx-value-opt='bordered'][checked]"
+             )
+    end
+  end
+
   describe "settings step" do
     test "the picker advances to the settings step, prefilled from the config", %{conn: conn} do
       view = to_settings(conn)
