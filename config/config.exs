@@ -15,6 +15,29 @@ config :ash_oban, pro?: false
 # settings live in `MishkaCmsCore.Settings` directly.
 config :mishka_cms_core, :settings_providers, []
 
+# THE UI KITS the first-run installer fetches come, by default, from the newest stable release of
+# mishka-group/mishka_chelekom that attaches them — or a pre-release, or the files on its `master`,
+# as the operator picks in the installer. No version is written anywhere. Set this to fetch exact
+# files instead (one or several, from anywhere) — to hold a version or use your own fork — or to
+# `[]` for an air-gapped install that uses only the bundles already in `priv/cms_ui_kits/`. The
+# installer then offers no version choice.
+#
+#     config :mishka_cms_core, :official_ui_kits, [
+#       %{
+#         key: :styled,
+#         label: "Chelekom — styled",
+#         file: "chelekom.json",
+#         tag: "v0.0.10-alpha.6",
+#         url: "https://github.com/…/releases/download/v0.0.10-alpha.6/chelekom.json"
+#       }
+#     ]
+
+# HOW LONG A CSS OR JS BUILD WAITS while another one installs the Tailwind or esbuild binary, in
+# milliseconds — ten minutes unless set. The download has no timeout of its own, so a build that
+# waits longer gives up with an error; a slow connection on a fresh install may need more.
+#
+#     config :mishka_cms_core, :asset_install_wait, :timer.minutes(20)
+
 # Kept out of every request and LiveView event log: a parameter whose name holds one of these words
 # — an account password, a provider's API key (`mailer.resend.api_key`), a sign-in token.
 config :phoenix, :filter_parameters, ["password", "secret", "api_key", "token"]

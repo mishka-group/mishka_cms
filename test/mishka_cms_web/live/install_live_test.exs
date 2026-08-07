@@ -70,6 +70,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
       Application.put_env(:mishka_cms_core, :official_ui_kits, official)
+      Application.delete_env(:mishka_cms_core, :ui_kit_req_options)
       :persistent_term.erase({Settings, :definitions})
       System.delete_env("MISHKA_SETUP_TOKEN")
       SettingsState.restore(snapshot)
@@ -77,6 +78,55 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
     :ok
   end
+
+  # Chelekom's packages from a fake GitHub: the API's release list, and each attached file a bundle
+  # of that name. The test's `chelekom.json` is a LINK to the shipped bundle, and a download writes
+  # through a link — so it goes first, and the fetched files land in the test's own directory.
+  defp github_releases!(releases) do
+    Application.delete_env(:mishka_cms_core, :official_ui_kits)
+    File.rm!(Path.join(UiKitHandler.kits_dir(), "chelekom.json"))
+
+    Application.put_env(:mishka_cms_core, :ui_kit_req_options,
+      plug: fn conn ->
+        case conn.host do
+          "api.github.com" ->
+            Req.Test.json(conn, releases)
+
+          _download ->
+            [tag, file] = conn.request_path |> String.split("/", trim: true) |> Enum.take(-2)
+
+            Req.Test.json(conn, %{
+              "$schema" => "mishka.ui_kit.bundle.v3",
+              "name" => Path.rootname(file),
+              "version" => tag,
+              "components" => []
+            })
+        end
+      end
+    )
+  end
+
+  defp kit_release(tag, prerelease?) do
+    %{
+      "tag_name" => tag,
+      "prerelease" => prerelease?,
+      "draft" => false,
+      "assets" =>
+        Enum.map(
+          ["chelekom.json", "chelekom_headless.json"],
+          &%{"name" => &1, "browser_download_url" => "https://github.test/#{tag}/#{&1}"}
+        )
+    }
+  end
+
+  defp acme_release_kit,
+    do: %{
+      key: :acme,
+      label: "Acme kit",
+      file: "acme.json",
+      tag: "v1.2.3",
+      url: "https://github.com/acme/kit/releases/download/v1.2.3/acme.json"
+    }
 
   defp to_ui_kit(conn, config \\ @valid) do
     {:ok, view, _html} = live(conn, "/install")
@@ -208,6 +258,259 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#rail-step-0[phx-click]")
       assert has_element?(view, "#rail-step-2[phx-click]")
       refute has_element?(view, "#rail-step-3[phx-click]")
+    end
+  end
+
+  describe "official package sources" do
+    # A PACKAGE THAT CANNOT BE FETCHED IS AN ORDINARY STATE NOW, not a dead install. There are two
+    # official packages, and one 404 used to raise out of `ensure_bundles!/1` and take the other —
+    # and every third-party bundle on disk — with it, leaving the step with no picker at all.
+    #
+    # This is not hypothetical while the headless bundle has no published URL: the styled kit
+    # resolves from the shipped file and the headless one 404s on every run of this suite.
+    test "the picker still renders when an official package cannot be fetched", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      assert has_element?(view, "#installer-uikit")
+
+      assert has_element?(view, "#toggle-chelekom-card"),
+             "a failed package must not cost the one that resolved"
+    end
+
+    test "a package that could not be fetched is named, with its version", %{conn: conn} do
+      Application.put_env(
+        :mishka_cms_core,
+        :official_ui_kits,
+        @offline_kits ++
+          [
+            %{
+              key: :ghost,
+              label: "Ghost Kit",
+              file: "install_test_ghost.json",
+              tag: "v4.2",
+              url: "https://127.0.0.1:1/ghost.json"
+            }
+          ]
+      )
+
+      view = to_ui_kit(conn)
+      html = render(view)
+
+      assert has_element?(view, "#uikit-partial"),
+             "an operator must be told which package is missing, not left to wonder later"
+
+      assert html =~ "Ghost Kit"
+      assert html =~ "v4.2"
+
+      assert has_element?(view, "#toggle-chelekom-card"),
+             "a failed package must not cost the one that resolved"
+    end
+
+    # The loading line said "the Chelekom bundle" when there are two, and would go stale again the
+    # moment a host edits `:official_ui_kits`.
+    # I1'S ACCEPTANCE CRITERION, and it was missed the first time: the packages were pinned, the
+    # config was right, the failure banners named a tag — and on the SUCCESS path, which is the one
+    # an operator normally sees, no version appeared anywhere. Pinning a package is worth nothing to
+    # someone who cannot see the pin.
+    test "the success path names every package and its version", %{conn: conn} do
+      view = to_ui_kit(conn)
+      html = render(view)
+
+      assert has_element?(view, "#uikit-versions")
+      assert has_element?(view, ".inst-kit-ver")
+
+      for source <- UiKitHandler.resolve_kits().sources do
+        assert html =~ source.name
+        assert html =~ source.tag || html =~ source.version
+      end
+    end
+
+    # A bundle a developer dropped into the kits directory was never fetched, so it has no tag —
+    # showing one would be a lie. Its own `version` is what it can honestly claim.
+    test "a locally placed bundle reports its own version, not a tag" do
+      assert %{sources: sources} = UiKitHandler.resolve_kits()
+
+      for source <- sources do
+        assert source.official? or is_nil(source.tag)
+      end
+    end
+
+    # ONE ROW A PACKAGE WHILE IT DOWNLOADS. A 12 MB kit on a slow line took minutes behind a single
+    # spinner that said nothing about which package was still coming, or how far it had got.
+    test "a package being fetched has its own row, and its bar fills as it downloads", %{
+      conn: conn
+    } do
+      test = self()
+      Application.put_env(:mishka_cms_core, :official_ui_kits, [acme_release_kit()])
+
+      Application.put_env(:mishka_cms_core, :ui_kit_req_options,
+        plug: fn conn ->
+          send(test, {:fetching, self()})
+          receive do: (:go -> :ok)
+          Req.Test.json(conn, %{"$schema" => "mishka.ui_kit.bundle.v3", "name" => "acme"})
+        end
+      )
+
+      {:ok, view, _html} = live(conn, "/install")
+      view |> form("#install-form", install: @valid) |> render_submit()
+      assert_receive {:fetching, download}, 5_000
+
+      assert has_element?(view, "#uikit-fetch-acme", "Acme kit")
+      assert has_element?(view, "#uikit-fetch-acme", "v1.2.3")
+      assert has_element?(view, "#uikit-fetch-acme", "Checking…")
+      refute has_element?(view, "#uikit-fetch-acme progress[value]")
+
+      send(view.pid, {:kit_progress, :acme, {6_291_456, 12_582_912}})
+
+      assert has_element?(view, "#uikit-fetch-acme progress[value='6291456'][max='12582912']")
+      assert has_element?(view, "#uikit-fetch-acme", "6.0 / 12.0 MB")
+
+      send(download, :go)
+      render_async(view, 15_000)
+      refute has_element?(view, "#uikit-loading")
+    end
+
+    # A RELEASE FILE IS NAMED BY ITS TAG. The short form was written for a raw path, whose tag is the
+    # third segment; a release URL's third segment is `releases`.
+    test "a release file that could not be fetched is named by its repository and tag", %{
+      conn: conn
+    } do
+      Application.put_env(:mishka_cms_core, :official_ui_kits, [acme_release_kit()])
+
+      Application.put_env(:mishka_cms_core, :ui_kit_req_options,
+        plug: fn conn -> Plug.Conn.send_resp(conn, 404, "") end
+      )
+
+      view = to_ui_kit(conn)
+
+      assert has_element?(view, "#uikit-fail-url-acme", "kit@v1.2.3/acme.json")
+    end
+
+    # A HOST THAT NAMES ITS KITS IN CONFIG GETS THOSE: there is no release to choose.
+    test "configured kits come with no version switch", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      refute has_element?(view, "#uikit-channel")
+    end
+
+    test "the version switch fetches the chosen channel's newest release and names it", %{
+      conn: conn
+    } do
+      github_releases!([kit_release("v2-alpha", true), kit_release("v1.9", false)])
+      view = to_ui_kit(conn)
+
+      # Nothing chosen yet: the kits already here, and no chip claiming to be their source.
+      assert has_element?(view, "#uikit-channel-note", "already on this server")
+      refute has_element?(view, "#uikit-channel .inst-chip.on")
+
+      view |> element("#uikit-channel-prerelease") |> render_click()
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#uikit-channel-prerelease.on[aria-checked='true']")
+      assert has_element?(view, "#uikit-channel-note", "v2-alpha")
+      assert has_element?(view, "#uikit-versions", "v2-alpha")
+
+      view |> element("#uikit-channel-stable") |> render_click()
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#uikit-channel-stable.on")
+      assert has_element?(view, "#uikit-channel-note", "The newest stable release, v1.9.")
+    end
+
+    # TODAY'S CASE: only pre-releases attach the kits. Stable still installs, and says what it took.
+    test "stable with no stable kits takes the newest pre-release and says so", %{conn: conn} do
+      github_releases!([kit_release("v2-alpha", true)])
+      view = to_ui_kit(conn)
+
+      view |> element("#uikit-channel-stable") |> render_click()
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#uikit-channel-stable.on")
+
+      assert has_element?(
+               view,
+               "#uikit-channel-fallback",
+               "No stable release has the UI kits yet"
+             )
+
+      assert has_element?(view, "#uikit-channel-fallback", "v2-alpha")
+    end
+
+    test "no partial banner when every package resolved", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      assert %{failures: []} = UiKitHandler.resolve_kits()
+      refute has_element?(view, "#uikit-partial")
+    end
+  end
+
+  describe "adding a package by URL" do
+    setup do
+      # The Req stub is global, so an official kit left configured would be served the custom
+      # bundle too — and cached under the official kit's filename.
+      Application.put_env(:mishka_cms_core, :official_ui_kits, [])
+      :ok
+    end
+
+    # The whole reason I3 exists: before it, a third-party kit could only be added by placing a file
+    # on disk, which an operator running a released image cannot do.
+    test "the field and its disclaimer are on the step", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      assert has_element?(view, "#uikit-custom-url")
+      assert has_element?(view, "#uikit-custom-add")
+      assert has_element?(view, "#uikit-custom-warning")
+    end
+
+    # BEFORE the fetch, not after it succeeds — by then the components are already in their admin.
+    test "the disclaimer is present before anything is fetched", %{conn: conn} do
+      html = conn |> to_ui_kit() |> render()
+
+      assert html =~ "not ours"
+      assert html =~ "Mishka takes no responsibility"
+    end
+
+    test "a valid bundle joins the picker", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      Application.put_env(:mishka_cms_core, :ui_kit_req_options,
+        plug: fn conn ->
+          Req.Test.json(conn, %{
+            "$schema" => "mishka.ui_kit.bundle.v3",
+            "name" => "acme_via_url",
+            "components" => [
+              %{
+                "name" => "acme-via-url-widget",
+                "template" => "<div>w</div>",
+                "type" => "general"
+              }
+            ]
+          })
+        end
+      )
+
+      view
+      |> form("#uikit-custom-form", url: "https://e.test/a.json")
+      |> render_submit()
+
+      render_async(view, 20_000)
+
+      assert render(view) =~ "acme_via_url"
+    end
+
+    test "a refused package reports why and adds nothing", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      Application.put_env(:mishka_cms_core, :ui_kit_req_options,
+        plug: fn conn -> Plug.Conn.send_resp(conn, 200, "<html>nope</html>") end
+      )
+
+      view
+      |> form("#uikit-custom-form", url: "https://e.test/bad.json")
+      |> render_submit()
+
+      assert has_element?(view, "#uikit-custom-error")
+      assert render(view) =~ "not valid JSON"
     end
   end
 

@@ -57,6 +57,8 @@ defmodule MishkaCmsWeb.InstallLive do
 
   @install_setting_keys ["site.title", "mailer.from"]
 
+  @kit_channels %{"stable" => :stable, "prerelease" => :prerelease, "master" => :master}
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -71,6 +73,16 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(
        bundle_status: nil,
        bundle_error: nil,
+       bundle_failures: [],
+       bundle_sources: [],
+       bundle_progress: %{},
+       bundle_release: nil,
+       fetch_kits: [],
+       kit_channel: nil,
+       kits_configured?: false,
+       custom_url: "",
+       custom_error: nil,
+       custom_busy: false,
        catalog: nil,
        kits: []
      )
@@ -94,6 +106,43 @@ defmodule MishkaCmsWeb.InstallLive do
     case errors(params) do
       [] -> {:noreply, start_ui_kit(socket, params)}
       _ -> {:noreply, assign_form(socket, params)}
+    end
+  end
+
+  def handle_event("retry_bundle", _params, socket) do
+    {:noreply, load_bundle(socket)}
+  end
+
+  # Matched against the three names rather than turned into an atom: the value is the client's.
+  def handle_event("kit_channel", %{"channel" => channel}, socket) do
+    case Map.fetch(@kit_channels, channel) do
+      {:ok, channel} -> {:noreply, socket |> assign(kit_channel: channel) |> load_bundle()}
+      :error -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("custom_url", %{"url" => url}, socket) do
+    {:noreply, assign(socket, custom_url: url, custom_error: nil)}
+  end
+
+  # The fetch runs in the LiveView process rather than `start_async`, because the whole picker has to
+  # be rebuilt from the merged catalogue afterwards and a half-added kit is not a state worth
+  # modelling. It is bounded by the download's own size limit and one retry.
+  # THE SUBMITTED VALUE, not the assign. A submit carries its own params, and depending on a change
+  # event having fired first is fragile — a paste-and-Enter, or an autofill, can reach here with the
+  # assign still empty and the field visibly full.
+  def handle_event("add_custom_kit", params, socket) do
+    url = Map.get(params, "url") || socket.assigns.custom_url
+
+    case UiKitHandler.add_custom_kit(url) do
+      {:ok, _bundle} ->
+        {:noreply,
+         socket
+         |> assign(custom_url: "", custom_error: nil, custom_busy: false)
+         |> load_bundle()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, custom_url: url, custom_error: reason, custom_busy: false)}
     end
   end
 
@@ -179,7 +228,11 @@ defmodule MishkaCmsWeb.InstallLive do
   # One catalogue over every kit found on disk. With only Chelekom present this is the single-kit
   # catalogue it always was; drop the generator's headless bundle beside it and its components join
   # the same picker, labelled by their own kit and installed separately.
-  def handle_async(:bundle, {:ok, %{bundles: bundles}}, socket) do
+  def handle_async(
+        :bundle,
+        {:ok, %{bundles: bundles, sources: sources, failures: failures} = result},
+        socket
+      ) do
     catalog = UiKitCatalog.merge(List.wrap(bundles))
 
     {:noreply,
@@ -187,7 +240,10 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(
        bundle_status: :ready,
        catalog: catalog,
-       kits: kit_names(bundles)
+       kits: kit_names(bundles),
+       bundle_sources: sources,
+       bundle_failures: failures,
+       bundle_release: Map.get(result, :release)
      )
      |> recompute(MapSet.new(catalog.names))}
   end
@@ -231,6 +287,10 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(compiled_count: count)
      |> assign(install_steps: log_running_step(socket.assigns.install_steps, line))}
   end
+
+  # How far each official kit's download has got, for its bar on the loading screen.
+  def handle_info({:kit_progress, key, sizes}, socket),
+    do: {:noreply, update(socket, :bundle_progress, &Map.put(&1, key, sizes))}
 
   def handle_info(_message, socket), do: {:noreply, socket}
 
@@ -421,23 +481,208 @@ defmodule MishkaCmsWeb.InstallLive do
       <div id="installer-uikit">
         <%= cond do %>
           <% @bundle_status == :loading -> %>
-            <div id="uikit-loading" class="inst-loading" role="status" aria-live="polite">
-              <div class="inst-ring is-run"></div>
-              {gettext("Fetching the UI kits…")}
+            <div id="uikit-loading" class="inst-fetch" role="status" aria-live="polite">
+              <div class="inst-fetch-head">
+                <div class="inst-ring is-run"></div>
+                {gettext("Fetching %{kits}…", kits: official_kit_summary())}
+              </div>
+              <%!-- One row per package, because a 12 MB kit and a 1.6 MB one finish minutes apart
+                    on a slow line, and a single spinner said nothing about which was still coming. --%>
+              <ul :if={@fetch_kits != []} class="inst-fetch-list">
+                <li
+                  :for={kit <- @fetch_kits}
+                  id={"uikit-fetch-#{kit.key}"}
+                  class="inst-fetch-row"
+                >
+                  <div class="inst-fetch-top">
+                    <span class="inst-fetch-name">{Settings.text(kit.label)}</span>
+                    <span :if={kit[:tag]} class="inst-kit-ver">{kit.tag}</span>
+                    <span class="inst-fetch-size">{fetch_size(@bundle_progress[kit.key])}</span>
+                  </div>
+                  <progress
+                    class="inst-fetch-bar"
+                    aria-label={Settings.text(kit.label)}
+                    {fetch_value(@bundle_progress[kit.key])}
+                  ></progress>
+                </li>
+              </ul>
             </div>
           <% @bundle_status == :error -> %>
             <div id="uikit-error" class="inst-banner is-amber">
               <b>{gettext("No UI-kit bundle could be loaded.")}</b>
               <p>{@bundle_error}</p>
+              <%!-- It used to say "place chelekom.json in priv/cms_ui_kits/", which is advice a
+                    reader cannot act on when the download is what failed and they have no copy to
+                    place. Name the packages and the versions instead, so they can check the tag or
+                    reach for their own bundle. --%>
+              <p :for={kit <- @fetch_kits}>
+                <code>{Settings.text(kit.label)}</code>{kit[:tag] && " · #{kit.tag}"}
+              </p>
               <p>
                 {raw(
-                  gettext("Drop a bundle into %{path} and reload.",
+                  gettext("Retry, or drop a bundle into %{path} and reload.",
                     path: inline_code("priv/cms_ui_kits/")
                   )
                 )}
               </p>
+              <button
+                id="uikit-retry"
+                type="button"
+                phx-click="retry_bundle"
+                class={[btn_ghost(), "inst-mt"]}
+              >
+                {gettext("Retry download")}
+              </button>
             </div>
           <% true -> %>
+            <%!-- WHICH CHELEKOM. The newest stable release unless the operator asks for a pre-release
+                  or the unreleased master; a host that names its kits in config gets those, and no
+                  choice. --%>
+            <div :if={not @kits_configured?} id="uikit-channel" class="inst-channel">
+              <span class="gl" id="uikit-channel-label">{gettext("Kit version")}</span>
+              <div class="inst-chips" role="radiogroup" aria-labelledby="uikit-channel-label">
+                <button
+                  :for={{channel, label} <- kit_channel_options()}
+                  type="button"
+                  id={"uikit-channel-#{channel}"}
+                  role="radio"
+                  aria-checked={to_string(shown_channel(@kit_channel, @bundle_release) == channel)}
+                  phx-click="kit_channel"
+                  phx-value-channel={channel}
+                  class={[
+                    "inst-chip",
+                    shown_channel(@kit_channel, @bundle_release) == channel && "on"
+                  ]}
+                >
+                  {label}
+                </button>
+              </div>
+              <p
+                :if={!match?(%{fallback?: true}, @bundle_release)}
+                class="inst-hint"
+                id="uikit-channel-note"
+              >
+                {channel_note(@bundle_release)}
+              </p>
+            </div>
+            <div
+              :if={match?(%{fallback?: true}, @bundle_release)}
+              id="uikit-channel-fallback"
+              class="inst-banner is-amber is-inline"
+            >
+              <b>{gettext("No stable release has the UI kits yet.")}</b>
+              <p>
+                {gettext("Using pre-release %{tag}, the newest release that has them.",
+                  tag: @bundle_release.tag
+                )}
+              </p>
+            </div>
+            <%!-- ONE package failing is not an error state: the step still installs everything it
+                  did reach. But it has to say what is missing, or an operator wonders later why
+                  half a kit is absent and has nothing to search for. --%>
+            <div
+              :if={@bundle_failures != []}
+              id="uikit-partial"
+              class="inst-banner is-amber is-inline"
+            >
+              <div class="inst-banner-head">
+                <b>
+                  {gettext("%{count} package(s) could not be fetched.",
+                    count: length(@bundle_failures)
+                  )}
+                </b>
+                <button
+                  id="uikit-partial-retry"
+                  type="button"
+                  phx-click="retry_bundle"
+                  class={btn_ghost()}
+                >
+                  {gettext("Retry")}
+                </button>
+              </div>
+              <%!-- The URL is the longest thing here and the least often read — printed whole it
+                    wrapped to three lines and pushed the module card off the fold. Elided to host +
+                    filename, with the rest on `title` and one click away on the clipboard. --%>
+              <div :for={failure <- @bundle_failures} class="inst-fail">
+                <span>{Settings.text(failure.label)} · {failure.tag} — {failure.reason}</span>
+                <%!-- Hover or focus for the whole URL, click to copy it. No `title` attribute: the
+                      native tooltip waits a second, cannot be styled, and would sit on top of this
+                      one. --%>
+                <span class="inst-tip-wrap">
+                  <button
+                    id={"uikit-fail-url-#{failure.key}"}
+                    type="button"
+                    phx-hook="CopyToClipboard"
+                    data-copy={failure.url}
+                    aria-label={
+                      gettext("Copy the URL for %{label}", label: Settings.text(failure.label))
+                    }
+                    class="inst-copy"
+                  >
+                    {short_source(failure.url)}
+                  </button>
+                  <span class="inst-tip" role="tooltip">{failure.url}</span>
+                </span>
+              </div>
+              <p>
+                {gettext("Everything below is what did load — install the rest later from the admin.")}
+              </p>
+            </div>
+            <%!-- ADD A PACKAGE WE DO NOT SHIP. The only route to a third-party kit at install time
+                  was placing a file on disk, which an operator running a released image cannot do.
+                  The disclaimer is shown BEFORE anything is fetched, not after it succeeds — by
+                  then the components are already in their admin. --%>
+            <details class="inst-custom" id="uikit-custom">
+              <summary>{gettext("Add a package by URL")}</summary>
+              <div class="inst-custom-body">
+                <%!-- RED, where the fetch-failure banner above is amber. They can be on screen
+                      together, and two identical-looking alerts read as one message split in half.
+                      The colours also rank correctly: a package that did not download is a nuisance,
+                      someone else's code running in your admin is a risk. --%>
+                <div class="inst-banner is-red is-inline" id="uikit-custom-warning">
+                  <b>{gettext("Packages from outside the official channels are not ours.")}</b>
+                  <p>
+                    {gettext(
+                      "Mishka takes no responsibility for them: their components run inside your admin and render on your visitors' pages. Install only from a source you trust."
+                    )}
+                  </p>
+                </div>
+                <form
+                  id="uikit-custom-form"
+                  phx-change="custom_url"
+                  phx-submit="add_custom_kit"
+                  class="inst-custom-row"
+                >
+                  <input
+                    type="url"
+                    name="url"
+                    id="uikit-custom-url"
+                    value={@custom_url}
+                    placeholder="https://example.com/my-kit.json"
+                    class={["inst-inp", @custom_error && "has-error"]}
+                    autocomplete="off"
+                  />
+                  <button
+                    type="submit"
+                    id="uikit-custom-add"
+                    disabled={@custom_url == ""}
+                    class={btn_ghost()}
+                    data-loading={gettext("Fetching…")}
+                  >
+                    {gettext("Fetch")}
+                  </button>
+                </form>
+                <p :if={@custom_error} class="inst-error" id="uikit-custom-error">{@custom_error}</p>
+                <p :if={is_nil(@custom_error)} class="inst-hint">
+                  {raw(
+                    gettext(
+                      "A %{schema} JSON. It is checked and cached beside the official packages before anything is installed.",
+                      schema: inline_code("mishka.ui_kit.bundle.v3")
+                    )
+                  )}
+                </p>
+              </div>
+            </details>
             <div class="inst-mod">
               <div class="inst-mod-head">
                 <div class="inst-mod-ico"><.svg_grid /></div>
@@ -453,6 +698,15 @@ defmodule MishkaCmsWeb.InstallLive do
                       selected: MapSet.size(@selected),
                       total: MapSet.size(@catalog.names)
                     )}
+                  </div>
+                  <%!-- WHICH VERSION IS BEING INSTALLED. The card said what and how many but never
+                        which — and pinning the packages is worth nothing to an operator who cannot
+                        see the pin. The `sources` come from the resolver rather than being joined
+                        back to config by filename, which would be a guess. --%>
+                  <div :if={@bundle_sources != []} class="inst-kit-vers" id="uikit-versions">
+                    <span :for={source <- @bundle_sources} class="inst-kit-ver">
+                      {source.name} {version_label(source)}
+                    </span>
                   </div>
                 </div>
                 <button
@@ -813,6 +1067,7 @@ defmodule MishkaCmsWeb.InstallLive do
         border-top-color:#fff;animation:inst-spin .7s linear infinite}
       .inst-btn[data-loading].phx-submit-loading::after,
       .inst-btn[data-loading].phx-click-loading::after{content:attr(data-loading)}
+      .inst-mt{margin-top:12px}
 
       /* module rows (collapsed installable units) */
       .inst-mod{border:1.5px solid var(--line);border-radius:14px;background:#fff;overflow:hidden;margin-bottom:12px}
@@ -839,6 +1094,26 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-kit-chip{padding:5px 12px;border:1.5px solid var(--line);border-radius:999px;
         background:#fff;font-size:11.5px;font-weight:700;color:var(--faint);cursor:pointer}
       .inst-kit-chip.on{border-color:#17161a;background:#17161a;color:#fff}
+      .inst-custom{margin-bottom:18px;border:1.5px solid var(--line);border-radius:12px;background:#fff}
+      .inst-custom>summary{cursor:pointer;padding:13px 16px;font-size:13px;font-weight:700;
+        color:var(--ink-2);list-style:none}
+      .inst-custom>summary::-webkit-details-marker{display:none}
+      /* A trailing space inside `content` collapses, so the marker sat against the label. */
+      .inst-custom>summary::before{content:"+";color:var(--faint);margin-right:7px}
+      .inst-custom[open]>summary::before{content:"\2212"}
+      .inst-custom>summary:hover{color:var(--ink)}
+      /* THE CONTAINER OWNS THE SPACING. This was `padding:0 …` plus a `margin-top` on the banner —
+         same specificity as `.inst-banner.is-inline`'s `margin:0 …` and earlier in the file, so the
+         later rule silently won and the banner sat welded to the divider. Padding cannot be
+         cancelled by a sibling's margin shorthand. */
+      .inst-custom-body{padding:16px;border-top:1px solid var(--line-2)}
+      .inst-custom-row{display:flex;gap:8px;align-items:center;margin-top:16px}
+      .inst-custom-row .inst-inp{flex:1;min-width:0}
+      .inst-custom-body .inst-hint,
+      .inst-custom-body .inst-error{margin-top:10px}
+      .inst-kit-vers{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+      .inst-kit-ver{padding:1px 6px;border-radius:5px;background:#f2f1ec;font-size:9.5px;
+        font-weight:700;color:var(--faint);white-space:nowrap}
       .inst-kit-tag{margin-left:auto;padding:1px 6px;border-radius:5px;background:#f2f1ec;
         font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
         color:var(--faint);flex:none;white-space:nowrap}
@@ -877,6 +1152,12 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-required{display:inline-flex;align-items:center;gap:4px;border-radius:99px;
         background:#f1f5f9;color:var(--faint);padding:2px 8px;font-size:10.5px;font-weight:600;flex-shrink:0}
       .inst-empty{padding:20px 0;text-align:center;color:var(--faint);font-size:13.5px;margin:0}
+      .inst-chips{display:flex;flex-wrap:wrap;gap:6px}
+      .inst-chip{font-size:12px;padding:5px 11px;border:1.5px solid var(--line);border-radius:99px;
+        background:#fff;color:var(--ink-2);cursor:pointer;transition:all .12s;font-weight:500;
+        display:inline-flex;align-items:center;position:relative}
+      .inst-chip:hover{border-color:#cbd5e1}
+      .inst-chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
 
       /* checkbox rows */
       .inst-smp-row{display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer;border-radius:10px}
@@ -905,6 +1186,39 @@ defmodule MishkaCmsWeb.InstallLive do
       @keyframes inst-spin{to{transform:rotate(360deg)}}
       .inst-loading{display:flex;align-items:center;justify-content:center;gap:12px;
         padding:64px 0;color:var(--blue);font-weight:600;font-size:14.5px}
+      /* The UI-kit download: a row per package, its bar drawn by `<progress>` itself, since this
+         page's CSP admits no inline `style` to size a div with. */
+      .inst-fetch{padding:44px 0 34px;animation:inst-rise .4s}
+      /* Which Chelekom: the release channel, as the step's own chips. */
+      .inst-channel{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 18px}
+      .inst-channel .gl{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--faint);
+        text-transform:uppercase}
+      .inst-channel .inst-hint{flex-basis:100%;margin:0}
+      .inst-fetch-head{display:flex;align-items:center;justify-content:center;gap:12px;
+        color:var(--blue);font-weight:600;font-size:14.5px}
+      .inst-fetch-list{list-style:none;margin:26px auto 0;padding:0;max-width:460px;display:grid;
+        grid-template-columns:minmax(0,1fr);gap:10px}
+      .inst-fetch-row{min-width:0;background:var(--bg);border:1px solid var(--line);
+        border-radius:var(--r);padding:12px 14px 13px}
+      /* On a narrow screen the size drops under the name rather than pushing the row wider. */
+      .inst-fetch-top{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-bottom:9px}
+      .inst-fetch-name{flex:0 1 auto;min-width:0;font-size:13px;font-weight:600;color:var(--ink-2);
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .inst-fetch-top .inst-kit-ver{flex:none}
+      .inst-fetch-size{margin-left:auto;flex-shrink:0;font-size:11px;color:var(--dim);
+        font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+        font-variant-numeric:tabular-nums}
+      .inst-fetch-bar{display:block;width:100%;height:6px;border:0;border-radius:99px;overflow:hidden;
+        background:var(--line-2);-webkit-appearance:none;appearance:none}
+      .inst-fetch-bar::-webkit-progress-bar{background:var(--line-2);border-radius:99px}
+      .inst-fetch-bar::-webkit-progress-value{background:var(--blue);border-radius:99px;transition:width .25s}
+      .inst-fetch-bar::-moz-progress-bar{background:var(--blue);border-radius:99px}
+      .inst-fetch-bar:indeterminate{background:linear-gradient(90deg,var(--line-2) 0%,var(--blue-l) 35%,
+        #bcd4ff 50%,var(--blue-l) 65%,var(--line-2) 100%) 0 0/200% 100%;animation:inst-shimmer 1.3s linear infinite}
+      .inst-fetch-bar:indeterminate::-webkit-progress-bar{background:transparent}
+      .inst-fetch-bar:indeterminate::-moz-progress-bar{background:transparent}
+      @keyframes inst-shimmer{to{background-position:-200% 0}}
+      @media(prefers-reduced-motion:reduce){.inst-fetch-bar:indeterminate{animation:none}}
 
       .inst-banner{margin-top:26px;border:1.5px solid #bbf7d0;background:var(--green-l);
         border-radius:12px;padding:16px 18px;animation:inst-rise .4s}
@@ -917,6 +1231,28 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-banner.is-amber b{color:#92400e}
       .inst-banner.is-amber p{color:#b45309}
       .inst-banner code{background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11.5px}
+      /* Sits ABOVE the module card rather than below the step, so it carries its own bottom gap —
+         `.inst-banner`'s margin-top alone left it glued to the card underneath. */
+      .inst-banner.is-inline{margin:0 0 18px;padding:13px 16px}
+      .inst-banner-head{display:flex;align-items:center;gap:12px}
+      .inst-banner-head b{flex:1;min-width:0}
+      .inst-fail{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;
+        font-size:12.5px;color:#b45309}
+      .inst-copy{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+        font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;
+        background:#fff;border:1px solid #fde68a;border-radius:5px;padding:2px 7px;
+        color:#92400e;cursor:pointer}
+      .inst-copy:hover{border-color:#d97706;background:#fffdf7}
+      /* The admin's popover treatment, rebuilt in this page's own stylesheet: the installer runs
+         before any site exists and loads no Tailwind, so the shared component cannot come with it. */
+      .inst-tip-wrap{position:relative;display:inline-flex;max-width:100%}
+      .inst-tip{position:absolute;bottom:calc(100% + 7px);left:0;z-index:5;display:none;
+        width:max-content;max-width:min(430px,78vw);background:#1c1b22;color:#fff;
+        border-radius:10px;padding:8px 11px;font-size:11px;line-height:1.55;word-break:break-all;
+        font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+        box-shadow:0 10px 30px -8px rgba(0,0,0,.5);pointer-events:none}
+      .inst-tip-wrap:hover .inst-tip,
+      .inst-tip-wrap:focus-within .inst-tip{display:block}
 
       /* done */
       .inst-done-wrap{text-align:center;margin-top:34px}
@@ -1389,6 +1725,55 @@ defmodule MishkaCmsWeb.InstallLive do
   defp blank_kit("all"), do: nil
   defp blank_kit(kit), do: kit
 
+  # THE TAG when we fetched it, the bundle's OWN version otherwise. A bundle a developer dropped into
+  # the kits directory has no tag — nothing fetched it — and claiming one would be a lie.
+  defp version_label(%{tag: tag}) when is_binary(tag), do: tag
+  defp version_label(%{version: version}) when is_binary(version), do: version
+  defp version_label(_source), do: gettext("unversioned")
+
+  # REPO@REF/FILE, because "wrong tag?" is the question someone actually asks when a package will not
+  # fetch. A raw GitHub URL is ~100 characters of path nobody reads, and printing it whole wrapped
+  # the banner to three lines; `raw.githubusercontent.com/…/chelekom_headless.json` was shorter but
+  # dropped the two segments that answer it.
+  #
+  # The shape is raw.githubusercontent.com's own layout (`/owner/repo/ref/…/file`), not anything to
+  # do with a kit — a URL that does not match it falls back to host and filename, which is all that
+  # can honestly be said about an arbitrary one.
+  defp short_source(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host, path: path} when is_binary(path) ->
+        label(String.split(path, "/", trim: true), host, Path.basename(path))
+
+      _unparseable ->
+        url
+    end
+  end
+
+  defp short_source(_url), do: ""
+
+  # A release's attached file (`/owner/repo/releases/download/tag/file`) names its tag two segments
+  # further in than a raw path does.
+  defp label([_owner, repo, "releases", "download", tag | _rest], _host, file),
+    do: "#{repo}@#{tag}/#{file}"
+
+  defp label([_owner, repo, ref | _rest], _host, file), do: "#{repo}@#{ref}/#{file}"
+  defp label(_segments, host, file), do: "#{host}/…/#{file}"
+
+  # "the Chelekom bundle" named one package when there are now two, and would have gone stale again
+  # the moment a host edits `:official_ui_kits`. Read the list instead.
+  defp official_kit_summary do
+    case UiKitHandler.packages() do
+      [] ->
+        gettext("the UI-kit bundles on disk")
+
+      [one] ->
+        String.trim("#{Settings.text(one.label)} #{one[:tag]}")
+
+      kits ->
+        ngettext("%{count} UI-kit package", "%{count} UI-kit packages", length(kits))
+    end
+  end
+
   defp kit_names(bundles) do
     bundles
     |> List.wrap()
@@ -1396,16 +1781,68 @@ defmodule MishkaCmsWeb.InstallLive do
     |> Enum.reject(&is_nil/1)
   end
 
+  # `resolve_kits/1` rather than `ensure_bundles!/1`: with more than one official package, one of them
+  # failing is an ordinary state this step has to RENDER — a headless bundle that 404s must not take
+  # the styled one, or a third-party bundle already on disk, down with it.
   defp load_bundle(socket) do
+    lv = self()
+    channel = socket.assigns.kit_channel
+
     socket
     |> assign(
       bundle_status: :loading,
-      bundle_error: nil
+      bundle_error: nil,
+      bundle_failures: [],
+      bundle_sources: [],
+      bundle_progress: %{},
+      bundle_release: nil,
+      fetch_kits: UiKitHandler.packages(),
+      kits_configured?: UiKitHandler.configured?()
     )
     |> MishkaGervaz.Messages.start_async(:bundle, fn ->
-      UiKitHandler.resolve_kits()
+      UiKitHandler.resolve_kits(
+        channel: channel,
+        progress: fn key, sizes -> send(lv, {:kit_progress, key, sizes}) end
+      )
     end)
   end
+
+  defp kit_channel_options do
+    [
+      {:stable, gettext("Stable")},
+      {:prerelease, gettext("Pre-release")},
+      {:master, gettext("Master")}
+    ]
+  end
+
+  # The channel the operator picked, or the one the answer came from. Neither is a developer's own
+  # bundles read from disk, and then no chip claims to be the source.
+  defp shown_channel(nil, %{channel: channel}), do: channel
+  defp shown_channel(channel, _release), do: channel
+
+  defp channel_note(%{channel: :stable, tag: tag}),
+    do: gettext("The newest stable release, %{tag}.", tag: tag)
+
+  defp channel_note(%{channel: :prerelease, tag: tag}),
+    do: gettext("The newest release, pre-releases included: %{tag}.", tag: tag)
+
+  defp channel_note(%{channel: :master}),
+    do:
+      gettext("Unreleased: the files on Chelekom's master branch, which may change at any time.")
+
+  defp channel_note(nil),
+    do: gettext("The kits already on this server. Pick a version to fetch one.")
+
+  # Nothing heard yet is a kit being read from disk or a download that has not started — the bar
+  # moves without a value until bytes arrive. A server that sends no length gets the count alone.
+  defp fetch_size(nil), do: gettext("Checking…")
+  defp fetch_size({received, nil}), do: "#{megabytes(received)} MB"
+  defp fetch_size({received, total}), do: "#{megabytes(received)} / #{megabytes(total)} MB"
+
+  defp fetch_value({received, total}) when is_integer(total), do: [value: received, max: total]
+  defp fetch_value(_unknown), do: []
+
+  defp megabytes(bytes), do: :erlang.float_to_binary(bytes / 1_048_576, decimals: 1)
 
   defp commit(socket, settings) do
     selection =
