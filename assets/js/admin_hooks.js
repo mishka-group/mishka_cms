@@ -1,6 +1,6 @@
-// THE HOOKS ONLY THE ADMIN EVER MOUNTS — the page builder, the dashboard's widget grid, the Assets
-// dropzone. No public template names one of these, and the elements they attach to exist only
-// under /admin.
+// THE HOOKS ONLY THE ADMIN EVER MOUNTS — the page builder, the dashboard's widget grid, the review
+// composer's `@` list, the Assets dropzone. No public template names one of these, and the elements
+// they attach to exist only under /admin.
 //
 // They live here rather than in `app.js` so the RUNTIME JAVASCRIPT COMPILER can leave them out. That
 // compiler builds each site's bundle with `app.js` as its entry point, so every hook below — and
@@ -18,6 +18,7 @@ import {
   resolveDrop as resolveDropAt,
   indicatorBox,
 } from "./pb_drop";
+import { mentionAt, withMention } from "./pb_mention";
 
 // WHAT A DRAG IS CARRYING, readable while it is still in flight.
 //
@@ -148,6 +149,152 @@ const MediaThumb = {
   },
   destroyed() {
     this.detach();
+  },
+};
+
+// TYPING `@` IN A REVIEW NOTE. The split is deliberate: the browser decides WHEN somebody is being
+// named — it is the only thing that knows where the caret is — and the server decides WHO can be
+// named, because that is a tenancy question and the browser must not be trusted with the answer.
+//
+// The hook sits on the textarea itself, so the form rebuilding on `defaults` (which replaces the
+// element) remounts it rather than leaving a listener on a textarea that is gone.
+const MentionBox = {
+  mounted() {
+    this.at = null;
+    this.open = false;
+    this.active = 0;
+    this.blurTimer = null;
+
+    this.el.addEventListener("input", () => this.probe());
+    this.el.addEventListener("click", () => this.probe());
+
+    // THE KEYBOARD IS HOW AN AUTOCOMPLETE IS USED. Without this, Enter typed a newline and left the
+    // half-written `@n` sitting in the note — the list was only ever clickable, which is not what
+    // anybody expects from a list that appears while they are typing.
+    this.el.addEventListener("keydown", (event) => {
+      // WHAT IS ON SCREEN DECIDES, not what this instance remembers. The composer rebuilds itself
+      // whenever `defaults` change, which remounts this hook with an empty memory while the list the
+      // server rendered is still standing — and a list you can see but cannot arrow through is worse
+      // than no list. If the rows are there, recover the caret position and carry on.
+      if (this.candidates().length === 0) return;
+
+      if (this.at === null) {
+        const found = mentionAt(this.el.value, this.el.selectionStart);
+        if (!found) return;
+        this.at = found.at;
+        this.open = true;
+      }
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        this.step(event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        this.pick(this.candidates()[this.active]);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.close();
+      }
+    });
+
+    this.el.addEventListener("keyup", (event) => {
+      if (!["Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"].includes(event.key)) this.probe();
+    });
+
+    // The mouse picks through the same path the keyboard does. `mousedown` rather than `click`, with
+    // the default prevented, so the caret never leaves the note — a click that blurs first is a
+    // click that closes the list it was aimed at.
+    this.onMouseDown = (event) => {
+      const option = event.target.closest("#pb-mention-list [data-handle]");
+      if (!option) return;
+      event.preventDefault();
+      this.pick(option);
+    };
+
+    document.addEventListener("mousedown", this.onMouseDown);
+    // A blur closes it, but not before a click on the list has landed — the click IS a blur. The
+    // timer is stored and cancelled on focus so a patch that relocates the textarea cannot close the
+    // list behind the author's back: LiveView hands focus straight back, and only a real click away
+    // leaves it gone.
+    this.el.addEventListener("blur", () => {
+      this.blurTimer = setTimeout(() => this.close(), 200);
+    });
+    this.el.addEventListener("focus", () => clearTimeout(this.blurTimer));
+
+  },
+
+  candidates() {
+    return Array.from(document.querySelectorAll("#pb-mention-list [data-handle]"));
+  },
+
+  // Which row Enter would take, painted where the reader is looking. Painting and remembering are
+  // one step on purpose: they drifted apart when only one of them ran, and a highlight that lies
+  // about what Enter will do is worse than no highlight.
+  step(by) {
+    const options = this.candidates();
+    if (options.length === 0) return;
+
+    this.active = (this.active + by + options.length) % options.length;
+    this.paint(options);
+    options[this.active].scrollIntoView({ block: "nearest" });
+  },
+
+  paint(options) {
+    options.forEach((option, index) =>
+      option.setAttribute("data-active", index === this.active ? "true" : "false"),
+    );
+  },
+
+  pick(option) {
+    if (!option) return;
+    this.insert(option.dataset.handle);
+    this.close();
+  },
+
+  probe() {
+    const found = mentionAt(this.el.value, this.el.selectionStart);
+
+    if (!found) return this.close();
+
+    this.at = found.at;
+    this.open = true;
+
+    // A NEW WORD IS A NEW LIST. The server re-renders it with the first row highlighted, so the
+    // hook has to agree — and repaint, because the rows on screen may be the previous answer still.
+    this.active = 0;
+    this.paint(this.candidates());
+
+    // One search per pause rather than one per keystroke: the list is a query, and holding a key
+    // down should not be a query per character.
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.pushEvent("mention_search", { q: found.query }), 120);
+  },
+
+  // The one place the list is finished with — writing the name does not close it, or `pick` would
+  // have nothing left to tell the server and the list would sit there over the note it just wrote.
+  close() {
+    clearTimeout(this.timer);
+    if (!this.open) return;
+    this.open = false;
+    this.at = null;
+    this.pushEvent("mention_close", {});
+  },
+
+  // Only the browser knows where the caret is, so only the browser can put the name where it goes.
+  insert(handle) {
+    if (this.at === null) return;
+
+    const written = withMention(this.el.value, this.at, this.el.selectionStart, handle);
+
+    this.el.value = written.value;
+    this.el.setSelectionRange(written.caret, written.caret);
+    this.el.focus();
+  },
+
+  destroyed() {
+    clearTimeout(this.timer);
+    clearTimeout(this.blurTimer);
+    document.removeEventListener("mousedown", this.onMouseDown);
   },
 };
 
@@ -1404,6 +1551,7 @@ export default {
   SidebarScroll,
   UploadSubmitsItself,
   MediaThumb,
+  MentionBox,
   DashboardGrid,
   DashboardTray,
   PbCanvas,
