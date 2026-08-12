@@ -34,12 +34,66 @@ import { PbCodeEditor } from "./pb_code_editor";
 const NODE_MIME = "application/x-pb-node";
 const TEMPLATE_MIME = "application/x-pb-template";
 
+// THE SERVER'S VERDICT FOR THE DRAG IN FLIGHT, in every window this editor draws in.
+//
+// `EditorSession.drop_hints/2` answers once per drag which parents will take the node. The reply
+// reaches ONE window — the chrome's for a palette card or a layers row, a frame's for a node picked
+// up on the canvas — and the pointer is free to travel into any of the others, so it is handed on
+// to all of them.
+//
+// Clearing has to reach exactly as far as setting, and it did not: every source nulled its own
+// `window.__pbDropHints` and left the frames holding the previous drag's map. Between the next
+// `dragstart` and the next reply landing — one round trip, and longer than that on a slow link — a
+// frame would answer from a verdict computed for a different node.
+//
+// The breakpoint view draws SIX frames of one document, which is why this is a sweep rather than a
+// hand-off to the frame the drag started in.
+function spreadHints(accepts, field = false) {
+  window.__pbDropHints = accepts;
+  window.__pbFieldDrag = !!field;
+
+  canvasFrames().forEach((frame) => {
+    frame.contentWindow.__pbDropHints = accepts;
+    frame.contentWindow.__pbFieldDrag = !!field;
+    markFieldDrag(frame.contentDocument, field);
+  });
+}
+
 // Whether a field is being dragged, on a frame's root element: the canvas outlines its forms while
 // it is set.
 function markFieldDrag(doc, field) {
   if (!doc || !doc.documentElement) return;
   if (field) doc.documentElement.setAttribute("data-pb-field-drag", "true");
   else doc.documentElement.removeAttribute("data-pb-field-drag");
+}
+
+function canvasFrames() {
+  return [...document.querySelectorAll('iframe[src*="builder-canvas"]')].filter(
+    (frame) => frame.contentWindow,
+  );
+}
+
+// A drag this window asked `drag_start` about is still in flight, so its `pb:drop-hints` reply is
+// still wanted. A reply that lands after the drag ended would mark every frame for a drag nobody is
+// making.
+let hintsAwaited = false;
+
+// THE END OF A DRAG, in every window this editor draws in, for the same reason the verdict is.
+//
+// `dragend` fires on the SOURCE. A palette card picked up in this document and released back over
+// the palette — or over the rail, or cancelled with Escape — fires it out here and nowhere else, so
+// a frame the pointer only passed THROUGH is never told the gesture is over. It opened every empty
+// container on the page when the pointer crossed in, and those floors, dashed edges and tints then
+// stood for the rest of the session, distorting the geometry the next drop is resolved from.
+//
+// So the end is broadcast the way the verdict is swept: `PbLayers` is reached through `pb:dragend`
+// already (it had this problem first), and `PbCanvas` listens for it inside each frame.
+function endDrag() {
+  hintsAwaited = false;
+  spreadHints(null);
+  window.__pbDragNode = null;
+  window.dispatchEvent(new Event("pb:dragend"));
+  canvasFrames().forEach((frame) => frame.contentWindow.dispatchEvent(new Event("pb:dragend")));
 }
 
 // THE DROPZONE IS THE SUBMIT, in the editor's Assets sheet. That sheet is 620px of overlay beside a
@@ -428,6 +482,104 @@ const PB_EDITABLE = (target) =>
   target &&
   (target.isContentEditable ||
     ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+
+const PbShortcuts = {
+  mounted() {
+    // Reload the CANVAS, not the editor: the frame's own location, so the panels, the drawer and the
+    // scroll position all survive. `src = src` is a no-op in some browsers when the URL is unchanged.
+    this.handleEvent("pb:reload-canvas", () => {
+      this.el
+        .querySelectorAll('iframe[src*="builder-canvas"]')
+        .forEach((frame) => frame.contentWindow?.location.reload());
+    });
+
+    // THE SERVER'S VERDICT, AND WHERE IT HAS TO END UP. `EditorSession.drop_hints/2` answers, once
+    // per drag, which parents will take the node — and both `BuilderLive` and `CanvasLive` push it.
+    // Nothing listened for either. Every assignment in this file set `__pbDropHints` to `null`, so
+    // the whole gesture ran on the optimistic fallback: the blue line offered parents the server was
+    // about to refuse, the drop was then relocated somewhere else, and the layers rail offered
+    // "inside" for a `<span>` a `<section>` cannot enter.
+    //
+    // A palette card and a layers row begin their drag in THIS document, so this is the copy the
+    // rail reads. The pointer, though, is going to arrive in a FRAME that never saw that dragstart
+    // and will never ask — so the answer is handed on to each of them as well.
+    this.handleEvent(
+      "pb:drop-hints",
+      ({ accepts, field }) => hintsAwaited && spreadHints(accepts, field),
+    );
+
+    this.onKey = (event) => {
+      // A HELD key auto-repeats about thirty times a second, and every one of these shortcuts is a
+      // document mutation: leaning on ⌘Z walks the whole undo stack off the end, on Delete removes a
+      // node per repeat, on ⌘S writes to the database per repeat. A shortcut is a press, not a rate.
+      if (event.repeat) return;
+
+      const shortcut = PB_SHORTCUTS(event);
+      if (!shortcut) return;
+      if (PB_EDITABLE(event.target) && shortcut !== "undo" && shortcut !== "redo") return;
+
+      event.preventDefault();
+      this.pushEvent("shortcut", { key: shortcut });
+    };
+
+    // The canvas cannot push to this LiveView, so it posts here instead.
+    this.onMessage = (event) => {
+      if (event.source === window || !event.data || event.data.pb !== true) return;
+      if (event.data.kind === "shortcut") this.pushEvent("shortcut", { key: event.data.key });
+      if (event.data.kind === "error") this.pushEvent("flash_error", { message: event.data.message });
+      if (event.data.kind === "info") this.pushEvent("flash_info", { message: event.data.message });
+      if (event.data.kind === "rail") this.pushEvent("open_rail", { action: event.data.action });
+
+      // A DRAG THAT BEGAN IN A FRAME, reported here because the layers rail is in THIS document and
+      // is where the pointer is heading. `drag` carries which node, so the rail stops offering the
+      // dragged row as a place to drop it; `hints` carries the server's verdict, so the rail stops
+      // guessing; `dragend` puts both back, since the `dragend` itself fires inside the frame and no
+      // listener out here would ever see it.
+      if (event.data.kind === "drag") {
+        window.__pbDragNode = event.data.node_id;
+        spreadHints(null);
+      }
+
+      // A MENU IN THE CHROME CANNOT SEE A CLICK IN THE CANVAS. `phx-click-away` walks THIS document
+      // for open menus and compares them against where the press started — and a press inside the
+      // frame is an event in another document that never reaches it. So the "..." menu, the preview
+      // and stage pickers and every other dropdown stayed open while you clicked the page behind
+      // them, and only a click on the chrome itself would shut them.
+      //
+      // Replayed as a real press on the BODY, which is in this document, is visible, and is outside
+      // every menu — so LiveView answers it exactly as it answers a click on empty chrome, and each
+      // of the 21 click-away bindings works without being named here.
+      //
+      // NOT ON THE FRAME ELEMENT. After click-away LiveView also runs the nearest `phx-click` above
+      // the target, and the frame sits inside `#pb-canvas-scroll`, whose `phx-click` is `place`: every
+      // press in the canvas sent it, so an armed palette component landed at the top of the page
+      // before the canvas could place it where it was clicked. Nothing binds a click above the body.
+      if (event.data.kind === "dismiss") {
+        document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+
+      if (event.data.kind === "hints") spreadHints(event.data.accepts, event.data.field);
+
+      if (event.data.kind === "dragend") endDrag();
+    };
+
+    // EVERY DRAG THAT BEGINS IN THE CHROME ENDS HERE, and nowhere else: `dragend` fires on the
+    // source, so a palette card or a layers row released over any surface reports to this document
+    // alone. One listener on the way out is what keeps the frames from being told by each source in
+    // turn — and from being forgotten by the next source that is added.
+    this.onDragEnd = () => endDrag();
+
+    window.addEventListener("keydown", this.onKey);
+    window.addEventListener("message", this.onMessage);
+    window.addEventListener("dragend", this.onDragEnd, true);
+  },
+  destroyed() {
+    window.removeEventListener("keydown", this.onKey);
+    window.removeEventListener("message", this.onMessage);
+    window.removeEventListener("dragend", this.onDragEnd, true);
+  },
+};
 
 // WHEN THE FRAME HAS ACTUALLY REPAINTED THE NEW DOCUMENT. Opening a draft replaces the tree in the
 // session and the frames re-render from a broadcast — no navigation, so `FrameLoader`'s `load` never
@@ -1557,6 +1709,7 @@ export default {
   MentionBox,
   DashboardGrid,
   DashboardTray,
+  PbShortcuts,
   PbCanvas,
   PbCodeEditor,
 };
