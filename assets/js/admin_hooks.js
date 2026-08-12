@@ -1832,6 +1832,162 @@ const PbPalettePrefs = {
   },
 };
 
+// The right-click menu, for a canvas node and for a layers row.
+//
+// It opens with NO round trip: the markup is static, so the hook stamps the node it was opened on
+// and pushes the action itself when something is chosen. That matters twice over — a menu that
+// waits on the server feels broken, and a patch arriving mid-gesture would otherwise be free to
+// replace the row the pointer is resting on.
+//
+// Both surfaces share one menu component; only the selector and the dataset key differ, and both
+// arrive as data attributes.
+const PbContextMenu = {
+  mounted() {
+    const doc = this.el.ownerDocument;
+    this.node = null;
+
+    this.close = () => {
+      this.el.hidden = true;
+      this.node = null;
+      this.unwatchFrames();
+    };
+
+    // Placed so the whole menu stays on screen: past the right edge it opens leftwards, past the
+    // bottom it opens upwards. Measured from the menu's own box rather than assumed, because the
+    // rail and the canvas are different widths.
+    //
+    // A viewport of ZERO is not a tiny viewport — it is a document that has not been laid out (a
+    // hidden tab, a headless pane). Flipping against it sends every menu to the top-left corner, so
+    // an unknown edge means no flip: the pointer's own position is already right.
+    this.open = (x, y) => {
+      this.el.hidden = false;
+
+      const box = this.el.getBoundingClientRect();
+      const width = doc.documentElement.clientWidth;
+      const height = doc.documentElement.clientHeight;
+
+      const left = width && x + box.width > width ? x - box.width : x;
+      const top = height && y + box.height > height ? y - box.height : y;
+
+      this.el.style.left = `${Math.max(6, left)}px`;
+      this.el.style.top = `${Math.max(6, top)}px`;
+      this.watchFrames();
+    };
+
+    this.onContext = (event) => {
+      const row = event.target.closest?.(this.el.dataset.target);
+      if (!row) return this.close();
+
+      event.preventDefault();
+      this.node = row.dataset[this.el.dataset.key];
+      this.el.dataset.hidden = row.dataset.pbHidden === "true" ? "true" : "false";
+      this.open(event.clientX, event.clientY);
+    };
+
+    this.mine = (event) => this.el.contains(event.target.closest?.("[data-action]") || event.target);
+
+    // DISMISSED ON POINTERDOWN, chosen on click. Waiting for the click means the menu is still up
+    // while the thing under it is already reacting; every menu in every editor closes on the way
+    // down. Capture, so a handler that stops the event on its way up cannot leave the menu stranded.
+    this.onDown = (event) => {
+      if (!this.el.hidden && !this.mine(event)) this.close();
+    };
+
+    this.onPick = (event) => {
+      const item = event.target.closest?.("[data-action]");
+      if (!item || !this.el.contains(item) || !this.node) return;
+
+      this.pushEvent("ctx", { action: item.dataset.action, node_id: this.node });
+      this.close();
+    };
+
+    this.onKey = (event) => event.key === "Escape" && this.close();
+
+    // THE CANVAS IS A DIFFERENT DOCUMENT. A click in the frame never reaches this one, so a menu
+    // opened over the layers rail stayed up while the author carried on working on the page — the
+    // one place they are most likely to click next. Same for the three frames of the side-by-side
+    // view. Listened to only while the menu is OPEN: a frame can be replaced at any time, and
+    // listeners left on a document that has gone are a leak the editor does not need.
+    this.watched = [];
+
+    this.watchFrames = () => {
+      this.unwatchFrames();
+
+      for (const frame of doc.querySelectorAll("iframe")) {
+        const inner = frame.contentDocument;
+        if (!inner) continue;
+
+        inner.addEventListener("pointerdown", this.close, true);
+        inner.addEventListener("wheel", this.close, true);
+        inner.addEventListener("scroll", this.close, true);
+        this.watched.push(inner);
+      }
+    };
+
+    this.unwatchFrames = () => {
+      for (const inner of this.watched) {
+        inner.removeEventListener("pointerdown", this.close, true);
+        inner.removeEventListener("wheel", this.close, true);
+        inner.removeEventListener("scroll", this.close, true);
+      }
+
+      this.watched = [];
+    };
+
+    // The canvas is a frame rendering the SITE's document — it has none of this stylesheet, so its
+    // right-clicks come here instead of drawing a second menu of their own. The point arrives in the
+    // frame's coordinates and has to be moved into ours, which is what the frame's own box gives.
+    //
+    // AND SCALED ON THE WAY, because the frame is CSS-zoomed: it keeps its real breakpoint width
+    // while being painted smaller, so a 1180px canvas at 30% reports a point up to 1180 wide inside
+    // a box 354 wide. Adding the two raw put the menu hundreds of pixels past the pointer, where
+    // `open`'s flip then pinned it to a viewport edge. The scale is the painted box over the frame's
+    // OWN viewport — the very space the point was measured in — so it is the ratio by definition,
+    // with nothing assumed about the style that caused it or how a zoomed element reports its width.
+    // A frame with no painted box — never laid out, a hidden tab — is left unscaled: the point on
+    // its own is closer than a NaN.
+    this.onMessage = (event) => {
+      if (!event.data || event.data.pb !== true || event.data.kind !== "context") return;
+
+      const frame = [...doc.querySelectorAll("iframe")].find(
+        (candidate) => candidate.contentWindow === event.source,
+      );
+      if (!frame) return;
+
+      const box = frame.getBoundingClientRect();
+      const inner = frame.contentWindow.innerWidth;
+      const scale = box.width && inner ? box.width / inner : 1;
+
+      this.node = event.data.id;
+      this.el.dataset.hidden = event.data.hidden ? "true" : "false";
+      this.open(box.left + event.data.x * scale, box.top + event.data.y * scale);
+    };
+
+    doc.addEventListener("contextmenu", this.onContext);
+    doc.addEventListener("pointerdown", this.onDown, true);
+    doc.addEventListener("click", this.onPick);
+    doc.addEventListener("keydown", this.onKey);
+    // A menu anchored to a point on screen is wrong the moment the page moves under it.
+    doc.addEventListener("scroll", this.close, true);
+    window.addEventListener("message", this.onMessage);
+    // And a menu is about a page you are still on: leaving takes it with you.
+    window.addEventListener("blur", this.close);
+  },
+
+  destroyed() {
+    const doc = this.el.ownerDocument;
+
+    doc.removeEventListener("contextmenu", this.onContext);
+    doc.removeEventListener("pointerdown", this.onDown, true);
+    doc.removeEventListener("click", this.onPick);
+    doc.removeEventListener("keydown", this.onKey);
+    doc.removeEventListener("scroll", this.close, true);
+    window.removeEventListener("message", this.onMessage);
+    window.removeEventListener("blur", this.close);
+    this.unwatchFrames();
+  },
+};
+
 const PbPaletteItem = {
   mounted() {
     this.onDragStart = (event) => {
@@ -2950,6 +3106,7 @@ export default {
   PbShortcuts,
   PbCanvas,
   PbPalettePrefs,
+  PbContextMenu,
   PbPaletteItem,
   PbPaletteHover,
   PbLayers,
