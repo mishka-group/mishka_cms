@@ -1608,6 +1608,543 @@ const PbCanvas = {
   },
 };
 
+// The layers tree reorders with SortableJS — a flat list per level, which is exactly what Sortable
+// is good at, and the same hook shape `DashboardGrid` already proves in this app.
+// The layers tree is NESTED, so a flat sortable could only ever reorder top-level siblings — which
+// is why dragging a row into another row did nothing. This resolves the drop the way the canvas
+// does: the top third of a row means "before it", the bottom third "after it", and the middle means
+// "inside it" when the row can take children. The server re-checks containment before it moves
+// anything, so a wrong guess is refused rather than trusted.
+const PbLayers = {
+  // The selected row is brought into view on every patch, smoothly and only when it is actually off
+  // screen: a tree of a few hundred rows is unreadable if selecting on the canvas leaves the rail
+  // wherever it happened to be, and a scroll that fires when the row is already visible is worse.
+  // Pushed by the server whenever the selection moves, rather than watched here: the rail is patched
+  // row by row and the hook's own `updated()` does not reliably fire for a change deep inside it,
+  // which is why selecting on the canvas used to leave the rail wherever it happened to be. A frame's
+  // grace covers the relayout when the same patch also opened a branch.
+  mounted() {
+    const ROW = "[data-layer-row]";
+
+    const ROOT_DROP = "[data-role='pb-root-drop']";
+
+    // NOTHING IN THIS RAIL MOVES WHILE A DRAG IS IN FLIGHT.
+    //
+    // The first version of this drew a "drop inside …" strip under the row the pointer was on, and
+    // that is a reflow: showing one is harmless, since it only moves what is BELOW its own row, but
+    // HIDING the previous one moves the row now under the pointer, and the strip was taller than a
+    // row. Every downward row-to-row step therefore pulled the new row up past the pointer and the
+    // line jumped from "before footer" to "inside footer" with the pointer standing still; reaching
+    // the end-of-page target moved it out from under the pointer altogether, which is a release that
+    // fires no `drop` event and says nothing.
+    //
+    // So the only things written here are attributes on boxes that already have their size: the
+    // marker (`data-drop`), which the row draws as a border edge, a tint and a chip, and the map
+    // (`data-can`), which it draws as an outline. Both are free.
+    const clear = () => {
+      const was = this.marked;
+      this.marked = null;
+      this.el.querySelectorAll("[data-drop]").forEach((el) => el.removeAttribute("data-drop"));
+
+      // The marked row gives up its "could take this" outline while it is the actual target — two
+      // treatments on one row is one too many, and the border is the more specific of them.
+      if (was && this.markedCan) was.setAttribute("data-can", "true");
+      this.markedCan = false;
+    };
+
+    // WHERE THIS DRAG COULD GO, painted once for the whole gesture rather than per pointer move.
+    //
+    // The verdict is the server's and arrives once (see `EditorSession.drop_hints/2`); until then
+    // the rail falls back to `data-container`, which is `Containment` answered about the target
+    // alone, so it says yes to rows this particular node cannot enter. That is why the sweep runs
+    // again when the hints land: the second pass takes back the rows the server refused.
+    const paintAccepts = () => {
+      const hints = window.__pbDropHints;
+      const dragged = draggingId();
+
+      this.witness = null;
+
+      this.el.querySelectorAll(ROW).forEach((row) => {
+        const id = row.dataset.layerRow;
+        const takes = hints ? hints[id] === true : row.dataset.container === "true";
+
+        if (takes && id !== dragged) {
+          row.setAttribute("data-can", "true");
+          this.witness = this.witness || row;
+        } else {
+          row.removeAttribute("data-can");
+        }
+      });
+
+      this.painted = hints ? "verdict" : "guess";
+    };
+
+    const unpaint = () => {
+      this.painted = null;
+      this.witness = null;
+      this.el.querySelectorAll("[data-can]").forEach((el) => el.removeAttribute("data-can"));
+    };
+
+    // IS THE MAP STILL THERE? `data-can` is written here and is in nothing the server renders, so any
+    // patch that touches a row takes it straight off again — a branch springing open, an autosave, a
+    // collaborator's edit, presence. Believing our own `painted` flag left the whole map gone for the
+    // rest of the gesture, on a rail the author is still trying to read.
+    //
+    // One row is kept as the witness rather than counting them all, because this is asked on every
+    // pointer move and the repaint it guards is a sweep of the entire rail.
+    const mapStanding = () =>
+      !!this.painted &&
+      (!this.witness || (this.witness.isConnected && this.witness.dataset.can === "true"));
+
+    // Re-painted when the verdict arrives, and only then: `dragover` fires on every pointer move and
+    // this is a sweep of the whole rail.
+    const repaintIfAnswered = () => {
+      if (this.painted === "guess" && window.__pbDropHints) paintAccepts();
+    };
+
+    // A ROW OPENS WHEN YOU REST ON IT, so a drag can reach what is shut underneath.
+    //
+    // `default_expanded/1` opens the roots and one level below them and nothing else, so a tree of
+    // any depth is mostly shut — a `<span>` four levels inside a `<p>` inside a `<div>` has no row
+    // to aim at at all. The only way to reach it was to let go of what you were holding, click your
+    // way down, and pick it up again, which is not a way to reach it.
+    //
+    // Opening is the SERVER's business: a shut branch is not in this document, so there is nothing
+    // to reveal here and `toggle_expand` is the only way to get it. That makes this the one hover in
+    // the editor that is allowed a round trip, and the dwell is what earns it — long enough that
+    // crossing a row on the way somewhere else opens nothing.
+    //
+    // It does not shift what the pointer is on. Children are rendered AFTER their row, so opening
+    // one moves only what is below it — the same property the drop marker relies on, and the reason
+    // this is safe mid-drag when revealing a strip above the pointer was not.
+    //
+    // Nothing is closed again. Closing on the way out would move rows while the pointer is between
+    // them, and a branch opened to drop into must still be open to see the drop land in it.
+    const SPRING = 600;
+
+    const stopSpring = () => {
+      clearTimeout(this.spring);
+      this.spring = null;
+      this.springing = null;
+    };
+
+    const springOpen = (row) => {
+      const id = row && row.dataset.open === "false" ? row.dataset.layerRow : null;
+      if (this.springing === id) return;
+
+      stopSpring();
+      if (!id || id === draggingId()) return;
+
+      this.springing = id;
+      this.spring = setTimeout(() => {
+        // Read again rather than trusting the row captured 600ms ago: a patch may have opened it,
+        // and `toggle_expand` TOGGLES — asking twice would shut the branch instead.
+        const still = this.el.querySelector(`[data-layer-row="${CSS.escape(id)}"]`);
+        if (!still || still.dataset.open !== "false") return;
+
+        // THE MAP IS REDRAWN AS THE BRANCH LANDS, not on the next pointer move. The patch that opens
+        // it takes `data-can` off every row it touches — the attribute is written here and is in
+        // nothing the server renders — and the rows that arrive with it were rendered after the
+        // sweep, so they carry none of it either. Waiting for the pointer to move would blink the
+        // whole map off at the exact moment the author is reading it to decide where to go next.
+        //
+        // A frame after the reply, because the reply and the diff are separate messages and only the
+        // frame boundary guarantees the new rows are in the document. `painted` is null once the
+        // gesture is over, which is what stops a late reply repainting a rail nobody is dragging on.
+        this.pushEvent("toggle_expand", { id }, () => {
+          if (this.painted) requestAnimationFrame(paintAccepts);
+        });
+      }, SPRING);
+    };
+
+    // AND THE RAIL SCROLLS AT ITS EDGES, which it never did. HTML drag does not scroll for you and
+    // there is no way to let go and grab again mid-gesture, so a target below the fold could not be
+    // reached — and a branch that has just sprung open is very often below the fold, because it just
+    // pushed itself there. `edgeVelocity` is the canvas's, unchanged: speed rises as the pointer
+    // nears the edge, so a nudge creeps and a push moves.
+    let scrollBy = 0;
+    let scrolling = null;
+
+    const runScroll = () => {
+      if (!scrollBy) return (scrolling = null);
+      this.el.scrollTop += scrollBy;
+      scrolling = requestAnimationFrame(runScroll);
+    };
+
+    const edgeScroll = (event) => {
+      const box = this.el.getBoundingClientRect();
+
+      // The canvas's 56px edge is a fraction of a full-height document; the rail is a panel, and on
+      // a short one — a narrow window, the assistant sheet open beside it — 56px at each end is the
+      // whole thing, so resting anywhere in it would scroll. Never more than a quarter per side.
+      const edge = Math.min(56, box.height / 4);
+
+      scrollBy = edgeVelocity(event.clientY - box.top, box.height, { edge });
+      if (scrollBy && !scrolling) scrolling = requestAnimationFrame(runScroll);
+    };
+
+    const stopScroll = () => {
+      scrollBy = 0;
+      if (scrolling) cancelAnimationFrame(scrolling);
+      scrolling = null;
+    };
+
+    // The end-of-page target is LAST in the rail, so showing it moves nothing above it — it is the
+    // one box here whose size may change, and it can only push the rail's own bottom padding down.
+    const tail = () => this.el.querySelector(ROOT_DROP);
+
+    const showTail = (show) => {
+      const el = tail();
+      if (!el) return;
+      if ((el.dataset.show === "true") === show) return;
+
+      if (show) el.dataset.show = "true";
+      else delete el.dataset.show;
+    };
+
+    // Nothing under the pointer is a target. Not the end of the gesture — the pointer is free to
+    // come back, so the map stays painted and the rail keeps scrolling at its edges.
+    const rest = () => {
+      stopSpring();
+      clear();
+    };
+
+    // The gesture is over, however it ended. `dragend` fires on the SOURCE, which for a palette card
+    // and for a canvas node is not in this rail at all, so this is also reachable from `window` and
+    // from the canvas's own message.
+    const finish = () => {
+      this.dragging = null;
+      spreadHints(null);
+      window.__pbDragNode = null;
+      stopSpring();
+      stopScroll();
+      clear();
+      unpaint();
+      showTail(false);
+    };
+
+    // ⌘-CLICK HOLDS A SECOND ROW, the same as on the canvas. Every row's name is a `phx-click`
+    // that SELECTS, which would throw away whatever was being held, so the modified click is
+    // caught before it reaches the button and re-sent as a mark.
+    this.onModifiedClick = (event) => {
+      if (!event.metaKey && !event.ctrlKey) return;
+
+      const row = event.target.closest(ROW);
+      if (!row) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      this.pushEvent("mark", { id: row.dataset.layerRow });
+    };
+
+    this.el.addEventListener("click", this.onModifiedClick, true);
+
+    // THE OTHER HALF OF `pb:reveal-layer`. `BuilderLive.expand_selected/2` has always pushed this
+    // whenever the selection moved, and nothing was listening — so selecting on the canvas marked
+    // the row and left the rail wherever it happened to be, exactly as the comment above says it
+    // must not. The event carries the id because the rail is patched row by row and `updated()` does
+    // not reliably fire for an attribute deep inside it.
+    this.handleEvent("pb:reveal-layer", ({ id }) => {
+      if (!id) return;
+
+      // A FRAME'S GRACE. The same patch often opens the branch this row is in, and measuring before
+      // that relayout lands reads the row's old box — usually zero-height, which scrolls to the
+      // wrong place or not at all.
+      requestAnimationFrame(() => {
+        const row = this.el.querySelector(`[data-layer-row="${CSS.escape(id)}"]`);
+        if (!row) return;
+
+        // THE ELEMENT THAT ACTUALLY SCROLLS, which is not always this one. The hook sits on the rail
+        // because that is where the rows are, but which box carries the overflow depends on how tall
+        // the panel is and what the layout above it does — and setting `scrollTop` on a box that does
+        // not scroll silently does nothing at all, which is the failure this whole handler exists to
+        // stop. So it is asked for rather than assumed: climb from the row until a box is found that
+        // both allows overflow and actually has some.
+        const scroller = (() => {
+          let el = row.parentElement;
+
+          while (el && el !== document.body) {
+            const overflow = getComputedStyle(el).overflowY;
+            const scrolls = overflow === "auto" || overflow === "scroll";
+            if (scrolls && el.scrollHeight > el.clientHeight) return el;
+            el = el.parentElement;
+          }
+
+          return this.el;
+        })();
+
+        // ONLY WHEN IT IS ACTUALLY OFF SCREEN. Scrolling a row that is already in view is motion the
+        // reader did not ask for, and on every selection it reads as the rail twitching.
+        const railBox = scroller.getBoundingClientRect();
+        const rowBox = row.getBoundingClientRect();
+        if (rowBox.top >= railBox.top && rowBox.bottom <= railBox.bottom) return;
+
+        // THE RAIL IS SCROLLED DIRECTLY, not through `scrollIntoView`. That call walks up and moves
+        // EVERY scrollport it finds on the way, so it also drags whatever the panel is sitting in;
+        // and its smooth mode is an animation the next LiveView patch cancels outright — which is
+        // precisely when this runs, because selecting is what patched the rail in the first place.
+        // Setting one container's own offset cannot be cancelled and cannot move anything else.
+        //
+        // Centred rather than `block: "nearest"`. Nearest moves the minimum, so a row reached from
+        // far away lands hard against an edge with no sight of what it sits among; the point of
+        // revealing it is to be able to read where it is.
+        const still =
+          document.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        const centred =
+          scroller.scrollTop + (rowBox.top - railBox.top) - (scroller.clientHeight - rowBox.height) / 2;
+
+        scroller.scrollTo({ top: Math.max(0, centred), behavior: still ? "auto" : "smooth" });
+      });
+    });
+
+    // A slot belongs to its component and only makes sense among its siblings, so it can be reordered
+    // but never dropped INSIDE another slot. Everything else may go inside one — a component in a
+    // slot is the whole point of slots.
+    //
+    // `window.__pbDropHints` is the server's verdict for this drag, asked for once at dragstart (see
+    // `EditorSession.drop_hints/2`). Without it the rail would offer "inside" for any row the markup
+    // calls a container, including the `<span>` a section cannot go into.
+    // THE HINT OVERRULES THE MARKUP, and only stands in for it until the hint arrives. `data-container`
+    // is `drop_target?/2`'s guess made while the row was rendered, before anything was picked up, and
+    // it used to be an EXTRA veto on top of the server's verdict — a row could be told yes by
+    // `Containment` and still refuse, which is what stopped a field being dropped into the `<.form>`
+    // the editor puts around every loose field: that form has no palette row, so `drop_target?/2`
+    // answered "no slots" for a component Phoenix itself declares one for, and the middle band of the
+    // row degraded to "after". The field landed beside the form instead of in it, every time.
+    //
+    // The canvas has always read them in this order (`nests` in `PbCanvas`); the rail now agrees.
+    //
+    // A slot belongs to its component and only makes sense among its siblings, so it can be reordered
+    // but never dropped INSIDE another slot. Everything else may go inside one — a component in a
+    // slot is the whole point of slots. A drag that began on the canvas has no row in this rail to
+    // read a kind off, and a node the rail cannot see is not a slot it needs to protect.
+    // WHICH NODE IS IN FLIGHT, wherever the gesture began. `this.dragging` is only ever set by this
+    // rail's own `dragstart`; a node picked up on the CANVAS starts in the iframe, and its id cannot
+    // be read off the dataTransfer until `drop` — the values are sealed for the whole gesture. So
+    // the canvas posts it up as it starts (see `toParent` in `PbCanvas`) and this is where the two
+    // answers meet. Without it the rail offered the dragged node's own row as a place to drop it.
+    const draggingId = () => this.dragging || window.__pbDragNode || null;
+
+    // WHAT THIS GESTURE IS CARRYING. Two questions, deliberately separate: whether the rail should
+    // take it at all, and whether taking it is a MOVE or a COPY. The second one is not cosmetic —
+    // HTML resolves a `dropEffect` the source did not allow to `none`, and a `none` drop is
+    // discarded silently, with no `drop` event to notice. Answering "move" to the palette's "copy"
+    // is exactly why a card could never be dropped on the tree.
+    const ours = (event) => {
+      if (this.dragging) return true;
+      const types = [...(event.dataTransfer?.types || [])];
+      return types.includes(NODE_MIME) || types.includes(TEMPLATE_MIME);
+    };
+
+    const isMove = (event) =>
+      !!this.dragging || [...(event.dataTransfer?.types || [])].includes(NODE_MIME);
+
+    const nests = (row) => {
+      const hints = window.__pbDropHints;
+      if (hints) {
+        if (hints[row.dataset.layerRow] !== true) return false;
+      } else if (row.dataset.container !== "true") {
+        return false;
+      }
+
+      const id = draggingId();
+      const dragged = id && this.el.querySelector(`[data-layer-row="${CSS.escape(id)}"]`);
+      return !(dragged?.dataset.kind === "slot" && row.dataset.kind === "slot");
+    };
+
+    // HALF THE ROW MEANS INSIDE, on a row that can be entered.
+    //
+    // It was the middle 40% — twelve pixels of a 31px row, and for a component with nineteen
+    // properties and a parsed template under it, about one per cent of what the thing occupies in
+    // the rail. The report was the plain truth: "so much property and etc listed instead of under
+    // something". Beside is still reachable at eight pixels a side, which is the band every other
+    // tree editor gives it, and the outer quarters are where the pointer naturally lands when the
+    // intent really is "between these two".
+    const zoneOf = (row, event) => {
+      const box = row.getBoundingClientRect();
+      const offset = (event.clientY - box.top) / box.height;
+      if (offset < 0.25) return "before";
+      if (offset > 0.75) return "after";
+
+      // A row that cannot be entered splits its middle rather than giving all of it to "after" —
+      // the pointer is in the top half, and "before" is what the top half has meant everywhere else.
+      return nests(row) ? "inside" : offset < 0.5 ? "before" : "after";
+    };
+
+    this.onDragStart = (event) => {
+      const row = event.target.closest(ROW);
+      if (!row) return;
+      this.dragging = row.dataset.layerRow;
+      spreadHints(null);
+      window.__pbDragNode = null;
+      showTail(true);
+      paintAccepts();
+      event.dataTransfer.effectAllowed = "move";
+      // Firefox will not start a drag without payload.
+      event.dataTransfer.setData("text/plain", this.dragging);
+      // What lets this row be dropped on the CANVAS, which cannot see this hook's state — see
+      // `NODE_MIME` at the top of the file.
+      event.dataTransfer.setData(NODE_MIME, this.dragging);
+      hintsAwaited = true;
+      this.pushEvent("drag_start", { node_id: this.dragging });
+    };
+
+    const accepts = (id) => {
+      const hints = window.__pbDropHints;
+      return !hints || !id || id === "root" || hints[id] !== false;
+    };
+
+    // Beside a row means inside that row's PARENT, so when the parent cannot hold this the answer is
+    // the same one the canvas gives: climb, and land after the branch it could not enter. Without it
+    // the rail marks a line the server would only have to relocate.
+    const resolve = (row, event) => {
+      const zone = zoneOf(row, event);
+      if (zone === "inside") return { row, zone };
+
+      let target = row;
+      let landing = zone;
+
+      while (!accepts(target.dataset.parentId)) {
+        const up = this.el.querySelector(`[data-layer-row="${CSS.escape(target.dataset.parentId)}"]`);
+        if (!up) break;
+        target = up;
+        landing = "after";
+      }
+
+      return { row: target, zone: landing };
+    };
+
+    const allow = (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = isMove(event) ? "move" : "copy";
+    };
+
+    this.onDragOver = (event) => {
+      if (!ours(event)) return rest();
+
+      // The rail has been entered, so the end-of-page target and the map of what will take this are
+      // worth drawing for the rest of the gesture. `dragenter` alone would miss a drag that began on
+      // a row of this very rail, and a drag that began anywhere else fires no `dragstart` here.
+      showTail(true);
+      edgeScroll(event);
+      if (mapStanding()) repaintIfAnswered();
+      else paintAccepts();
+
+      const end = event.target.closest(ROOT_DROP);
+      if (end) {
+        allow(event);
+        if (this.marked === end) return;
+        clear();
+        end.setAttribute("data-drop", "inside");
+        this.marked = end;
+        return;
+      }
+
+      const over = event.target.closest(ROW);
+
+      // A HIGHLIGHT THAT OUTLIVES THE TARGET IS A LIE, and this one was told constantly. Between a
+      // component's row and its children the rail draws its properties group, its parsed markup and
+      // its slot ghosts — for a `chelekom-modal`, about thirty-four rows that are not drop targets
+      // and never were. Drifting a few pixels down onto one of them left this handler through the
+      // early return WITHOUT clearing, so the row above kept its blue "inside" border while the
+      // browser had gone back to refusing the drop. The author let go over what looked like an
+      // accepting target and nothing happened at all — no `drop` event is fired when the last
+      // `dragover` was not cancelled, so there was not even a refusal to report.
+      if (!over || over.dataset.layerRow === draggingId()) return rest();
+
+      // Whatever the pointer is resting on, including a row it is only aiming BESIDE: `<ul>` refuses
+      // a paragraph and the `<li>` inside it takes one, so a row this drag cannot enter is still
+      // worth opening.
+      springOpen(over);
+      allow(event);
+
+      const { row, zone } = resolve(over, event);
+      if (this.marked === row && row.dataset.drop === zone) return;
+
+      clear();
+
+      // The marked row gives up its map outline while it IS the target. Two dashed treatments on one
+      // row read as two different offers; `clear()` puts it back when the pointer moves on.
+      this.markedCan = row.dataset.can === "true";
+      row.removeAttribute("data-can");
+      row.setAttribute("data-drop", zone);
+      this.marked = row;
+    };
+
+    // INSIDE MEANS LAST, not first. The canvas has always sent `9999` for it and `Tree`'s own
+    // `clamp/2` reads any index past the end as "append" — the rail sending `0` put a node dropped
+    // onto the middle of a row in front of everything already there, so dropping a field onto a
+    // form wrapper landed it above the fields that were there before it.
+    const landingFor = (row, zone) => {
+      const index = Number(row.dataset.index || 0);
+
+      return zone === "inside"
+        ? { parent_id: row.dataset.layerRow, index: 9999 }
+        : { parent_id: row.dataset.parentId, index: zone === "before" ? index : index + 1 };
+    };
+
+    this.onDrop = (event) => {
+      // WHAT IS BEING DROPPED, read in the one place it is legible. A node's id and a palette card's
+      // template are both sealed until now; a node is a MOVE and a card is an INSERT, and the server
+      // tells them apart by whether `node_id` is on the payload — see `EditorSession.drop_kind/1`.
+      const node = this.dragging || event.dataTransfer.getData(NODE_MIME);
+      const template = node ? "" : event.dataTransfer.getData(TEMPLATE_MIME);
+      if (!node && !template) return finish();
+
+      const end = event.target.closest(ROOT_DROP);
+      const over = end ? null : event.target.closest(ROW);
+      if (!end && (!over || over.dataset.layerRow === node)) return finish();
+
+      const { row, zone } = end ? {} : resolve(over, event);
+      const landing = end ? { parent_id: "root", index: 9999 } : landingFor(row, zone);
+
+      event.preventDefault();
+      this.pushEvent("drop", node ? { node_id: node, ...landing } : { template, ...landing });
+      finish();
+    };
+
+    // `dragend` fires on the SOURCE of the gesture, and for two of the three surfaces that is not in
+    // this rail: a palette card is elsewhere in this document, and a canvas node is in the iframe.
+    // Bound on `window` for the first, reached through `pb:dragend` for the second — without both,
+    // a card picked up and dropped somewhere else left the rail's strips standing open.
+    this.onDragEnd = () => finish();
+
+    // `dragleave` bubbles out of every row the pointer crosses, so clearing on all of them made the
+    // marker blink for the whole drag. Only leaving the rail itself clears it.
+    //
+    // The end-of-page target stays open. The pointer that just left is on its way to the canvas and
+    // may well come back, and closing it costs the rail its own height twice for nothing.
+    this.onDragLeave = (event) => {
+      if (event.relatedTarget && this.el.contains(event.relatedTarget)) return;
+      stopScroll();
+      rest();
+    };
+
+    this.el.addEventListener("dragstart", this.onDragStart);
+    // Entering a row has to be accepted as well, or a drop that lands in the same motion that
+    // crossed into it is discarded — the same rule the canvas needs.
+    this.el.addEventListener("dragenter", this.onDragOver);
+    this.el.addEventListener("dragover", this.onDragOver);
+    this.el.addEventListener("drop", this.onDrop);
+    this.el.addEventListener("dragleave", this.onDragLeave);
+    window.addEventListener("dragend", this.onDragEnd, true);
+    window.addEventListener("pb:dragend", this.onDragEnd);
+  },
+  destroyed() {
+    this.el.removeEventListener("click", this.onModifiedClick, true);
+    this.el.removeEventListener("dragstart", this.onDragStart);
+    this.el.removeEventListener("dragenter", this.onDragOver);
+    this.el.removeEventListener("dragover", this.onDragOver);
+    this.el.removeEventListener("drop", this.onDrop);
+    this.el.removeEventListener("dragleave", this.onDragLeave);
+    window.removeEventListener("dragend", this.onDragEnd, true);
+    window.removeEventListener("pb:dragend", this.onDragEnd);
+    // A pending spring would ask a LiveView that is gone to open a row that is gone.
+    clearTimeout(this.spring);
+  },
+};
+
 // The editor's code boxes; the module itself is loaded on demand — see `pb_code_editor.js`.
 
 // A number field the server bounds, bounded on the client too. The gear panel it lives in is
@@ -1711,5 +2248,6 @@ export default {
   DashboardTray,
   PbShortcuts,
   PbCanvas,
+  PbLayers,
   PbCodeEditor,
 };
