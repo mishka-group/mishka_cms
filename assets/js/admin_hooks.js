@@ -19,6 +19,7 @@ import {
   indicatorBox,
 } from "./pb_drop";
 import { mentionAt, withMention } from "./pb_mention";
+import { PbCodeEditor } from "./pb_code_editor";
 
 // WHAT A DRAG IS CARRYING, readable while it is still in flight.
 //
@@ -1455,6 +1456,8 @@ const PbCanvas = {
   },
 };
 
+// The editor's code boxes; the module itself is loaded on demand — see `pb_code_editor.js`.
+
 // A number field the server bounds, bounded on the client too. The gear panel it lives in is
 // `phx-update="ignore"`, so once rendered its inputs are never patched again: a value the server
 // clamps is stored clamped while the field keeps showing what was typed, for the rest of the
@@ -1555,4 +1558,5 @@ export default {
   DashboardGrid,
   DashboardTray,
   PbCanvas,
+  PbCodeEditor,
 };

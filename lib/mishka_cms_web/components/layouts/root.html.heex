@@ -136,6 +136,18 @@
     </script>
     <script :if={assigns[:live_tailwind]} src={~p"/assets/js/vendor/tailwind-browser.js"}>
     </script>
+    <%!-- AN ADDRESS, NOT A SCRIPT. CodeMirror and its three grammars are 262 KB gzipped — bigger than
+         the rest of the admin JS together — and they are wanted only once a code box is actually on
+         screen, which on most visits to the builder never happens. So the layout publishes where the
+         bundle lives and `pb_code_editor.js` fetches it on the first mount of an editor.
+
+         It is a meta tag because the URL has to survive `mix phx.digest`, and `~p` is what knows the
+         digested name — the LiveView that renders the drawer cannot use it. --%>
+    <meta
+      :if={assigns[:code_editor]}
+      name="pb-code-editor-src"
+      content={~p"/assets/js/code_editor.js"}
+    />
 
     <% js =
       MishkaInstaller.Event.Hook.call("RootHtml.InlineScript", %{js: nil, assigns: assigns}).js %>
