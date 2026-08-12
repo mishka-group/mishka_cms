@@ -20,6 +20,14 @@ import {
 } from "./pb_drop";
 import { mentionAt, withMention } from "./pb_mention";
 import { PbCodeEditor } from "./pb_code_editor";
+import {
+  byRecency,
+  favourites,
+  noteUse,
+  recents,
+  shows,
+  toggleFavourite,
+} from "./pb_prefs";
 
 // WHAT A DRAG IS CARRYING, readable while it is still in flight.
 //
@@ -426,6 +434,67 @@ const DashboardTray = {
 // ordinary LiveView binding, because the document lives on the server. These cover the parts a
 // server genuinely cannot do — pointer geometry, key handling, and bridging the canvas iframe.
 // ---------------------------------------------------------------------------------------------
+
+// A horizontal strip you can pan by dragging it, for the palette's category chips. The row is
+// deliberately scrollbar-less — a scrollbar under a row of chips eats a line of pixels and reads as
+// a defect — so without this the overflow would be reachable by wheel alone.
+//
+// A drag that never really moved is left alone so the chip under the pointer still receives its
+// click; only past a few pixels does this take over and suppress it.
+const PbDragScroll = {
+  mounted() {
+    this.onDown = (event) => {
+      if (event.button !== 0) return;
+      this.start = { x: event.clientX, left: this.el.scrollLeft };
+      this.moved = false;
+      this.el.style.cursor = "grabbing";
+    };
+
+    this.onMove = (event) => {
+      if (!this.start) return;
+      const dx = event.clientX - this.start.x;
+      if (Math.abs(dx) <= 3) return;
+
+      // Capture is taken only once the gesture has become a DRAG. Taking it on pointerdown made
+      // every pointerup land on this row instead of the chip under the cursor, and the browser
+      // fires `click` on the nearest common ancestor of the two — so the chip never got one and the
+      // category filter, the frame row and the assistant's starter chips all looked dead.
+      if (!this.moved) {
+        this.moved = true;
+        this.el.setPointerCapture?.(event.pointerId);
+      }
+
+      this.el.scrollLeft = this.start.left - dx;
+    };
+
+    this.onUp = (event) => {
+      if (!this.start) return;
+      this.start = null;
+      this.el.style.cursor = "";
+      if (this.moved) this.el.releasePointerCapture?.(event.pointerId);
+    };
+
+    this.onClick = (event) => {
+      if (!this.moved) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.moved = false;
+    };
+
+    this.el.addEventListener("pointerdown", this.onDown);
+    this.el.addEventListener("pointermove", this.onMove);
+    this.el.addEventListener("pointerup", this.onUp);
+    this.el.addEventListener("pointercancel", this.onUp);
+    this.el.addEventListener("click", this.onClick, true);
+  },
+  destroyed() {
+    this.el.removeEventListener("pointerdown", this.onDown);
+    this.el.removeEventListener("pointermove", this.onMove);
+    this.el.removeEventListener("pointerup", this.onUp);
+    this.el.removeEventListener("pointercancel", this.onUp);
+    this.el.removeEventListener("click", this.onClick, true);
+  },
+};
 
 // THE EDITOR'S KEYBOARD, in one place because two hooks read it — `PbShortcuts` on the chrome and
 // `PbCanvas` inside the frame, which cannot see the chrome's listener at all.
@@ -1608,6 +1677,186 @@ const PbCanvas = {
   },
 };
 
+// A palette card is a drag source. The payload is the same HEEx template click-to-place inserts, so
+// both gestures go through one server op and neither can drift from the other.
+// A star and a recent row, owned entirely by the browser.
+//
+// 177 tiles is a lot to scroll past to reach the four you actually use, and which four they are is
+// not the site's data — it is one author's habit. So nothing here reaches the server: no event, no
+// assign, no re-render of the tile that was starred. The rules live in `pb_prefs.js`, which is
+// where they are tested; this only reads the DOM and writes classes.
+const PbPalettePrefs = {
+  mounted() {
+    this.mode = null;
+
+    this.lists = () => ({
+      fav: favourites(window.localStorage, this.el.dataset.scope),
+      recent: recents(window.localStorage, this.el.dataset.scope),
+    });
+
+    // ONE LISTENER, NOT 177. The tiles are re-rendered by every search keystroke and every category
+    // change, so anything bound per card would have to be rebound on each patch; delegation from
+    // the panel survives all of it.
+    this.onClick = (event) => {
+      const chip = event.target.closest("[data-pb-prefchip]");
+      if (chip) {
+        event.preventDefault();
+        const next = chip.dataset.pbPrefchip;
+        this.mode = this.mode === next ? null : next;
+        return this.apply();
+      }
+
+      // ONE CHIP AT A TIME. Starred and Recent sit in the same row as the categories and are styled
+      // the same, so a row showing two chips lit reads as broken — and the obvious way back to
+      // everything, clicking "all", appeared to do nothing at all while a star filter was still on.
+      // The category is the server's, the facet is ours; picking a category drops ours.
+      if (event.target.closest("[phx-value-cat]")) {
+        this.mode = null;
+        return this.apply();
+      }
+
+      const star = event.target.closest("[data-role='pb-fav']");
+      if (star) {
+        // The star sits ON the tile, and the tile places the component. Without both of these,
+        // starring something places it.
+        event.preventDefault();
+        event.stopPropagation();
+        toggleFavourite(window.localStorage, this.el.dataset.scope, this.nameOf(star));
+        return this.apply();
+      }
+
+      // Anything else that reaches a tile is an intent to place — click-to-arm and drag both count,
+      // and both go through here.
+      const cell = event.target.closest("[data-role='pb-compcell']");
+      if (cell) this.remember(cell);
+    };
+
+    this.onDragStart = (event) => {
+      const cell = event.target.closest?.("[data-role='pb-compcell']");
+      if (cell) this.remember(cell);
+    };
+
+    this.nameOf = (node) => node.closest("[data-role='pb-compcell']")?.dataset.name;
+
+    this.remember = (cell) => {
+      noteUse(window.localStorage, this.el.dataset.scope, cell.dataset.name);
+      if (this.mode) this.apply();
+    };
+
+    this.apply = () => {
+      const lists = this.lists();
+
+      for (const chip of this.el.querySelectorAll("[data-pb-prefchip]")) {
+        chip.dataset.on = String(chip.dataset.pbPrefchip === this.mode);
+      }
+
+      let showing = 0;
+
+      // `style.display`, not the `hidden` attribute: the tile carries Tailwind's `block`, and a
+      // class beats the zero-specificity `[hidden]` rule every time — the tile would stay on screen
+      // and the filter would look broken.
+      for (const cell of this.el.querySelectorAll("[data-role='pb-compcell']")) {
+        const name = cell.dataset.name;
+        const visible = shows(name, this.mode, lists);
+
+        cell.style.display = visible ? "" : "none";
+        if (visible) showing++;
+
+        const star = cell.querySelector("[data-role='pb-fav']");
+        if (star) star.dataset.on = String(lists.fav.includes(name));
+      }
+
+      // A heading over nothing reads as a section that failed to load, so a group whose every tile
+      // is hidden goes with them.
+      for (const group of this.el.querySelectorAll("[data-role='pb-comps'] > section")) {
+        const alive = [...group.querySelectorAll("[data-role='pb-compcell']")].some(
+          (cell) => cell.style.display !== "none",
+        );
+        group.style.display = alive ? "" : "none";
+      }
+
+      // Recency is the whole point of the row — category order is no order at all for "what did I
+      // just use". Re-ordered in place rather than re-rendered, so the tiles keep their identity.
+      if (this.mode === "recent") this.sortByRecency(lists.recent);
+
+      this.emptyState(showing);
+      this.count(showing);
+    };
+
+    this.sortByRecency = (recent) => {
+      const board = this.el.querySelector("[data-role='pb-comps']");
+      if (!board) return;
+
+      const cells = [...this.el.querySelectorAll("[data-role='pb-compcell']")].filter(
+        (cell) => cell.style.display !== "none",
+      );
+      const order = byRecency(
+        cells.map((cell) => cell.dataset.name),
+        recent,
+      );
+
+      for (const name of order) {
+        const cell = cells.find((entry) => entry.dataset.name === name);
+        if (cell) cell.parentElement.appendChild(cell);
+      }
+    };
+
+    this.emptyState = (showing) => {
+      for (const mode of ["fav", "recent"]) {
+        const note = this.el.querySelector(`#pb-palette-empty-${mode}`);
+        if (note) note.hidden = !(this.mode === mode && showing === 0);
+      }
+    };
+
+    // The badge counts what is on screen. Written here rather than by the server, which cannot know
+    // — and re-applied on every patch, because the server writes the unfiltered number back.
+    this.count = (showing) => {
+      const badge = this.el.querySelector("[data-role='pb-count']");
+      if (badge) badge.textContent = showing;
+    };
+
+    this.el.addEventListener("click", this.onClick, true);
+    this.el.addEventListener("dragstart", this.onDragStart, true);
+    this.apply();
+  },
+
+  // Every search keystroke and category change replaces the tiles, and the fresh ones arrive with
+  // no star on them.
+  updated() {
+    this.apply();
+  },
+
+  destroyed() {
+    this.el.removeEventListener("click", this.onClick, true);
+    this.el.removeEventListener("dragstart", this.onDragStart, true);
+  },
+};
+
+const PbPaletteItem = {
+  mounted() {
+    this.onDragStart = (event) => {
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData(TEMPLATE_MIME, this.el.dataset.template);
+      event.dataTransfer.setData("text/plain", this.el.dataset.template);
+      // Asked here, where the template is still readable. The canvas gets the answer through the
+      // `phx:pb:drop-hints` listener above; by the time the pointer reaches the frame it has it.
+      spreadHints(null);
+      // Nothing is being MOVED, so no row of the rail is off limits. Left over from a previous
+      // gesture this would have made the rail refuse one arbitrary row for the whole drag.
+      window.__pbDragNode = null;
+      hintsAwaited = true;
+      this.pushEvent("drag_start", { template: this.el.dataset.template });
+    };
+
+    // The end of this card's drag is `PbShortcuts`' to announce — it holds the one `dragend`
+    // listener this document needs, and it reaches the frames as well as this state.
+    this.el.addEventListener("dragstart", this.onDragStart);
+  },
+  destroyed() {
+    this.el.removeEventListener("dragstart", this.onDragStart);
+  },
+};
+
 // The layers tree reorders with SortableJS — a flat list per level, which is exactly what Sortable
 // is good at, and the same hook shape `DashboardGrid` already proves in this app.
 // The layers tree is NESTED, so a flat sortable could only ever reorder top-level siblings — which
@@ -1615,6 +1864,241 @@ const PbCanvas = {
 // does: the top third of a row means "before it", the bottom third "after it", and the middle means
 // "inside it" when the row can take children. The server re-checks containment before it moves
 // anything, so a wrong guess is refused rather than trusted.
+// WHAT A CARD WILL PUT ON THE PAGE, shown while the pointer rests on it.
+//
+// The hook lives on the PANEL, not on the cards: 151 cards would mean 151 hooks, and the panel is
+// the thing that has to survive the palette re-rendering underneath it. Card hovers are caught by
+// delegation on the scroll container.
+//
+// Everything about showing it is client-side and deliberately so — the editor's rule is that hover
+// never becomes a round trip. The server is asked exactly once per component: after the pointer has
+// settled for DWELL, and never again for a template already in `seen`, so sweeping the palette a
+// second time costs nothing at all.
+const PbPaletteHover = {
+  mounted() {
+    // Long enough that crossing the grid on the way to a card lower down opens nothing. A palette is
+    // two columns of small targets, so at 380ms a diagonal sweep flashed three previews the reader
+    // never asked for; the panel now waits until the pointer has settled.
+    const DWELL = 750;
+    const MARGIN = 12;
+    const DESIGN = 760;
+    const SCALE = 0.5;
+    const MIN_H = 90;
+    const MAX_H = 300;
+    const CARD = "[data-role='pb-compcell']";
+
+    this.seen = new Map();
+    this.timer = null;
+    this.current = null;
+
+    const head = this.el.querySelector("[data-role='pb-card-preview-head']");
+    const name = this.el.querySelector("[data-role='pb-card-preview-name']");
+    const badgeGlobal = this.el.querySelector("[data-role='pb-card-preview-global']");
+    const badgeTenant = this.el.querySelector("[data-role='pb-card-preview-tenant']");
+    const note = this.el.querySelector("[data-role='pb-card-preview-note']");
+    const frame = this.el.querySelector("[data-role='pb-card-preview-frame']");
+    const body = this.el.querySelector("[data-role='pb-card-preview-body']");
+
+    // Laid out at 760px and shown at half that. Transform rather than a narrow viewport: a component
+    // that changes shape below its breakpoint would otherwise preview as its mobile self, which is
+    // not what dropping it on a desktop page would give you.
+    //
+    // The panel then takes the HEIGHT of what was drawn, because a fixed box is wrong in both
+    // directions — an alert leaves three quarters of it empty, and a pricing table is cut off. The
+    // frame is same-origin so its height can simply be read; it cannot run scripts (no
+    // `allow-scripts`), so there is nothing inside it that could use that.
+    const fit = () => {
+      const height = Math.min(MAX_H, Math.max(MIN_H, Math.ceil(drawnHeight() * SCALE)));
+
+      frame.style.height = `${Math.ceil(height / SCALE)}px`;
+      body.style.height = `${height}px`;
+    };
+
+    // MEASURED WITH THE FRAME COLLAPSED, which is the whole trick: an iframe's body stretches to the
+    // iframe, so asking a full-height frame how tall its content is answers with the frame's own
+    // height. Collapse it first and `scrollHeight` is the content again.
+    const drawnHeight = () => {
+      frame.style.width = `${DESIGN}px`;
+      frame.style.transform = `scale(${SCALE})`;
+      frame.style.height = "0px";
+
+      try {
+        const doc = frame.contentDocument;
+        return (doc && doc.body && doc.body.scrollHeight) || MIN_H / SCALE;
+      } catch (_opaque) {
+        return MIN_H / SCALE;
+      }
+    };
+
+    // Empty of everything a person could see: no words, nothing drawn, and no picture or icon that
+    // would have height of its own. An empty box is indistinguishable from a preview that failed,
+    // so it is worth one measurement to say which it is.
+    const blank = () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc || !doc.body) return false;
+        if (doc.body.innerText.trim() !== "") return false;
+        if (doc.body.querySelector("img,svg,video,canvas,iframe,input,select,textarea,hr")) {
+          return false;
+        }
+
+        // Above this it is a box with real size — a spacer or a panel — and showing it is fair. The
+        // empty containers this catches come out at the height of their own padding.
+        return drawnHeight() < 48;
+      } catch (_opaque) {
+        return false;
+      }
+    };
+
+    const place = (card) => {
+      const box = card.getBoundingClientRect();
+      const panel = this.el.getBoundingClientRect();
+      const top = Math.min(
+        Math.max(MARGIN, box.top + box.height / 2 - panel.height / 2),
+        window.innerHeight - panel.height - MARGIN
+      );
+
+      // Beside the palette, and on whichever side has room — a right-hand rail on a narrow window
+      // would otherwise push it off screen.
+      const right = box.right + MARGIN;
+      const left = right + panel.width < window.innerWidth - MARGIN ? right : box.left - panel.width - MARGIN;
+
+      this.el.style.top = `${Math.max(MARGIN, top)}px`;
+      this.el.style.left = `${Math.max(MARGIN, left)}px`;
+    };
+
+    const draw = (card, entry) => {
+      if (entry && entry.html) {
+        note.textContent = "";
+        frame.srcdoc = entry.html;
+
+        // Sized and shown only once the markup is really there: measuring a frame mid-parse gives
+        // the empty document's height, and the panel would settle to its minimum and then jump.
+        frame.onload = () => {
+          // A COMPONENT THAT DRAWS NOTHING SAYS SO. A flash group with no flashes in it, a list with
+          // no items — these render to an empty box, and an empty box is indistinguishable from a
+          // preview that failed. Saying which it is costs one measurement.
+          if (blank()) {
+            frame.removeAttribute("srcdoc");
+            frame.style.opacity = "0";
+            body.style.height = `${MIN_H}px`;
+            note.textContent = "Nothing to show until this has content of its own.";
+            place(card);
+            return;
+          }
+
+          fit();
+          place(card);
+          frame.style.opacity = "1";
+        };
+      } else {
+        frame.removeAttribute("srcdoc");
+        frame.style.opacity = "0";
+        body.style.height = `${MIN_H}px`;
+        note.textContent = (entry && entry.note) || "Drawing…";
+        place(card);
+      }
+    };
+
+    // The card's own words lead, with the component's real name behind them, because the palette
+    // labels a card `Overlay` and the thing a template names is `chelekom-overlay` — an author
+    // reading a preview wants the first and an author writing HEEx wants the second.
+    //
+    // The scope badge is here because it used to be in the native tooltip, and that tooltip is gone:
+    // two floating layers for one hover is one too many. Both badges are in the markup so their
+    // colours stay in the template rather than being rebuilt from strings in here.
+    const show = (card, entry) => {
+      const global = card.dataset.scope !== "tenant";
+
+      head.textContent = card.dataset.label || card.dataset.name || "";
+      name.textContent = card.dataset.name || "";
+      badgeGlobal.hidden = !global;
+      badgeTenant.hidden = global;
+
+      this.el.hidden = false;
+      draw(card, entry);
+    };
+
+    const hide = () => {
+      clearTimeout(this.timer);
+      this.timer = null;
+      this.current = null;
+      this.card = null;
+      this.el.hidden = true;
+      frame.removeAttribute("srcdoc");
+      frame.style.opacity = "0";
+    };
+
+    this.onOver = (event) => {
+      const card = event.target.closest(CARD);
+      if (!card) return;
+
+      const button = card.querySelector("[data-template]");
+      const template = button && button.dataset.template;
+      if (!template) return;
+      if (this.current === template) return;
+
+      clearTimeout(this.timer);
+      this.current = template;
+
+      this.timer = setTimeout(() => {
+        if (this.current !== template) return;
+
+        const entry = this.seen.get(template);
+        this.card = card;
+        show(card, entry);
+
+        // ASKED ONCE. A component already rendered this session is drawn from `seen`, so moving back
+        // along a row of cards sends nothing.
+        if (!entry) this.pushEvent("preview_card", { template });
+      }, DWELL);
+    };
+
+    this.onOut = (event) => {
+      const card = event.target.closest(CARD);
+      if (!card) return;
+      if (event.relatedTarget && event.relatedTarget.closest(CARD) === card) return;
+      hide();
+    };
+
+    // A DRAG IS NOT A HOVER. The moment a card is picked up the preview is in the way of the thing
+    // it was describing, and it must not reappear while the pointer crosses other cards.
+    this.onDrag = () => hide();
+
+    this.onArrive = ({ detail }) => {
+      if (!detail || !detail.template) return;
+
+      this.seen.set(detail.template, { html: detail.html, note: detail.note });
+      if (this.current !== detail.template || this.el.hidden) return;
+
+      const card = this.card;
+      if (card) draw(card, this.seen.get(detail.template));
+    };
+
+    this.palette = document.querySelector("[data-role='pb-comps']");
+    if (this.palette) {
+      this.palette.addEventListener("mouseover", this.onOver);
+      this.palette.addEventListener("mouseout", this.onOut);
+      this.palette.addEventListener("scroll", this.onDrag, { passive: true });
+    }
+
+    window.addEventListener("dragstart", this.onDrag, true);
+    window.addEventListener("phx:pb:card-preview", this.onArrive);
+  },
+  destroyed() {
+    clearTimeout(this.timer);
+
+    if (this.palette) {
+      this.palette.removeEventListener("mouseover", this.onOver);
+      this.palette.removeEventListener("mouseout", this.onOut);
+      this.palette.removeEventListener("scroll", this.onDrag);
+    }
+
+    window.removeEventListener("dragstart", this.onDrag, true);
+    window.removeEventListener("phx:pb:card-preview", this.onArrive);
+  },
+};
+
 const PbLayers = {
   // The selected row is brought into view on every patch, smoothly and only when it is actually off
   // screen: a tree of a few hundred rows is unreadable if selecting on the canvas leaves the rail
@@ -2462,8 +2946,12 @@ export default {
   MentionBox,
   DashboardGrid,
   DashboardTray,
+  PbDragScroll,
   PbShortcuts,
   PbCanvas,
+  PbPalettePrefs,
+  PbPaletteItem,
+  PbPaletteHover,
   PbLayers,
   PbCodeEditor,
 };
