@@ -2147,6 +2147,220 @@ const PbLayers = {
 
 // The editor's code boxes; the module itself is loaded on demand — see `pb_code_editor.js`.
 
+// THE FRAME IS BUSY, AND THE PAGE SAYS SO WHILE IT IS.
+//
+// One overlay covers both moments a canvas frame is not showing what was asked for: the FIRST load,
+// where there is nothing underneath yet, and every LIVE swap after it — opening a draft, reverting a
+// version — where the frame never navigates and no `load` event ever fires again.
+//
+// It was two, and they answered the same question differently: the first with a bare spinner and no
+// way to tell a slow render from a dead one, the second with a label and a running clock.
+//
+// State is module-level rather than per-hook because the breakpoint view has SIX frames all showing
+// the same document: one load, or one swap, covers all of them and each has its own overlay.
+const PB_FRAME_BUSY = {
+  since: 0,
+  revision: null,
+  timer: null,
+  deadline: null,
+  detail: null,
+  stages: [],
+
+  overlays() {
+    return document.querySelectorAll("[data-role='pb-frame-busy']");
+  },
+
+  // WHAT A LONG WAIT IS TOLD. There is no percentage to report — the server does not know how far
+  // through a render it is — so the honest escalation is to say more as more time passes and to stop
+  // implying that the usual wait is what is happening. Silence past ten seconds reads as a hang, and
+  // a spinner that has not changed in a minute reads as a bug.
+  stagesFor(label) {
+    return [
+      { after: 0, text: label },
+      { after: 6000, text: "Still working — this document is a large one." },
+      { after: 15000, text: "Taking longer than usual. The server has not answered yet." },
+      { after: 40000, text: "Still waiting. Nothing has failed, but something is very slow." },
+    ];
+  },
+
+  start(label, revision, { settleOnLoad = false } = {}) {
+    this.revision = revision === undefined ? null : String(revision);
+    this.stages = this.stagesFor(label || "Loading…");
+    this.since = Date.now();
+
+    for (const overlay of this.overlays()) {
+      overlay.hidden = false;
+      const detail = overlay.querySelector("[data-role='pb-busy-detail']");
+      if (detail) detail.hidden = true;
+    }
+
+    // HELD BACK FOR HALF A SECOND. A load that finishes quickly would otherwise flash a sentence and
+    // a clock at somebody with no time to read either, which reads as a glitch rather than as
+    // progress. The spinner is up from the first frame; the words arrive only if there is a wait
+    // worth explaining.
+    clearTimeout(this.detail);
+    this.detail = setTimeout(() => this.reveal(), 500);
+
+    this.tick();
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.tick(), 200);
+
+    // A LOST SIGNAL MUST NOT LEAVE THE EDITOR COVERED — but only where there is something worth
+    // uncovering. On a swap the old document is still underneath, so giving up after fifteen seconds
+    // shows the reader something real. On a FIRST load there is nothing under the overlay but a
+    // blank iframe, and pulling it away to reveal a white void turns a slow load into what looks
+    // like a broken one. There it waits, and says so in stronger words as it goes.
+    clearTimeout(this.deadline);
+    this.deadline = settleOnLoad ? null : setTimeout(() => this.stop(), 15000);
+  },
+
+  // The overlay the SERVER rendered already covering, on the first load. Nothing pushed it, so
+  // nothing would have started its clock or armed its listeners.
+  adopt() {
+    const covering = [...this.overlays()].filter((overlay) => !overlay.hidden);
+    if (!covering.length) return;
+
+    const label = covering[0].querySelector("[data-role='pb-busy-label']");
+    this.start(label ? label.textContent.trim() : "Loading the canvas…", null, {
+      settleOnLoad: true,
+    });
+
+    // `load` means the iframe's DOCUMENT arrived, which on a first load is the tree already
+    // server-rendered into that response — so the reader is looking at the page. The canvas also
+    // posts `painted` once its own socket connects. Whichever happens first is the answer; neither
+    // alone is, which is why the old split between them was wrong.
+    for (const overlay of covering) {
+      const frame = document.getElementById(overlay.dataset.frame || "");
+      if (!frame || frame.__pbBusyWatched) continue;
+
+      frame.__pbBusyWatched = true;
+      const done = () => this.stop();
+      frame.addEventListener("load", done, { once: true });
+      frame.addEventListener("error", done, { once: true });
+    }
+  },
+
+  reveal() {
+    for (const overlay of this.overlays()) {
+      const detail = overlay.querySelector("[data-role='pb-busy-detail']");
+      if (detail && !overlay.hidden) detail.hidden = false;
+    }
+  },
+
+  // Only a revision at least as new as the one asked for settles it. Without the comparison, the
+  // patch that CARRIED the request — the editor's own re-render, which the frame answers first —
+  // took the overlay down before the document had changed.
+  settle(revision) {
+    if (!this.since) return;
+    if (this.revision !== null && Number(revision) < Number(this.revision)) return;
+    this.stop();
+  },
+
+  stop() {
+    clearInterval(this.timer);
+    clearTimeout(this.deadline);
+    clearTimeout(this.detail);
+    this.timer = null;
+    this.deadline = null;
+    this.detail = null;
+    this.since = 0;
+    this.revision = null;
+    for (const overlay of this.overlays()) overlay.hidden = true;
+  },
+
+  tick() {
+    const waited = Date.now() - this.since;
+    const seconds = (waited / 1000).toFixed(1);
+    const stage = this.stages.filter((entry) => waited >= entry.after).pop();
+
+    for (const overlay of this.overlays()) {
+      if (overlay.hidden) continue;
+
+      const elapsed = overlay.querySelector("[data-role='pb-busy-elapsed']");
+      const label = overlay.querySelector("[data-role='pb-busy-label']");
+      if (elapsed) elapsed.textContent = `${seconds}s`;
+      if (label && stage && stage.text) label.textContent = stage.text;
+    }
+  },
+};
+
+// Mounted on the frame column, so the editor can raise the overlay from the server on the same round
+// trip that swaps the document — and so the one the server rendered already covering, for the first
+// load, gets its clock started and its listeners armed.
+const PbFrameBusy = {
+  mounted() {
+    this.handleEvent("pb:frame-busy", ({ label, revision }) =>
+      PB_FRAME_BUSY.start(label || "Loading…", revision),
+    );
+
+    // BOTH ENDS IN ONE PLACE. The editor's keyboard bridge already listens for `message`, and the
+    // first version of this settled the overlay from there — which put "raise it" and "take it down"
+    // in two hooks that know nothing about each other, and left the second silently dead whenever
+    // the first was the only one mounted.
+    this.onPainted = (event) => {
+      if (!event.data || event.data.pb !== true || event.data.kind !== "painted") return;
+      PB_FRAME_BUSY.settle(event.data.revision);
+    };
+
+    window.addEventListener("message", this.onPainted);
+    PB_FRAME_BUSY.adopt();
+  },
+  destroyed() {
+    window.removeEventListener("message", this.onPainted);
+    PB_FRAME_BUSY.stop();
+  },
+};
+
+// A SPINNER OVER AN IFRAME, REMOVED WHEN THE FRAME LOADS.
+//
+// The obvious CSS-only version does not work, and it is worth saying why: an iframe that has not
+// loaded yet is NOT transparent — it paints its own white canvas — so a spinner placed BEHIND one is
+// covered from the first frame and never seen. Measured, after shipping exactly that mistake.
+//
+// Nor can the spinner be swapped for the frame: replacing the element restarts the load, so it would
+// never finish. So the spinner sits on top and this removes it, and the frame's `load` is the only
+// signal available — the document inside is another origin (the canvas frames are sandboxed to an
+// opaque one) and cannot report for itself.
+//
+// `data-frame` names the iframe. State lives on the hook rather than the DOM because LiveView strips
+// `data-*` the server did not render on the next patch, `phx-update="ignore"` included.
+const FrameLoader = {
+  mounted() {
+    this.watch();
+  },
+  updated() {
+    this.watch();
+  },
+  watch() {
+    const frame = document.getElementById(this.el.dataset.frame);
+    if (!frame) return;
+
+    // NEVER ASK `readyState`. A freshly created iframe reports "complete" for the `about:blank` it
+    // starts on, so checking it hides the overlay on the very first tick and the reader sees the
+    // blank frame this exists to explain. Measured, after shipping exactly that.
+    //
+    // The flag lives as a JS property on the FRAME rather than on this hook or a `data-*`: the hook
+    // remounts whenever LiveView replaces the overlay, and `data-*` the server did not render is
+    // stripped on the next patch. The frame element itself survives both.
+    if (frame.__pbLoaded) return this.hide();
+
+    if (!frame.__pbWatched) {
+      frame.__pbWatched = true;
+      const done = () => {
+        frame.__pbLoaded = true;
+        this.hide();
+      };
+      frame.addEventListener("load", done, { once: true });
+      // A load that fails quietly would otherwise leave the spinner up for good; let whatever the
+      // frame ends up showing speak for itself.
+      frame.addEventListener("error", done, { once: true });
+    }
+  },
+  hide() {
+    this.el.style.display = "none";
+  },
+};
+
 // A number field the server bounds, bounded on the client too. The gear panel it lives in is
 // `phx-update="ignore"`, so once rendered its inputs are never patched again: a value the server
 // clamps is stored clamped while the field keeps showing what was typed, for the rest of the
@@ -2239,8 +2453,10 @@ const SidebarScroll = {
 };
 
 export default {
+  FrameLoader,
   NumberBounds,
   SidebarScroll,
+  PbFrameBusy,
   UploadSubmitsItself,
   MediaThumb,
   MentionBox,
