@@ -42,7 +42,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
             if String.starts_with?(path, "/"), do: path, else: "/" <> path
           end)
 
-        {found, _captured} =
+        {found, captured} =
           WebRunTimeMetaDataState.resolve!("#{joined_path}", site.name, "Page")
 
         page_module = Helpers.module_name(found.id, found.site, "Page")
@@ -68,6 +68,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                       |> assign(page_module.__page_information__())
                       |> assign_page_title()
                       |> assign(current_site: site)
+                      |> assign(:query_params, query_params(params, captured))
                       |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
 
                     Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
@@ -177,7 +178,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
               message: "Invalid host for this site"
             )
 
-        {found, _captured} = WebRunTimeMetaDataState.resolve!(joined_path, site_name, "Page")
+        # A PATTERN'S CAPTURES ARE THINGS THE VISITOR ASKED FOR, so they arrive beside the query
+        # string rather than in a place of their own: a page stored at `/post/:category/:slug` reads
+        # `@query_params["category"]` and `@query_params["slug"]`, and a component reads the same
+        # name whether the value came from the path or from `?slug=`. The query string wins a
+        # collision, because the visitor typed that one.
+        {found, captured} = WebRunTimeMetaDataState.resolve!(joined_path, site_name, "Page")
         page_module = Helpers.module_name(found.id, found.site, "Page")
 
         result =
@@ -198,6 +204,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
               |> assign(page_module: page_module)
               |> assign(page_module.__page_information__())
               |> assign(:current_path, joined_path)
+              |> assign(:query_params, query_params(params, captured))
               |> then(fn socket ->
                 new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
                 {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
@@ -422,6 +429,22 @@ defmodule MishkaCmsWeb.RuntimeLive do
     {layout_module,
      ModuleCompilerHandler.compile_or_return_module(layout_module, layout_path, site, site_id)}
   end
+
+  # WHAT THE VISITOR ASKED FOR, WITHOUT THE ROUTE'S OWN WILDCARD. `live "/*path"` puts the matched
+  # segments under "path" as a LIST, and a page template that rebuilds a query string from this map
+  # would hand `URI.encode_query/1` a list and raise — so the one key the router owns is dropped and
+  # everything the visitor typed is kept.
+  #
+  # This is the seam a page needs to put state in the URL: a component is handed
+  # `page={@query_params["page"]}`, its pager is `<.link patch={…}>`, and the back button then works
+  # because `handle_params/3` runs again and the value arrives from the address bar rather than from
+  # anything the component remembered.
+  defp query_params(params, captured) when is_map(params) and is_map(captured) do
+    captured
+    |> Map.merge(Map.drop(params, ["path"]))
+  end
+
+  defp query_params(_not_a_map, _captured), do: %{}
 
   defp default_layout(assigns) do
     ~H"""
