@@ -237,8 +237,28 @@ defmodule MishkaCmsWeb.Router do
       live "/_preview/:resource/:token", DraftPreviewLive
     end
 
+    # `alias: false` — the /auth surface lives in `mishka_cms_core`, so these must NOT pick up this
+    # scope's `MishkaCmsWeb` alias.
+    #
+    # The sign-in pages themselves are each site's runtime pages at `/<language>/auth…`, answered
+    # by `RuntimeLive` below; `/auth…` reaches them through `LanguagePlug`'s redirect. The sign-out
+    # page's form posts its DELETE here.
+    scope "/", alias: false do
+      auth_routes MishkaCmsCoreWeb.AuthController, MishkaCmsCore.Accounts.User, path: "/api/auth"
+
+      delete "/auth/sign-out", MishkaCmsCoreWeb.AuthController, :sign_out, as: :auth
+    end
+
+    # THE SESSION AshAuthentication WOULD GENERATE, WITHOUT THE HOOK THAT SPENDS IT.
+    # `ash_authentication_live_session` adds `AshAuthentication.Phoenix.LiveSession`'s own
+    # `on_mount`, which verifies the token and loads the user before any of these pages has even
+    # been resolved — two queries per mount and per live navigation, on every brochure page that
+    # never mentions a visitor. The `:session` below is the one that macro would have built, so the
+    # token still travels; `MishkaCmsCore.LiveUserAuth.load_current_user/1` makes exactly the same
+    # checks, at the moment `MishkaCmsWeb.RuntimeLive` finds a page that needs a user.
     live_session :authenticated_routes,
-      session: {__MODULE__, :runtime_session, []} do
+      session: {__MODULE__, :runtime_session, []},
+      on_mount: {MishkaCmsCore.LiveUserAuth, :live_user_lazy} do
       live "/*path", RuntimeLive
     end
   end
@@ -246,8 +266,8 @@ defmodule MishkaCmsWeb.Router do
   # Helpers
 
   @doc """
-  The session a runtime page's socket is opened with: the language the response is being
-  answered in.
+  The session a runtime page's socket is opened with: the one `AshAuthentication` would have built,
+  plus the language the response is being answered in.
 
   A page whose own address names a language reads it out of the address. A page at `/no-lang`, and
   every hand-written page under `mish-`, has no address to read — this is how their socket learns
@@ -256,7 +276,9 @@ defmodule MishkaCmsWeb.Router do
   """
   @spec runtime_session(Plug.Conn.t()) :: map()
   def runtime_session(conn) do
-    %{Languages.session() => LanguagePlug.spoken(conn)}
+    conn
+    |> AshAuthentication.Phoenix.LiveSession.generate_session(nil, [])
+    |> Map.put(Languages.session(), LanguagePlug.spoken(conn))
   end
 
   # Only runs before the CMS is installed: afterwards `/install` is a 404. There is no site yet, but

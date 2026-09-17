@@ -9,14 +9,28 @@ defmodule MishkaCmsWeb.RuntimeLive do
   mechanisms for layout rendering failures.
   """
   use MishkaCmsWeb, :live_view
+  alias MishkaCmsCore.Accounts.Checks.AccessPermissions
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Runtime.Compilers.Helpers
-  alias MishkaCmsCore.Runtime.{Languages, PageEditions}
+  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions}
   alias MishkaCmsCore.Runtime.Plugs.LanguagePlug
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
+  alias MishkaCmsCoreWeb.ReturnTo
   alias MishkaInstaller.Event.Hook
 
   require Logger
+
+  # Where `handle_params/3` leaves the address this socket is showing, which is where a visitor goes
+  # when a page stops admitting them. Private rather than an assign because nothing renders it and
+  # the socket's private is never part of a diff — the same reason
+  # `MishkaCmsCore.LiveUserAuth` keeps its session there.
+  @address :mishka_cms_runtime_address
+
+  # Where `mount/3` leaves the name of the site-wide page topic it subscribed to. `handle_info/2`
+  # matches the arriving broadcast's topic against it, so only the subscription made here is read as
+  # a page write — a page that listens to `page:<site id>:created` for its own purposes keeps
+  # receiving its own messages.
+  @page_topic :mishka_cms_runtime_page_topic
 
   def mount(%{"path" => path} = params, %{"current_site" => site} = session, socket) do
     socket =
@@ -40,11 +54,29 @@ defmodule MishkaCmsWeb.RuntimeLive do
             socket =
               if connected?(socket) do
                 Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, "site:#{site.name}:assets")
-                socket
+
+                # WHAT THIS SITE'S PAGES BECOME, WHILE SOMEBODY IS READING ONE. `MishkaCmsCore.Runtime.Page`
+                # publishes every write to this topic through `Ash.Notifier.PubSub`; `handle_info/2` below
+                # keeps the write that is about the page this socket is showing and drops the rest. One
+                # subscription covers every page the socket goes on to visit, because a live navigation
+                # between database pages keeps this process.
+                #
+                # The name is kept because `handle_info/2` answers only what arrived on it: the resource
+                # publishes `created` and `destroyed` under the same payload shape, and a page listening
+                # for those must still be handed them.
+                page_topic = "page:#{site.id}:updated"
+                Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, page_topic)
+                Phoenix.LiveView.put_private(socket, @page_topic, page_topic)
               else
                 socket
               end
 
+            # NO VISITOR TRAVELS WITH THIS, and that is not an omission. Rewriting the path is CHOOSING
+            # the page, and which page it is decides whether a user has to be loaded at all — so at this
+            # point nobody has been, and the key this payload used to carry would be `nil` here and a
+            # leftover from some earlier page in `handle_params/3`. A hook that has to know the visitor
+            # is handed the whole socket by `RuntimeLive.OnMount.BeforeMount` a few lines above, and
+            # `MishkaCmsCore.LiveUserAuth.load_current_user/1` verifies one from it.
             joined_path =
               %{path: path, site: site}
               |> then(&Hook.call("RuntimeLive.OnMount.BeforePathTransform", &1).path)
@@ -71,8 +103,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
                       site.id
                     )
                     |> then(&Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1))
+                    |> admit(page_module, socket)
                     |> case do
-                      {:ok, _result} ->
+                      {{:ok, _result}, socket} ->
                         new_socket =
                           socket
                           |> assign(page_module: page_module)
@@ -84,7 +117,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
                         Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
 
-                      {:error, reason} ->
+                      {:sign_in, socket} ->
+                        sign_in(socket, params)
+
+                      {{:error, reason}, _socket} ->
                         _ =
                           Hook.call("RuntimeLive.OnMount.AfterCompileError", reason,
                             return: false
@@ -176,6 +212,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
             current_site = socket.assigns.current_site
 
+            # NO VISITOR TRAVELS WITH THIS EITHER, for the reason given in `mount/3`: whoever an earlier
+            # page in this socket happened to need is not an answer to who is asking for this one.
+            # `RuntimeLive.HandleParams.BeforeParams`, above, is handed the socket.
             joined_path =
               %{path: path, site: current_site}
               |> then(&Hook.call("RuntimeLive.HandleParams.BeforePathTransform", &1).path)
@@ -195,6 +234,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   message: "Invalid host for this site"
                 )
 
+            # THE ADDRESS THIS SOCKET IS ON, KEPT BEFORE ANYTHING CAN REFUSE IT. This callback runs after
+            # `mount/3` on the first response and on the connect, and again on every navigation, so it is
+            # the one place that always knows where the browser is — and it has run before any event or
+            # message can arrive.
+            socket = Phoenix.LiveView.put_private(socket, @address, address(uri))
+
             # A PATTERN'S CAPTURES ARE THINGS THE VISITOR ASKED FOR, so they arrive beside the query
             # string rather than in a place of their own: a page stored at `/post/:category/:slug` reads
             # `@query_params["category"]` and `@query_params["slug"]`, and a component reads the same
@@ -211,8 +256,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
                 site_id
               )
               |> then(&Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1))
+              |> admit(page_module, socket)
               |> case do
-                {:ok, _result} ->
+                {{:ok, _result}, socket} ->
                   # A LIVE NAVIGATION LANDS ON A DIFFERENT PAGE, and that page's uploads are not the
                   # ones mount registered. `allow_upload/3` refuses a name already registered, so
                   # `MishkaCmsCore.Runtime.PageUpload.allow/2` skips what is there and adds what the
@@ -228,7 +274,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
                     {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
                   end)
 
-                {:error, reason} ->
+                {:sign_in, socket} ->
+                  {:noreply, sign_in(socket, params)}
+
+                {{:error, reason}, _socket} ->
                   _ =
                     Hook.call("RuntimeLive.HandleParams.AfterCompileError", reason, return: false)
 
@@ -270,36 +319,54 @@ defmodule MishkaCmsWeb.RuntimeLive do
       fn ->
         %{private: %{site: ^site}} = page_module.__page_information__()
 
-        result =
-          apply(page_module, :handle_event, [event_name, event_params, socket])
-          |> then(&Hook.call("RuntimeLive.HandleEvent.AfterCallEvent", &1))
+        # ASKED AGAIN, OF THE VISITOR AS THEY ARE NOW, BEFORE THE PAGE ACTS. Only a socket that
+        # passed `admit/3` can send here, and losing a permission cuts the socket
+        # (`MishkaCmsCore.Accounts.LiveSockets`) — but between the write and the broadcast there is a
+        # moment, and an event arriving in it would be answered from a user this socket read when it
+        # mounted. `readmit/2` reads that user again; a page naming no permissions asks nothing and
+        # pays nothing.
+        #
+        # WHAT THE PAGE ASKS FOR IS THE MODULE'S ANSWER, the same one `mount/3` and `handle_params/3`
+        # get, and it is current: a write that changes it reaches this socket as a page notification,
+        # which brings the module up to the row before anything else runs — see `align_page_module/2`.
+        socket
+        |> readmit(page_module.__page_information__([:acl, :permissions]))
+        |> case do
+          {:refused, socket} ->
+            {{:noreply, refuse(socket)}, %{}}
 
-        final_result =
-          case result do
-            {:noreply, %Phoenix.LiveView.Socket{} = socket} ->
-              {:noreply, Hook.call("RuntimeLive.HandleEvent.ReturnCallEvent", socket)}
+          {:ok, socket} ->
+            result =
+              apply(page_module, :handle_event, [event_name, event_params, socket])
+              |> then(&Hook.call("RuntimeLive.HandleEvent.AfterCallEvent", &1))
 
-            other ->
-              _ =
-                Hook.call("RuntimeLive.HandleEvent.AfterCallEventError", other, return: false)
+            final_result =
+              case result do
+                {:noreply, %Phoenix.LiveView.Socket{} = socket} ->
+                  {:noreply, Hook.call("RuntimeLive.HandleEvent.ReturnCallEvent", socket)}
 
-              :telemetry.execute(
-                [:mishka_cms, :runtime, :handle_event, :error],
-                %{count: 1},
-                %{
-                  error_reason: "Invalid return value",
-                  event: event_name,
-                  path: path,
-                  site: site
-                }
-              )
+                other ->
+                  _ =
+                    Hook.call("RuntimeLive.HandleEvent.AfterCallEventError", other, return: false)
 
-              raise MishkaCmsCore.ErrorsExceptions.ServerError,
-                message:
-                  "handle_event for #{path} expected return of {:noreply, %Phoenix.LiveView.Socket{}}, but got #{inspect(other)}"
-          end
+                  :telemetry.execute(
+                    [:mishka_cms, :runtime, :handle_event, :error],
+                    %{count: 1},
+                    %{
+                      error_reason: "Invalid return value",
+                      event: event_name,
+                      path: path,
+                      site: site
+                    }
+                  )
 
-        {final_result, %{}}
+                  raise MishkaCmsCore.ErrorsExceptions.ServerError,
+                    message:
+                      "handle_event for #{path} expected return of {:noreply, %Phoenix.LiveView.Socket{}}, but got #{inspect(other)}"
+              end
+
+            {final_result, %{}}
+        end
       end
     )
   end
@@ -328,6 +395,51 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   def handle_info({:js_updated, _hash}, socket) do
     {:noreply, push_event(socket, "mishka:js-updated", %{})}
+  end
+
+  # THE PAGE CHANGED HANDS UNDER WHOEVER IS READING IT. Its permissions are asked in `mount/3` and in
+  # `handle_params/3`, and somebody sitting on the page runs neither — so an admin who closes a page
+  # to the public left everyone already on it reading it, for as long as they stayed.
+  #
+  # The row that arrives here is the page as it now is, which is fresher than the module this socket
+  # is rendering: a write only QUEUES the recompile, so the permissions the compiled module carries
+  # are still the ones from before it. That gap is closed first, by `align_page_module/2`, because
+  # the refusal below is answered by asking for the address again — and a mount judging by a module
+  # older than the refusal would let the same visitor straight back in.
+  #
+  # Whoever no longer holds a permission is sent back to the address, where `mount/3` gives them the
+  # site's 403 or the sign-in it would have given them had they asked a second later. Whoever still
+  # holds one notices nothing.
+  #
+  # Matching `topic` in both the message and this socket's own private admits only the subscription
+  # `mount/3` made; the same page's `created` or `destroyed` belongs to whoever subscribed to those.
+  def handle_info(
+        %Phoenix.Socket.Broadcast{
+          topic: topic,
+          payload: %Ash.Notifier.Notification{resource: Page, data: %{id: id} = page}
+        },
+        %{private: %{@page_topic => topic}, assigns: %{private: %{id: id}}} = socket
+      ) do
+    required = page_permissions(page)
+    align_page_module(socket, required)
+
+    case readmit(socket, required) do
+      {:ok, socket} -> {:noreply, socket}
+      {:refused, socket} -> {:noreply, refuse(socket)}
+    end
+  end
+
+  # ANOTHER PAGE OF THE SAME SITE. The subscription is the site's, so every page's writes arrive
+  # here; the clause above keeps this socket's own and this one drops the rest rather than handing a
+  # page's own `handle_info/2` a message about a page it is not.
+  def handle_info(
+        %Phoenix.Socket.Broadcast{
+          topic: topic,
+          payload: %Ash.Notifier.Notification{resource: Page}
+        },
+        %{private: %{@page_topic => topic}} = socket
+      ) do
+    {:noreply, socket}
   end
 
   def handle_info(message, socket) do
@@ -551,6 +663,161 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   # THE TAB READS WHAT THE PAGE IS CALLED. Assigned in `mount/3` for the first load.
   defp assign_page_title(socket), do: assign(socket, :page_title, socket.assigns.page.title)
+
+  # A PAGE THAT NAMES PERMISSIONS OPENS ONLY FOR WHOEVER HOLDS ONE OF THEM, asked of
+  # `AccessPermissions` the way every admin gate asks it, so `*` and `admin:*` grant here what they
+  # grant there. Nobody signed in is sent to sign in; somebody signed in without one gets the site's
+  # 403.
+  #
+  # Asked in `mount/3` and again in `handle_params/3`, because a `<.link patch>` to another page runs
+  # only the second, and the first HTTP response is refused in `mount/3` before anything is drawn.
+  # Anything the module holds other than an empty list is a restriction, so a page whose permissions
+  # cannot be read is refused rather than served.
+  #
+  # AND THIS IS WHERE THE VISITOR IS LOADED, because it is the first moment the page is known — see
+  # `with_current_user/3`. The socket travels through and comes back out, so the two callers keep
+  # whichever user this page needed and no other.
+  defp admit({:ok, _result} = compiled, page_module, socket) do
+    required = page_module.__page_information__([:acl, :permissions])
+    socket = with_current_user(socket, required, page_module)
+
+    case {required, socket.assigns[:current_user]} do
+      {[], _nobody_in_particular} ->
+        {compiled, socket}
+
+      {_required, nil} ->
+        {:sign_in, socket}
+
+      {required, user} ->
+        if AccessPermissions.match?(user, %{}, permissions: required),
+          do: {compiled, socket},
+          else: refuse_as_missing(socket, page_module, required, user)
+    end
+  end
+
+  defp admit(not_compiled, _page_module, socket), do: {not_compiled, socket}
+
+  # A PAGE SOMEBODY MAY NOT OPEN ANSWERS WHAT A PAGE THAT IS NOT THERE ANSWERS — the site's 404, with
+  # the same exception, status and sentence `WebRunTimeMetaDataState.resolve!/3` raises for an address
+  # nothing is stored at. A 403 tells whoever asks that the address exists and is worth asking about
+  # again with another account; this repository is meant to host private client pages, so the user's
+  # decision (2026-09-20) is that a refusal is indistinguishable from a miss.
+  #
+  # THE SYSTEM STILL KNOWS IT WAS A REFUSAL. The telemetry event carries the page, the permissions it
+  # wanted and who asked, which is what the log feature will read later; nothing of that reaches the
+  # visitor. A visitor who is not signed in is NOT sent here — they are redirected to sign in, because
+  # a members-only page has to be reachable by signing in, and that does tell an anonymous prober the
+  # address exists. Closing that needs a per-page "hide that this page exists" flag, which is its own
+  # task.
+  defp refuse_as_missing(socket, page_module, required, user) do
+    page = page_module.__page_information__([:page]) || %{}
+
+    :telemetry.execute(
+      [:mishka_cms, :runtime, :page, :forbidden],
+      %{count: 1},
+      %{
+        page_id: page[:id],
+        path: page[:path],
+        site_id: socket.assigns[:private][:site_id],
+        required: required,
+        actor_id: user.id
+      }
+    )
+
+    Logger.info(
+      "[RuntimeLive] #{user.id} may not open #{page[:path]} (wants #{Enum.join(required, ", ")}); answered as missing"
+    )
+
+    raise MishkaCmsCore.ErrorsExceptions.NotFoundError,
+      message: "Sorry, the page you are looking for does not exist or has been moved."
+  end
+
+  # THE SAME QUESTION `admit/3` ASKS, ASKED OF A SOCKET THAT IS ALREADY ON THE PAGE: once because the
+  # page now names permissions it did not, once before the page acts on an event. Same check,
+  # `AccessPermissions`, so `*` and `admin:*` grant here what they grant everywhere.
+  #
+  # THE VISITOR IS READ AGAIN. `admit/3` may answer from the user this socket loaded when it mounted,
+  # because a change to that user ends the socket; here the change is the thing being guarded
+  # against, so the assign is exactly what must not be trusted — see
+  # `MishkaCmsCore.LiveUserAuth.reload_current_user/1`. A page naming no permissions is not asked at
+  # all, and pays nothing. Anything else that is not a list of permissions cannot be judged, so it is
+  # refused.
+  defp readmit(socket, []), do: {:ok, socket}
+
+  defp readmit(socket, required) when is_list(required) do
+    socket = MishkaCmsCore.LiveUserAuth.reload_current_user(socket)
+
+    if AccessPermissions.match?(socket.assigns[:current_user], %{}, permissions: required),
+      do: {:ok, socket},
+      else: {:refused, socket}
+  end
+
+  defp readmit(socket, _unreadable), do: {:refused, socket}
+
+  # BACK TO THE ADDRESS, AS A REQUEST RATHER THAN A NAVIGATION. Refusing here would mean writing a
+  # second copy of what `mount/3` already decides — the 403 for somebody signed in, the sign-in with
+  # `return_to` for somebody who is not — so the browser asks for the page again instead, and the one
+  # place that answers that question answers it.
+  defp refuse(socket), do: redirect(socket, to: socket.private[@address])
+
+  # THE COMPILED MODULE IS BROUGHT UP TO THE ROW IT HAS JUST BEEN TOLD ABOUT, and only when the two
+  # disagree about who may read the page — a body, a title, a description costs nothing here and
+  # waits for the queued recompile as it always did.
+  #
+  # It has to be done from here because the module is the ONE source the other three callbacks read:
+  # `mount/3`, `handle_params/3` and `handle_event/3` all ask `__page_information__/1`, and the write
+  # that changed the row only enqueued the job that would change the module. Leaving them to disagree
+  # is what made a refusal meaningless — the browser asked for the address again and the old module
+  # admitted it. The module is the node's, so whichever socket on the page compiles first answers for
+  # all of them, and the cost is a compile per write that changes a page's permissions — the one the
+  # queued job was going to do anyway.
+  defp align_page_module(socket, required) when is_list(required) do
+    %{page_module: page_module, page: %{path: path}, private: %{site: site, site_id: site_id}} =
+      socket.assigns
+
+    if page_module.__page_information__([:acl, :permissions]) != required do
+      ModuleCompilerHandler.compile_or_return_module(page_module, path, site, site_id, :update)
+    end
+
+    :ok
+  end
+
+  defp align_page_module(_socket, _unreadable), do: :ok
+
+  # WHAT THE PAGE ASKS FOR, READ THE WAY THE COMPILER READS IT.
+  # `MishkaCmsCore.Runtime.Compilers.LiveViewCompiler` writes `permissions || []` into the module, so
+  # a column left null is a public page there and has to be one here too — otherwise every save of a
+  # public page would throw its readers off and `mount/3` would let them straight back in.
+  #
+  # Anything else is a page whose permissions could not be read, which `admit/3` refuses rather than
+  # serves; `readmit/2` does the same with what this hands it.
+  defp page_permissions(%{permissions: nil}), do: []
+  defp page_permissions(%{permissions: permissions}), do: permissions
+  defp page_permissions(_unreadable), do: :unreadable
+
+  # What the browser has in its address bar, from the URL `handle_params/3` was given: its path and
+  # its query, and nothing that would make it point at another host.
+  defp address(%URI{} = uri), do: URI.to_string(%URI{path: uri.path || "/", query: uri.query})
+
+  defp with_current_user(socket, _required, _page_module),
+    do: MishkaCmsCore.LiveUserAuth.load_current_user(socket)
+
+  # BACK TO THE PAGE THAT ASKED, once signed in: `/auth` redirects to the site's sign-in page with
+  # the query kept, that page hands `return_to` on to the sign-in it starts, and
+  # `MishkaCmsCoreWeb.AuthController` redirects there.
+  #
+  # WHAT TRAVELS IS A SIGNATURE, NOT AN ADDRESS. The address is the route this request already
+  # matched, so it is this site's by construction; signing it is what lets the controller tell it
+  # apart from the one a stranger would rather send people to. `~p` refuses to build an address a
+  # browser would read as another origin — it raises instead — so what reaches `ReturnTo.sign/2`
+  # here is always something it mints a token for.
+  defp sign_in(socket, %{"path" => path} = params) do
+    return_to = ReturnTo.sign(socket, ~p"/#{path}?#{query_params(params, %{})}")
+
+    socket
+    |> put_flash(:error, gettext("You must log in to access this page."))
+    |> redirect(to: ~p"/auth?#{[return_to: return_to]}")
+  end
 
   defp compile_layout({site, layout_path}, page_site_id) do
     site_id = if(site == "Global", do: nil, else: page_site_id)
