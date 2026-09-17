@@ -9,7 +9,8 @@ defmodule MishkaCmsWeb.Router do
   import MishkaCmsCore.Runtime.Plugs.ApiTenantLookupPlug, only: [confirm_bearer_tenant: 2]
 
   alias MishkaCmsCore.Accounts.Helper
-  alias MishkaCmsCore.Runtime.Plugs.AdminSurfacePlug
+  alias MishkaCmsCore.Runtime.Languages
+  alias MishkaCmsCore.Runtime.Plugs.{AdminSurfacePlug, LanguagePlug}
 
   # Html alone, but for a route that names what else it answers — robots.txt, sitemap.xml and the
   # sitemap-00001.xml.gz… files beside it.
@@ -27,6 +28,10 @@ defmodule MishkaCmsWeb.Router do
     plug :confirm_tenant
     plug MishkaCmsWeb.Runtime.Plugs.SecurityHeaders
     plug MishkaCms.Plugs.MaintenanceGate
+
+    plug LanguagePlug,
+      router: __MODULE__,
+      live_view: MishkaCmsWeb.RuntimeLive
   end
 
   # Like :browser but without SiteLookupPlug — a fresh deploy has no site to resolve, so the
@@ -232,12 +237,27 @@ defmodule MishkaCmsWeb.Router do
       live "/_preview/:resource/:token", DraftPreviewLive
     end
 
-    live_session :authenticated_routes do
+    live_session :authenticated_routes,
+      session: {__MODULE__, :runtime_session, []} do
       live "/*path", RuntimeLive
     end
   end
 
   # Helpers
+
+  @doc """
+  The session a runtime page's socket is opened with: the language the response is being
+  answered in.
+
+  A page whose own address names a language reads it out of the address. A page at `/no-lang`, and
+  every hand-written page under `mish-`, has no address to read — this is how their socket learns
+  which language the visitor is in, and it is the same value
+  `MishkaCmsCore.Runtime.Plugs.LanguagePlug` put in the session and in Gettext.
+  """
+  @spec runtime_session(Plug.Conn.t()) :: map()
+  def runtime_session(conn) do
+    %{Languages.session() => LanguagePlug.spoken(conn)}
+  end
 
   # Only runs before the CMS is installed: afterwards `/install` is a 404. There is no site yet, but
   # a browser that visited before (a database reset, say) still has its old site in the cookie.
