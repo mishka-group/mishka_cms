@@ -138,6 +138,7 @@ config :mishka_cms,
   ecto_repos: [MishkaCms.Repo],
   generators: [timestamp_type: :utc_datetime],
   ash_domains: [
+    MishkaDocument,
     MishkaBlog,
     MishkaCmsCore.Runtime,
     MishkaCmsCore.Accounts,
@@ -150,7 +151,8 @@ config :mishka_cms,
 config :mishka_cms_core,
   extensions: [
     MishkaCmsCoreWeb,
-    MishkaBlogWeb
+    MishkaBlogWeb,
+    MishkaDocumentWeb
   ]
 
 # Configures the endpoint

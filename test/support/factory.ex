@@ -4,15 +4,16 @@ defmodule MishkaCms.Test.Factory do
 
   Deliberately small: every extension carries its own factory now, so this holds only what the tests
   that remain here actually build — the CMS's web layer, its installer, and the handful of checks
-  that need more than one extension installed at once. The blog fixtures below are here
-  because those cross-extension tests need real records from it.
+  that need more than one extension installed at once. The blog and document fixtures below are here
+  because those cross-extension tests need real records from both.
 
-  See `MishkaBlog.Test.Factory` and `MishkaCmsCore.Test.Factory` for
+  See `MishkaBlog.Test.Factory`, `MishkaDocument.Test.Factory` and `MishkaCmsCore.Test.Factory` for
   each extension's own.
   """
 
   import MishkaCmsCore.Dev.Generator, except: [generate: 1, generate: 2]
   import MishkaBlog.Dev.Generator, except: [generate: 1, generate: 2]
+  import MishkaDocument.Dev.Generator, except: [generate: 1, generate: 2]
   import Ash.Generator, only: [generate: 1]
 
   alias MishkaCmsCore.Install.StarterContent
@@ -118,7 +119,7 @@ defmodule MishkaCms.Test.Factory do
     report
   end
 
-  # Blog records, for the tests here that span extensions.
+  # Blog and document records, for the tests here that span extensions.
 
   def create_blog_post!(overrides \\ []) do
     {site_id, overrides} = Keyword.pop(overrides, :site_id)
@@ -139,6 +140,86 @@ defmodule MishkaCms.Test.Factory do
 
     overrides
     |> collection(tenant)
+    |> generate()
+  end
+
+  def create_workspace!(overrides \\ []) do
+    {site_id, overrides} = Keyword.pop(overrides, :site_id)
+    {skip_version, overrides} = Keyword.pop(overrides, :skip_version, false)
+
+    # Workspace MUST have a site_id (not global)
+    site_id = site_id || create_site!().id
+    tenant = site_id
+
+    # Step 1: Create workspace (no version_ids needed)
+    workspace =
+      overrides
+      |> workspace(tenant)
+      |> generate()
+
+    # Step 2: Create a default version unless skip_version is true
+    unless skip_version do
+      _version = create_workspace_version!(workspace_id: workspace.id, site_id: site_id)
+    end
+
+    workspace
+  end
+
+  def create_workspace_version!(overrides \\ []) do
+    {site_id, overrides} = Keyword.pop(overrides, :site_id)
+    {workspace_id, overrides} = Keyword.pop(overrides, :workspace_id)
+
+    {site_id, workspace_id} =
+      cond do
+        site_id && workspace_id ->
+          {site_id, workspace_id}
+
+        workspace_id ->
+          workspace =
+            Ash.get!(MishkaDocument.Workspace, workspace_id,
+              action: :master_get,
+              authorize?: false
+            )
+
+          {workspace.site_id, workspace.id}
+
+        site_id ->
+          workspace = create_workspace!(site_id: site_id)
+          {site_id, workspace.id}
+
+        true ->
+          workspace = create_workspace!()
+          {workspace.site_id, workspace.id}
+      end
+
+    tenant = site_id
+
+    overrides
+    |> Keyword.put(:workspace_id, workspace_id)
+    |> workspace_version(tenant)
+    |> generate()
+  end
+
+  def create_section!(overrides \\ []) do
+    {site_id, overrides} = Keyword.pop(overrides, :site_id)
+    {workspace_version_id, overrides} = Keyword.pop(overrides, :workspace_version_id)
+
+    # Section MUST have site_id and workspace_version_id
+    site_id = site_id || create_site!().id
+
+    workspace_version_id =
+      workspace_version_id ||
+        create_workspace_version!(
+          workspace_id: create_workspace!(site_id: site_id).id,
+          site_id: site_id
+        ).id
+
+    tenant = site_id
+
+    overrides
+    |> Keyword.put(:site_id, site_id)
+    |> Keyword.put(:workspace_version_id, workspace_version_id)
+    |> section(tenant)
     |> generate()
   end
 end

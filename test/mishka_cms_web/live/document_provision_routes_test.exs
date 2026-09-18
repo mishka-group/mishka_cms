@@ -1,0 +1,62 @@
+defmodule MishkaCmsWeb.DocumentProvisionRoutesTest do
+  @moduledoc """
+  The paths `MishkaDocument.Provision` gives a site are paths the runtime can actually answer.
+
+  The router serves this application's hand-written marketing pages first and the database's pages
+  last, from one `live "/*path"` catch-all. So a provisioned page whose path a static route also
+  matches is a page nobody will ever see — and nothing about creating it would fail, because the
+  clash is in the router rather than in the row. `/mish-chelekom/docs`,
+  `/mish-chelekom/docs/:component` and `/mish-cms/extensions/documentation` are exactly the shape
+  that would swallow one.
+
+  Here rather than in the extension's own suite because only this application has the router. The
+  static routes are read OFF that router rather than listed here, so a route added later is covered
+  without anyone remembering this file.
+  """
+  use ExUnit.Case, async: true
+
+  alias MishkaDocument.Provision
+
+  # A value for every capture the provisioned paths use, so a real URL can be asked of the router.
+  @captures %{"lang" => "en", "workspace" => "mishka-cms", "section" => "installation"}
+
+  test "no page this extension provisions is answered by a static route" do
+    catch_all = runtime_route()
+
+    for path <- Provision.page_paths() do
+      url = fill(path)
+      answered_by = route_info(url).route
+
+      assert answered_by == catch_all,
+             "#{path} is served at #{url} by the #{answered_by} route rather than by the " <>
+               "runtime — the page would be created and never reached"
+    end
+  end
+
+  # WHICH ROUTE IS THE DATABASE'S, read off the router rather than written down, so moving the
+  # catch-all does not quietly turn the assertion above into a tautology.
+  defp runtime_route do
+    MishkaCmsWeb.Router
+    |> Phoenix.Router.routes()
+    |> Enum.find_value(fn route ->
+      case route.metadata[:phoenix_live_view] do
+        {MishkaCmsWeb.RuntimeLive, _action, _opts, _live_session} -> route.path
+        _another_page -> nil
+      end
+    end)
+    |> case do
+      nil -> flunk("the router has no RuntimeLive route, so nothing serves database pages")
+      path -> path
+    end
+  end
+
+  defp fill(path) do
+    Regex.replace(~r/:(\w+)/, path, fn _whole, name ->
+      Map.get(@captures, name) ||
+        flunk("no sample value for :#{name} in #{path} — add one to @captures")
+    end)
+  end
+
+  defp route_info(url),
+    do: Phoenix.Router.route_info(MishkaCmsWeb.Router, "GET", url, "localhost")
+end

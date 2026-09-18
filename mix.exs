@@ -134,6 +134,7 @@ defmodule MishkaCms.MixProject do
       # Extentions
       {:mishka_cms_core, path: "__extensions/mishka_cms_core"},
       {:mishka_blog, path: "__extensions/mishka_blog"},
+      {:mishka_document, path: "__extensions/mishka_document"},
       {:mishka_gervaz, path: "__extensions/mishka_gervaz"}
     ]
   end
