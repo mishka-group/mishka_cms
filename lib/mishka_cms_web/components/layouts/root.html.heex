@@ -10,7 +10,11 @@
     <.live_title default="Mishka CMS" suffix={if(assigns[:admin_css], do: " - Mishka CMS")}>
       {assigns[:page_title]}
     </.live_title>
-    {raw(MishkaInstaller.Event.Hook.call("RootHtml.MetaTags", %{html: "", assigns: assigns}).html)}
+    {raw(MishkaInstaller.Event.Hook.call("RootHtml.MetaTags", %{html: "", assigns: assigns}).html)}<MishkaCmsWeb.RuntimeLive.page_head
+      :if={assigns[:runtime_page]}
+      seo={assigns[:page_seo]}
+      csp_nonce={assigns[:csp_nonce]}
+    />
     <% css_href =
       assigns[:current_site] &&
         "/assets/css/#{assigns[:current_site][:name]}/#{MishkaCmsCore.Runtime.States.AssetsState.get!(assigns[:current_site][:name], "css")[:hash]}.css" %>

@@ -7,12 +7,55 @@ defmodule MishkaCmsWeb.RuntimeLive do
   the complete lifecycle of runtime page rendering including path resolution, module compilation, security
   validation, and error handling. The module supports multi-site configurations and provides fallback
   mechanisms for layout rendering failures.
+
+  ## The head
+
+  `handle_params/3` resolves the page's `<title>` and SEO head into `@page_seo` before every render,
+  the HTTP one a crawler reads included, and `page_head/1` renders it — see
+  `MishkaCmsCore.Runtime.Seo` for the defaults, the layers and the variables.
+
+  ## Events
+
+  - `runtime:page:seo` — the page's head for the address asked, in every `handle_params/3`. A plugin
+    is handed this map (`MishkaCmsCore.Runtime.Seo.given/2`) and returns it, changed — a page that
+    serves many records (`/:lang/blog/:slug`) sets each record's own here. What it returns are
+    DEFAULTS: whatever the page sets in its own SEO wins, and may name the plugin's `vars`.
+
+      * `title` — the page's `title`. `<title>`, `og:title`, `twitter:title`, `og:image:alt` and the
+        default JSON-LD's `name` read it. A stored `title` tag replaces it.
+      * `description` — the page's `description`, or `nil`; used only when the page has none. The
+        `description`, `og:description` and `twitter:description` tags and the JSON-LD read it;
+        empty, a stored `description` meta stands in.
+      * `image` — `nil`. An `http(s)://…` address, or a `/…` path on the site, which is made absolute.
+        `og:image`, `twitter:image`, the `twitter:card` size and the JSON-LD read it. A stored
+        `og:image` replaces it.
+      * `type` — `"website"`, the `og:type`; `"article"` for a post.
+      * `url` — the canonical address: the site's address (`MishkaCmsCore.Runtime.Seo.base/1`) and
+        the path asked, without its query string. An `http(s)://…` address or a `/…` path.
+      * `language` — the language this response is in.
+      * `tags` — `[]`. Tags in the stored shape, `%{tag: "meta", attrs: %{"property" => "og:image"},
+        content: "…"}`, above the defaults and under the layout's tags and the page's.
+      * `schema` — the page's stored JSON-LD objects; used only when the page stores none. A
+        non-empty one replaces the default `WebPage`.
+      * `vars` — `%{}`. Values for `{{key}}` placeholders in stored tags and the schema,
+        `%{"post.title" => "…"}`, over the core ones on the same key
+        (`MishkaCmsCore.Runtime.Seo.variables/0`). Strings, or numbers.
+      * `var_docs` — `[]`. The variables this plugin fills, `[%{key: "post.title", label: "Post
+        title"}]`, so an editor can list them. Return them whether or not this request filled them.
+      * `page`, `site_id`, `params` — the `:page` section of `__page_information__/0`, the site, and
+        `@query_params`: the path's captures (`"slug"`) and the query string. Read only. The
+        visual editor asks with `params` empty, for `var_docs` and a preview, or with a sample
+        record's.
+
+    A key returned with the wrong type keeps the given value
+    (`MishkaCmsCore.Runtime.Seo.accept/2`). Every default tag is built from the answer, so a plugin
+    that sets `title`, `description` and `image` gets a complete head.
   """
   use MishkaCmsWeb, :live_view
   alias MishkaCmsCore.Accounts.Checks.AccessPermissions
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Runtime.Compilers.Helpers
-  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions}
+  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo}
   alias MishkaCmsCore.Runtime.Plugs.LanguagePlug
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCoreWeb.ReturnTo
@@ -269,6 +312,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> assign_page_language(captured)
                   |> assign(:current_path, joined_path)
                   |> assign(:query_params, query_params(params, captured))
+                  |> assign_page_seo(uri)
                   |> then(fn socket ->
                     new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
                     {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
@@ -550,6 +594,32 @@ defmodule MishkaCmsWeb.RuntimeLive do
   end
 
   @doc """
+  What a database page puts in the document's `<head>`: the tags and the JSON-LD of `@page_seo`,
+  which `handle_params/3` resolved — see `MishkaCmsCore.Runtime.Seo.head/2`.
+
+  The root layout renders this for `RuntimeLive` and nothing else, so a marketing page's head
+  carries none of it. Call it there with no whitespace before it: on a line of its own it adds a
+  blank line to every marketing page's head too.
+
+  It renders once per HTTP response, which is the response a crawler reads. A live navigation to
+  another database page updates `<title>` and keeps these tags.
+  """
+  attr :seo, :map, default: nil, doc: "`@page_seo`, with its `tags` and its `schema`"
+  attr :csp_nonce, :string, default: nil
+
+  def page_head(%{seo: %{tags: _, schema: _}} = assigns) do
+    ~H"""
+    <meta :for={{"meta", attrs} <- @seo.tags} {attrs} />
+    <link :for={{"link", attrs} <- @seo.tags} {attrs} />
+    <script :for={json <- @seo.schema} type="application/ld+json" nonce={@csp_nonce}>
+      <%= raw(json) %>
+    </script>
+    """
+  end
+
+  def page_head(assigns), do: ~H""
+
+  @doc """
   The document's `<html lang>`: the language of a database page's response, the language its admin
   reads an admin page in, and `"en"` — what the root layout has always said — for everything else.
   """
@@ -661,8 +731,48 @@ defmodule MishkaCmsWeb.RuntimeLive do
     end
   end
 
-  # THE TAB READS WHAT THE PAGE IS CALLED. Assigned in `mount/3` for the first load.
+  # THE TAB READS WHAT THE PAGE IS CALLED. Assigned in `mount/3` for the first load; `handle_params/3`
+  # replaces it with the title `assign_page_seo/2` resolved, which a live navigation needs to rewrite
+  # `<title>`.
   defp assign_page_title(socket), do: assign(socket, :page_title, socket.assigns.page.title)
+
+  # The page's `<title>` and head for this address, through the plugins on `Seo.event/0`. Run after
+  # `assign_page_language/2` and `:query_params`, whose editions and captures it reads.
+  defp assign_page_seo(socket, %URI{path: path}) do
+    %{page: page, private: private, page_languages: languages, query_params: params} =
+      socket.assigns
+
+    base = Seo.base(private[:host])
+
+    seo =
+      Seo.resolve(page,
+        site_id: private[:site_id],
+        url: Seo.absolute(canonical_path(path, params), base),
+        params: params,
+        record: Seo.record_of(socket.assigns[:extra]),
+        base: base,
+        languages: languages,
+        restricted?: Seo.noindex?(acl_permissions(socket.assigns[:acl]), socket.assigns[:extra]),
+        layers: [layout_seo_tags(private), stored_seo(page, :meta_tags)]
+      )
+
+    assign(socket, page_seo: seo, page_title: seo.title)
+  end
+
+  # The path asked for, without empty segments or a trailing slash, and the page of a list it asks
+  # for past the first: `/en/blog?page=2` is not the same page as `/en/blog`.
+  defp canonical_path(path, params) do
+    canonical = "/" <> (path |> to_string() |> String.split("/", trim: true) |> Enum.join("/"))
+
+    case Seo.page_number(params) do
+      nil -> canonical
+      number -> canonical <> "?page=#{number}"
+    end
+  end
+
+  # A page whose permissions cannot be read is kept out of an index as one that names a permission.
+  defp acl_permissions(%{permissions: permissions}), do: permissions
+  defp acl_permissions(_unreadable), do: :unreadable
 
   # A PAGE THAT NAMES PERMISSIONS OPENS ONLY FOR WHOEVER HOLDS ONE OF THEM, asked of
   # `AccessPermissions` the way every admin gate asks it, so `*` and `admin:*` grant here what they
@@ -868,6 +978,26 @@ defmodule MishkaCmsWeb.RuntimeLive do
     {layout_module,
      ModuleCompilerHandler.compile_or_return_module(layout_module, layout_path, site, site_id)}
   end
+
+  # A LAYOUT THAT CANNOT BE FOUND OR COMPILED BRINGS NO TAGS. `runtime_layout/1` has already
+  # rendered this page without it and reported why, in this same response; the head only leaves it
+  # out.
+  defp layout_seo_tags(%{layout: {_site, _path} = layout, site_id: site_id}) do
+    case compile_layout(layout, site_id) do
+      {layout_module, {:ok, _result}} ->
+        layout_module.__layout_information__([:layout, :seo, :meta_tags])
+
+      {_layout_module, {:error, _reason}} ->
+        []
+    end
+  rescue
+    _error -> []
+  end
+
+  defp layout_seo_tags(_no_layout), do: []
+
+  defp stored_seo(%{seo: %{} = seo}, key), do: Map.get(seo, key)
+  defp stored_seo(_page, _key), do: nil
 
   # WHAT THE VISITOR ASKED FOR, WITHOUT THE ROUTE'S OWN WILDCARD. `live "/*path"` puts the matched
   # segments under "path" as a LIST, and a page template that rebuilds a query string from this map
