@@ -799,8 +799,49 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # its query, and nothing that would make it point at another host.
   defp address(%URI{} = uri), do: URI.to_string(%URI{path: uri.path || "/", query: uri.query})
 
+  # A PAGE PAYS FOR THE VISITOR ONLY WHERE IT HAS A USE FOR ONE. Two uses: permissions, which need
+  # somebody to judge, and markup or code that reads `@current_user`, which
+  # `MishkaCmsCore.Runtime.Compilers.UserClosure` worked out when the page was compiled. Only the
+  # page that has neither is served without a lookup.
+  #
+  # `MishkaCmsCore.LiveUserAuth.load_current_user/1` makes exactly the checks the live session used
+  # to make on every mount, and does them again on a navigation into a page that needs one after a
+  # page that did not.
+  defp with_current_user(socket, [], page_module) do
+    if reads_user?(page_module),
+      do: MishkaCmsCore.LiveUserAuth.load_current_user(socket),
+      else: socket
+  end
+
   defp with_current_user(socket, _required, _page_module),
     do: MishkaCmsCore.LiveUserAuth.load_current_user(socket)
+
+  # THE PAGE AND ITS LAYOUT ARE ASKED SEPARATELY, and either is enough. The layout is drawn with this
+  # LiveView's own assigns, so its markup reads the visitor exactly as the page's does — but its
+  # answer cannot be baked into the page, because editing a layout rebuilds the layout module and no
+  # page under it. Asked of the layout module instead, it is as fresh as the layout itself.
+  #
+  # ANYTHING BUT AN EXPLICIT `false` MEANS LOAD, so a module compiled before either answer existed
+  # says `nil` here and loads, and a layout that cannot be resolved or compiled loads too.
+  defp reads_user?(page_module) do
+    page_module.__page_information__([:private, :reads_user]) != false or
+      layout_reads_user?(page_module.__page_information__(:private))
+  end
+
+  # A PAGE WITH NO LAYOUT IS DRAWN IN `default_layout/1`, which names no visitor.
+  defp layout_reads_user?(%{layout: nil}), do: false
+
+  defp layout_reads_user?(%{layout: layout, site_id: site_id}) do
+    case compile_layout(layout, site_id) do
+      {layout_module, {:ok, _result}} ->
+        layout_module.__layout_information__([:private, :reads_user]) != false
+
+      {_layout_module, {:error, _reason}} ->
+        true
+    end
+  rescue
+    _unreadable -> true
+  end
 
   # BACK TO THE PAGE THAT ASKED, once signed in: `/auth` redirects to the site's sign-in page with
   # the query kept, that page hands `return_to` on to the sign-in it starts, and
