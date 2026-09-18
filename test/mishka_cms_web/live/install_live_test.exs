@@ -816,6 +816,62 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     end
   end
 
+  describe "dev sample-data step" do
+    setup do
+      Application.put_env(:mishka_cms_core, :env_dev?, true)
+      on_exit(fn -> Application.delete_env(:mishka_cms_core, :env_dev?) end)
+      :ok
+    end
+
+    test "the dev-seed entry is hidden outside dev", %{conn: conn} do
+      Application.delete_env(:mishka_cms_core, :env_dev?)
+      {:ok, view, _html} = live(conn, "/install")
+      refute has_element?(view, "#install-dev-seeds")
+    end
+
+    test "in dev, offers the dev-seed entry and its extension categories", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/install")
+      assert has_element?(view, "#install-dev-seeds")
+
+      view |> element("#install-dev-seeds") |> render_click()
+      assert has_element?(view, "#installer-seeds")
+      # The Chelekom UI-kit option + the extension seeds, all checked by default.
+      assert has_element?(view, "#seed-chelekom input[checked]")
+      assert has_element?(view, "#seed-blog input[checked]")
+      assert has_element?(view, "#seed-document input[checked]")
+
+      # Extensions are labelled by their name, not "Blog content".
+      html = render(view)
+      assert html =~ "Mishka Blog"
+      assert html =~ "Mishka Document"
+    end
+
+    test "loads the core sample data behind a live checklist, then the done screen", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/install")
+      view |> element("#install-dev-seeds") |> render_click()
+
+      # Trim to the core only (deselect the heavy Chelekom kit + extension seeds) for a fast test.
+      view |> element("#seed-chelekom input") |> render_click()
+      view |> element("#seed-blog input") |> render_click()
+      view |> element("#seed-document input") |> render_click()
+
+      view |> element("#seeds-run") |> render_click()
+
+      # Runs async behind the same checklist the real install uses.
+      assert has_element?(view, "#install-progress")
+      assert has_element?(view, "#step-core")
+      render_async(view, 30_000)
+
+      assert has_element?(view, "#install-complete")
+      view |> element("#install-finish") |> render_click()
+
+      assert has_element?(view, "#install-done")
+      assert render(view) =~ "Sample data loaded"
+      assert Install.installed?()
+      assert Site |> Ash.read!(authorize?: false) != []
+    end
+  end
+
   # THE PICKER IS THE INSTALLER'S OWN REGISTRY DRAWN. Nothing in the wizard names an extension, so
   # these register a plugin the way a real one registers itself and assert the screen follows.
   describe "the extensions step" do

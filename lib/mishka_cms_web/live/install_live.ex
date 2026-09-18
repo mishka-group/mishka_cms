@@ -66,7 +66,8 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(
        page_title: gettext("Install — Mishka CMS"),
        step: :config,
-       site: nil
+       site: nil,
+       seeded?: false
      )
      |> assign(standalone_assets: true)
      |> assign(config: %{}, submitted?: false)
@@ -97,6 +98,11 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
      |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
+     |> assign(
+       dev_seeds: dev_seeds_allowed?(),
+       seed_categories: dev_seed_categories(),
+       seed_selected: default_seed_selected()
+     )
      |> assign_form(%{})}
   end
 
@@ -254,6 +260,38 @@ defmodule MishkaCmsWeb.InstallLive do
     end
   end
 
+  def handle_event("dev_seeds", _params, socket) do
+    if dev_seeds_allowed?(),
+      do: {:noreply, assign(socket, step: :seeds)},
+      else: {:noreply, socket}
+  end
+
+  def handle_event("toggle_seed", %{"key" => key}, socket) do
+    {:noreply, assign(socket, seed_selected: toggle(socket.assigns.seed_selected, key))}
+  end
+
+  def handle_event("run_seeds", _params, socket) do
+    if dev_seeds_allowed?() do
+      selected = Enum.map(socket.assigns.seed_selected, &String.to_existing_atom/1)
+      lv = self()
+
+      if connected?(socket),
+        do: Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, "runtime:bulk_compile")
+
+      {:noreply,
+       socket
+       |> assign(step: :installing, install_origin: :seeds, install_steps: seed_steps(selected))
+       |> assign(install_error: nil, install_done: false, install_total: 0, compiled_count: 0)
+       |> MishkaGervaz.Messages.start_async(:seeds, fn ->
+         MishkaCmsCore.Dev.Seeds.run(selected, fn message ->
+           send(lv, {:install_progress, message})
+         end)
+       end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl true
   # One catalogue over every kit found on disk. With only Chelekom present this is the single-kit
   # catalogue it always was; drop the generator's headless bundle beside it and its components join
@@ -294,6 +332,23 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   def handle_async(:install, {:exit, reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(install_steps: fail_running_step(socket.assigns.install_steps))
+     |> assign(install_error: exit_message(reason))}
+  end
+
+  def handle_async(:seeds, {:ok, core}, socket) do
+    MishkaCmsCore.Install.mark_installed!()
+    site = Enum.find(core.sites, &(&1.host == "localhost")) || hd(core.sites)
+
+    {:noreply,
+     socket
+     |> assign(site: site, seeded?: true, install_done: true)
+     |> assign(install_steps: all_done(socket.assigns.install_steps))}
+  end
+
+  def handle_async(:seeds, {:exit, reason}, socket) do
     {:noreply,
      socket
      |> assign(install_steps: fail_running_step(socket.assigns.install_steps))
@@ -365,6 +420,14 @@ defmodule MishkaCmsWeb.InstallLive do
             )
           )}
         </p>
+        <p :if={@seeded?} class="inst-seed-note">
+          {raw(
+            gettext("Sample data loaded — master login %{email} / %{password}",
+              email: strong("master@example.com"),
+              password: strong("Password123!")
+            )
+          )}
+        </p>
         <div class="inst-db">
           {gettext("Admin dashboard:")} <code phx-no-curly-interpolation>/admin/dashboard</code>
         </div>
@@ -386,7 +449,11 @@ defmodule MishkaCmsWeb.InstallLive do
       step={@step}
       config={@config}
       catalog={@catalog}
-      title={gettext("Installation")}
+      title={
+        if @install_origin == :seeds,
+          do: gettext("Loading sample data"),
+          else: gettext("Installation")
+      }
       subtitle={gettext("Setting up everything your CMS needs — sit tight.")}
     >
       <ul id="install-progress" class="inst-steps-list">
@@ -414,7 +481,9 @@ defmodule MishkaCmsWeb.InstallLive do
       <div :if={@install_error} class="inst-actions">
         <button id="install-error-back" type="button" phx-click="back" class={btn_ghost()}>
           <.svg_back />
-          {gettext("Back to settings")}
+          {if @install_origin == :seeds,
+            do: gettext("Back to sample data"),
+            else: gettext("Back to settings")}
         </button>
       </div>
 
@@ -1030,6 +1099,78 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  def render(%{step: :seeds} = assigns) do
+    ~H"""
+    <.shell
+      step={@step}
+      config={@config}
+      catalog={@catalog}
+      title={gettext("Load sample data")}
+      subtitle={gettext("For local development only — sample master, sites, users and content.")}
+    >
+      <div id="installer-seeds">
+        <div class="inst-smp">
+          <label id="seed-chelekom" class="inst-smp-row">
+            <input
+              type="checkbox"
+              checked={MapSet.member?(@seed_selected, "chelekom")}
+              phx-click="toggle_seed"
+              phx-value-key="chelekom"
+              class="inst-cbox"
+            />
+            <span class="nm">
+              {gettext("Chelekom UI components")}
+              <span class="ex">{gettext("— the full kit")}</span>
+            </span>
+          </label>
+          <label
+            :for={category <- @seed_categories}
+            id={"seed-#{category.key}"}
+            class="inst-smp-row"
+          >
+            <input
+              type="checkbox"
+              checked={MapSet.member?(@seed_selected, to_string(category.key))}
+              phx-click="toggle_seed"
+              phx-value-key={category.key}
+              class="inst-cbox"
+            />
+            <span class="nm">{category.label}</span>
+          </label>
+          <p class="inst-smp-note">
+            {raw(
+              gettext("Core data (sites, users, permissions, components) is %{included}.",
+                included: strong(gettext("always included"))
+              )
+            )}<br />
+            {raw(
+              gettext("Master login will be %{email} / %{password}",
+                email: strong("master@example.com"),
+                password: strong("Password123!")
+              )
+            )}
+          </p>
+        </div>
+
+        <div class="inst-actions">
+          <button id="seeds-back" type="button" phx-click="back" class={btn_ghost()}>
+            <.svg_back /> {gettext("Back")}
+          </button>
+          <button
+            id="seeds-run"
+            type="button"
+            phx-click="run_seeds"
+            data-loading={gettext("Seeding…")}
+            class={btn_primary()}
+          >
+            <span class="lbl">{gettext("Load sample data")} <.svg_arrow /></span>
+          </button>
+        </div>
+      </div>
+    </.shell>
+    """
+  end
+
   def render(assigns) do
     ~H"""
     <.shell
@@ -1092,6 +1233,16 @@ defmodule MishkaCmsWeb.InstallLive do
           <span class="lbl">{gettext("Next: choose components")} <.svg_arrow /></span>
         </button>
       </.form>
+
+      <button
+        :if={@dev_seeds}
+        id="install-dev-seeds"
+        type="button"
+        phx-click="dev_seeds"
+        class="inst-link-sub"
+      >
+        {gettext("⚡ Or load sample data for development")}
+      </button>
     </.shell>
     """
   end
@@ -1239,6 +1390,9 @@ defmodule MishkaCmsWeb.InstallLive do
         border-top-color:#fff;animation:inst-spin .7s linear infinite}
       .inst-btn[data-loading].phx-submit-loading::after,
       .inst-btn[data-loading].phx-click-loading::after{content:attr(data-loading)}
+      .inst-link-sub{display:block;text-align:center;margin-top:18px;background:none;border:none;
+        color:var(--blue);font-size:13.5px;font-weight:600;cursor:pointer;width:100%}
+      .inst-link-sub:hover{text-decoration:underline}
       .inst-mt{margin-top:12px}
 
       /* module rows (collapsed installable units) */
@@ -1360,11 +1514,15 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-chip.def{border-style:dashed}
       .inst-chip input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
 
-      /* checkbox rows */
+      /* sample data list */
+      .inst-smp{border:1.5px solid var(--line);border-radius:14px;background:#fff;padding:8px 6px}
       .inst-smp-row{display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer;border-radius:10px}
       .inst-smp-row:hover{background:var(--bg-2)}
       .inst-smp-row .nm{font-weight:600;font-size:14.5px}
       .inst-smp-row .ex{font-size:12.5px;color:var(--faint);margin-left:2px;font-weight:400}
+      .inst-smp-note{border-top:1px solid var(--line-2);margin:6px 0 0;padding:14px 16px 8px;
+        font-size:12.5px;color:var(--dim);line-height:1.55}
+      .inst-smp-note strong{color:var(--ink-2)}
 
       /* install progress */
       .inst-steps-list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0}
@@ -1464,6 +1622,8 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-done-wrap .inst-db{font-size:13px;color:var(--dim);margin-bottom:28px}
       .inst-done-wrap .inst-db code{background:var(--bg-2);border:1px solid var(--line);
         border-radius:6px;padding:2px 8px;font-size:12px}
+      .inst-seed-note{display:inline-block;margin:6px auto 14px;background:#fffbeb;
+        border:1.5px solid #fde68a;border-radius:10px;padding:10px 16px;font-size:13px;color:#92400e}
 
       /* mobile */
       .inst-mtop{display:none}
@@ -1556,6 +1716,7 @@ defmodule MishkaCmsWeb.InstallLive do
   defp rail_index(:settings), do: 2
   defp rail_index(:installing), do: 3
   defp rail_index(:done), do: 4
+  defp rail_index(:seeds), do: 10
 
   defp rail_state(i, index) when i < index, do: "done"
   defp rail_state(i, index) when i == index, do: "active"
@@ -2398,4 +2559,20 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp error_message(error) when is_exception(error), do: Exception.message(error)
   defp error_message(error), do: inspect(error)
+
+  defp dev_seeds_allowed?, do: Application.get_env(:mishka_cms_core, :env_dev?, false)
+
+  defp dev_seed_categories do
+    if dev_seeds_allowed?(), do: MishkaCmsCore.Dev.Seeds.categories(), else: []
+  end
+
+  defp default_seed_selected do
+    MapSet.new(["chelekom" | Enum.map(dev_seed_categories(), &to_string(&1.key))])
+  end
+
+  defp seed_steps(selected) do
+    Enum.map(MishkaCmsCore.Dev.Seeds.steps(selected), fn {id, label} ->
+      %{id: id, label: Settings.text(label), status: :pending, logs: []}
+    end)
+  end
 end
