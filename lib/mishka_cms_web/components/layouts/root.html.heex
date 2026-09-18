@@ -34,7 +34,10 @@
       href={css_href}
       id="mishka-runtime-css"
     />
-    <script :if={js_src} defer src={js_src}>
+    <%!-- The page-builder canvas wants the site's CSS so the document looks exactly as it will in
+         production, but NOT the site's JS bundle: that bundle opens its own LiveSocket, and a
+         second one inside the editor's iframe would fight the canvas LiveView for the same DOM. --%>
+    <script :if={js_src && !assigns[:suppress_site_js]} defer src={js_src}>
     </script>
     <script nonce={assigns[:csp_nonce]}>
       (() => {

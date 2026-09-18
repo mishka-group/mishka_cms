@@ -12,15 +12,17 @@ defmodule MishkaCmsWeb.Endpoint do
     same_site: "Lax"
   ]
 
-  # LiveView socket with dynamic origin checking for multi-tenant.
+  # LiveView socket with dynamic origin checking for multi-tenant. The sign-in pages' forms are rate
+  # limited by the address `RemoteIp` reads off `:x_headers`, or `:peer_data` names — see
+  # `MishkaCmsWeb.RuntimeLive`'s `@client_request`.
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [
-      connect_info: [session: @session_options],
+      connect_info: [:peer_data, :x_headers, session: @session_options],
       check_origin: {MishkaCmsCore.Runtime.OriginValidator, :verify_origin?, []},
       timeout: 60_000
     ],
     longpoll: [
-      connect_info: [session: @session_options],
+      connect_info: [:peer_data, :x_headers, session: @session_options],
       check_origin: {MishkaCmsCore.Runtime.OriginValidator, :verify_origin?, []}
     ]
 

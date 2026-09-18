@@ -324,4 +324,26 @@ defmodule MishkaCmsWeb.SiteBundleTest do
 
     assert fetch(site, "css", on: other).resp_body == "/* address css #{site.name} */"
   end
+
+  # THE BUNDLE IS SERVED TO ITS ADMINS ONLY while the site is offline, and the visitor on the
+  # sign-in page is not signed in yet.
+  test "an offline site's sign-in page runs on the app's client, not on the site's bundle", %{
+    site: site
+  } do
+    seed_auth_pages!(site)
+    offline!(site)
+
+    assert site.host |> on_host() |> get("/auth") |> redirected_to() == "/en/auth"
+
+    head =
+      site.host
+      |> on_host()
+      |> get("/en/auth")
+      |> html_response(200)
+      |> String.split("</head>", parts: 2)
+      |> hd()
+
+    assert head =~ ~s(src="/assets/js/app.js")
+    refute head =~ "/assets/js/#{site.name}/"
+  end
 end

@@ -17,7 +17,9 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
   @moduletag :capture_log
 
   import MishkaCms.Test.Factory
+  import Phoenix.LiveViewTest
 
+  alias MishkaCmsCore.Accounts.Permission
   alias MishkaCmsCore.Install
   alias MishkaCmsCore.Install.StarterContent
   alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorPage}
@@ -26,6 +28,8 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
   alias MishkaCmsCore.Runtime.States.{AssetsState, CompileFailureState, SettingsState, SiteState}
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Settings
+
+  require Ash.Query
 
   setup %{conn: conn} do
     Install.mark_installed!()
@@ -111,6 +115,27 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
 
   defp entry(status, template), do: %{status: status, template: template}
 
+  @password "Password123!"
+
+  # The site's own admin, holding the whole dashboard.
+  defp admin!(site) do
+    permission =
+      case Permission
+           |> Ash.Query.filter(name == "admin:dashboard:*")
+           |> Ash.read_one!(authorize?: false) do
+        nil -> create_permission!(name: "admin:dashboard:*")
+        held -> held
+      end
+
+    [site_id: site.id]
+    |> create_user!()
+    |> Ash.Changeset.for_update(:assign_permissions, %{permission_ids: [permission.id]},
+      authorize?: false,
+      tenant: site.id
+    )
+    |> Ash.update!()
+  end
+
   # A site owner's plugin that answers an offline site with a page of its own.
   defmodule OwnersPage do
     @moduledoc false
@@ -178,6 +203,36 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
     for path <- ["/authors", "/authentic", "/installation-guide", "/assets-list", "/admin"] do
       assert conn |> get(path) |> maintenance?(), "#{path} was not closed"
     end
+  end
+
+  # THE WAY BACK IN: `/auth` goes to the site's sign-in page, which answers while the site is
+  # offline, and the site's admin signs in there and reaches the dashboard.
+  test "the sign-in page stays open, and an admin signs in there", %{conn: conn, site: site} do
+    seed_auth_pages!(site)
+    admin = admin!(site)
+
+    assert conn |> get("/auth") |> redirected_to() == "/en/auth"
+    assert conn |> get("/en/auth") |> html_response(200) =~ ~s(id="auth-sign-in-form")
+
+    {:ok, view, _html} = live(conn, "/en/auth")
+
+    {:error, {:redirect, %{to: handoff}}} =
+      view
+      |> form("#auth-sign-in-form", user: %{email: to_string(admin.email), password: @password})
+      |> render_submit()
+
+    signed_in = get(conn, handoff)
+    assert redirected_to(signed_in) == "/"
+
+    dashboard =
+      signed_in
+      |> recycle()
+      |> Map.put(:host, site.host)
+      |> Map.update!(:req_headers, &[{"host", site.host} | List.keydelete(&1, "host", 0)])
+      |> get("/admin/dashboard")
+
+    assert html_response(dashboard, 200)
+    refute maintenance?(dashboard)
   end
 
   test "the dashboard sends a signed-out admin to sign in", %{conn: conn} do

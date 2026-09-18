@@ -8,6 +8,28 @@ defmodule MishkaCmsWeb.RuntimeLive do
   validation, and error handling. The module supports multi-site configurations and provides fallback
   mechanisms for layout rendering failures.
 
+  ## What every page reads
+
+  - `@client_request` — `%{remote_ip: String.t() | nil}`, the address the visitor's socket came
+    from, read in `mount/3` and kept for every page the socket goes on to show. A page's sign-in
+    forms hand it to AshAuthentication as `ash_authentication_request`, so they are rate limited
+    per address as the `/api/auth` routes are (`MishkaCmsCore.Accounts.AuthRateLimit`).
+  - `@current_tenant` — the site's id, or `nil` for a master and for a visitor signing in to the
+    master accounts (`MishkaCmsCore.LiveUserAuth`, `:live_user_lazy`).
+
+  ## Visitors-only and signed-in-only pages
+
+  A page whose `extra` holds `"visitors_only" => true` — the sign-in pages — opens only for a
+  visitor who is not signed in; a signed-in one is redirected to the site root. One whose `extra`
+  holds `"signed_in_only" => true` — the sign-out page — opens only for a signed-in visitor; anyone
+  else is redirected to the sign-in page.
+
+  ## Sign-in pages of an offline site
+
+  A page on a sign-in address (`MishkaCmsCore.Runtime.Plugs.SiteLookupPlug.sign_in_path?/2`) stays
+  open while its site is offline, and loads the app's own LiveView client in place of the site's
+  bundle, which an offline site serves to its admins only.
+
   ## The head
 
   `handle_params/3` resolves the page's `<title>` and SEO head into `@page_seo` before every render,
@@ -16,6 +38,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   ## Events
 
+  - `runtime:page:visitors_only_redirected` — the socket of a signed-in visitor on a visitors-only
+    page, before it is redirected to the site root, with `%{site_id: site_id, path: page_path}` as
+    its meta. A plugin may redirect it elsewhere instead.
+  - `runtime:page:signed_in_only_redirected` — the same for a visitor who is not signed in on a
+    signed-in-only page, before it is redirected to the sign-in page.
   - `runtime:page:seo` — the page's head for the address asked, in every `handle_params/3`. A plugin
     is handed this map (`MishkaCmsCore.Runtime.Seo.given/2`) and returns it, changed — a page that
     serves many records (`/:lang/blog/:slug`) sets each record's own here. What it returns are
@@ -52,11 +79,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
     that sets `title`, `description` and `image` gets a complete head.
   """
   use MishkaCmsWeb, :live_view
+  alias MishkaCmsCore.Accounts.AuthRateLimit
   alias MishkaCmsCore.Accounts.Checks.AccessPermissions
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Runtime.Compilers.Helpers
-  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo}
-  alias MishkaCmsCore.Runtime.Plugs.LanguagePlug
+  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo, SiteAvailability}
+  alias MishkaCmsCore.Runtime.Plugs.{LanguagePlug, SiteLookupPlug}
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCoreWeb.ReturnTo
   alias MishkaInstaller.Event.Hook
@@ -79,6 +107,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
     socket =
       socket
       |> speaking(session[Languages.session()], site.id)
+      |> assign(:client_request, client_request(socket))
 
     case language_target(socket, path, site) do
       {:redirect, to} ->
@@ -156,12 +185,19 @@ defmodule MishkaCmsWeb.RuntimeLive do
                           |> assign_page_title()
                           |> assign(current_site: site)
                           |> assign(:query_params, query_params(params, captured))
+                          |> sign_in_assets(path, site)
                           |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
 
                         Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
 
                       {:sign_in, socket} ->
                         sign_in(socket, params)
+
+                      {:visitors_only, socket} ->
+                        send_home(socket, page_module)
+
+                      {:signed_in_only, socket} ->
+                        send_to_sign_in(socket, page_module)
 
                       {{:error, reason}, _socket} ->
                         _ =
@@ -320,6 +356,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
                 {:sign_in, socket} ->
                   {:noreply, sign_in(socket, params)}
+
+                {:visitors_only, socket} ->
+                  {:noreply, send_home(socket, page_module)}
+
+                {:signed_in_only, socket} ->
+                  {:noreply, send_to_sign_in(socket, page_module)}
 
                 {{:error, reason}, _socket} ->
                   _ =
@@ -785,13 +827,24 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # cannot be read is refused rather than served.
   #
   # AND THIS IS WHERE THE VISITOR IS LOADED, because it is the first moment the page is known — see
-  # `with_current_user/3`. The socket travels through and comes back out, so the two callers keep
+  # `with_current_user/4`. The socket travels through and comes back out, so the two callers keep
   # whichever user this page needed and no other.
+  #
+  # A visitors-only page answers `:visitors_only` for a signed-in visitor, and a signed-in-only page
+  # `:signed_in_only` for one who is not, before any permission.
   defp admit({:ok, _result} = compiled, page_module, socket) do
     required = page_module.__page_information__([:acl, :permissions])
-    socket = with_current_user(socket, required, page_module)
+    visitors_only = extra?(page_module, :visitors_only)
+    signed_in_only = extra?(page_module, :signed_in_only)
+    socket = with_current_user(socket, required, page_module, visitors_only or signed_in_only)
 
     case {required, socket.assigns[:current_user]} do
+      {_required, %{}} when visitors_only ->
+        {:visitors_only, socket}
+
+      {_required, nil} when signed_in_only ->
+        {:signed_in_only, socket}
+
       {[], _nobody_in_particular} ->
         {compiled, socket}
 
@@ -917,14 +970,83 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # `MishkaCmsCore.LiveUserAuth.load_current_user/1` makes exactly the checks the live session used
   # to make on every mount, and does them again on a navigation into a page that needs one after a
   # page that did not.
-  defp with_current_user(socket, [], page_module) do
+  #
+  # A visitors-only or signed-in-only page loads the visitor too, to send the wrong one away.
+  defp with_current_user(socket, [], page_module, false) do
     if reads_user?(page_module),
       do: MishkaCmsCore.LiveUserAuth.load_current_user(socket),
       else: socket
   end
 
-  defp with_current_user(socket, _required, _page_module),
+  defp with_current_user(socket, _required, _page_module, _visitors_only),
     do: MishkaCmsCore.LiveUserAuth.load_current_user(socket)
+
+  # A page marks itself visitors-only with `extra["visitors_only"] == true`, signed-in-only with
+  # `extra["signed_in_only"] == true`; the compiled `extra` holds atom or string keys, see `field/2`.
+  defp extra?(page_module, key) do
+    case page_module.__page_information__(:extra) do
+      %{} = extra -> field(extra, key) == true
+      _no_extra -> false
+    end
+  end
+
+  # A signed-in visitor on a visitors-only page goes to the site root, unless a plugin on
+  # `runtime:page:visitors_only_redirected` redirected the socket elsewhere first.
+  defp send_home(socket, page_module) do
+    socket =
+      Hook.call("runtime:page:visitors_only_redirected", socket,
+        meta: %{
+          site_id: page_module.__page_information__([:private, :site_id]),
+          path: page_module.__page_information__([:page, :path])
+        }
+      )
+
+    if socket.redirected,
+      do: socket,
+      else: redirect(socket, to: MishkaCmsCore.Helpers.path(socket, "/"))
+  end
+
+  # A visitor who is not signed in on a signed-in-only page goes to the sign-in page — nothing there
+  # to come back to — unless a plugin on `runtime:page:signed_in_only_redirected` redirected the
+  # socket elsewhere first.
+  defp send_to_sign_in(socket, page_module) do
+    socket =
+      Hook.call("runtime:page:signed_in_only_redirected", socket,
+        meta: %{
+          site_id: page_module.__page_information__([:private, :site_id]),
+          path: page_module.__page_information__([:page, :path])
+        }
+      )
+
+    if socket.redirected,
+      do: socket,
+      else: redirect(socket, to: MishkaCmsCore.Helpers.path(socket, "/auth"))
+  end
+
+  # The address the visitor's socket came from: `:x_headers` read the way the endpoint's
+  # `plug RemoteIp` reads a request's, else `:peer_data`. Call it from `mount/3` only, the one
+  # callback `get_connect_info/2` answers in; the `/live` socket must list both in `connect_info`.
+  defp client_request(socket) do
+    forwarded = get_connect_info(socket, :x_headers) || []
+
+    address =
+      RemoteIp.from(forwarded, AuthRateLimit.remote_ip_options()) ||
+        peer(get_connect_info(socket, :peer_data))
+
+    %{remote_ip: address && address |> :inet.ntoa() |> to_string()}
+  end
+
+  defp peer(%{address: address}), do: address
+  defp peer(_undeclared), do: nil
+
+  # A sign-in page of a site that is not open loads the app's own LiveView client and not the site's
+  # bundle, which such a site serves to its admins only. Assigned in `mount/3`, the render the root
+  # layout is drawn from.
+  defp sign_in_assets(socket, path, site) do
+    if SiteLookupPlug.sign_in_path?(path, site) and SiteAvailability.state(site.id) != :open,
+      do: assign(socket, standalone_assets: true, suppress_site_js: true),
+      else: socket
+  end
 
   # THE PAGE AND ITS LAYOUT ARE ASKED SEPARATELY, and either is enough. The layout is drawn with this
   # LiveView's own assigns, so its markup reads the visitor exactly as the page's does — but its
@@ -998,6 +1120,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   defp stored_seo(%{seo: %{} = seo}, key), do: Map.get(seo, key)
   defp stored_seo(_page, _key), do: nil
+
+  # A compiled page's keys are atoms where the atom already exists and strings where it does not —
+  # see `MishkaCmsCore.Runtime.Helpers.atomize_keys/1` — so each field is read both ways.
+  defp field(map, key), do: Map.get(map, key, Map.get(map, Atom.to_string(key)))
 
   # WHAT THE VISITOR ASKED FOR, WITHOUT THE ROUTE'S OWN WILDCARD. `live "/*path"` puts the matched
   # segments under "path" as a LIST, and a page template that rebuilds a query string from this map
