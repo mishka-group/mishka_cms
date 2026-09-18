@@ -4,13 +4,15 @@ defmodule MishkaCms.Test.Factory do
 
   Deliberately small: every extension carries its own factory now, so this holds only what the tests
   that remain here actually build — the CMS's web layer, its installer, and the handful of checks
-  that need more than one extension installed at once.
+  that need more than one extension installed at once. The blog fixtures below are here
+  because those cross-extension tests need real records from it.
 
-  See `MishkaCmsCore.Test.Factory` for
+  See `MishkaBlog.Test.Factory` and `MishkaCmsCore.Test.Factory` for
   each extension's own.
   """
 
   import MishkaCmsCore.Dev.Generator, except: [generate: 1, generate: 2]
+  import MishkaBlog.Dev.Generator, except: [generate: 1, generate: 2]
   import Ash.Generator, only: [generate: 1]
 
   alias MishkaCmsCore.Install.StarterContent
@@ -114,5 +116,29 @@ defmodule MishkaCms.Test.Factory do
     end)
 
     report
+  end
+
+  # Blog records, for the tests here that span extensions.
+
+  def create_blog_post!(overrides \\ []) do
+    {site_id, overrides} = Keyword.pop(overrides, :site_id)
+    # BlogPost MUST have a site_id (not global)
+    site_id = site_id || create_site!().id
+    tenant = site_id
+
+    overrides
+    |> blog_post(tenant)
+    |> generate()
+  end
+
+  def create_collection!(overrides \\ []) do
+    {site_id, overrides} = Keyword.pop(overrides, :site_id)
+    # Collection MUST have a site_id (not global)
+    site_id = site_id || create_site!().id
+    tenant = site_id
+
+    overrides
+    |> collection(tenant)
+    |> generate()
   end
 end

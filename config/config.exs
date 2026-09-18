@@ -138,6 +138,7 @@ config :mishka_cms,
   ecto_repos: [MishkaCms.Repo],
   generators: [timestamp_type: :utc_datetime],
   ash_domains: [
+    MishkaBlog,
     MishkaCmsCore.Runtime,
     MishkaCmsCore.Accounts,
     MishkaCmsCore.Notify,
@@ -148,7 +149,8 @@ config :mishka_cms,
 # Read by `MishkaCmsCore`, so it lives under that app's name rather than the host's.
 config :mishka_cms_core,
   extensions: [
-    MishkaCmsCoreWeb
+    MishkaCmsCoreWeb,
+    MishkaBlogWeb
   ]
 
 # Configures the endpoint

@@ -1,7 +1,8 @@
 defmodule MishkaCmsWeb.AshJsonApiRouter do
   @domains [
     MishkaCmsCore.Runtime,
-    MishkaCmsCore.Accounts
+    MishkaCmsCore.Accounts,
+    MishkaBlog
   ]
 
   # `use AshJsonApi.Router` generates `domains/0` from this list. The host router reads it when it
