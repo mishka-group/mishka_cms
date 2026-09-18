@@ -51,7 +51,7 @@ defmodule MishkaCmsWeb.InstallLive do
   """
   use MishkaCmsWeb, :live_view
 
-  alias MishkaCmsCore.Install.{Bootstrap, UiKitCatalog}
+  alias MishkaCmsCore.Install.{Bootstrap, Extensions, UiKitCatalog}
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
   alias MishkaCmsCore.Settings
 
@@ -89,6 +89,11 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(selected: MapSet.new(), required: MapSet.new(), query: "")
      |> assign(kits: [], kit_filter: nil)
      |> assign(picker_open: false, config_axes: %{}, open_config: nil)
+     |> assign(
+       extensions: Extensions.offered(),
+       extensions_chosen: MapSet.new(),
+       open_extension: nil
+     )
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
      |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
@@ -204,6 +209,17 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   def handle_event("rail_nav", _params, socket), do: {:noreply, socket}
+
+  def handle_event("toggle_extension", %{"key" => key}, socket) do
+    {:noreply, assign(socket, extensions_chosen: toggle(socket.assigns.extensions_chosen, key))}
+  end
+
+  # AN EXTENSION THAT WANTS NOTHING ASKED HAS NOTHING TO OPEN. Only one is open at a time, the way
+  # the component configuration above behaves, so a long list stays readable.
+  def handle_event("toggle_extension_fields", %{"key" => key}, socket) do
+    {:noreply,
+     assign(socket, open_extension: if(socket.assigns.open_extension == key, do: nil, else: key))}
+  end
 
   def handle_event("to_settings", _params, socket) do
     {:noreply, to_settings_step(socket)}
@@ -920,6 +936,86 @@ defmodule MishkaCmsWeb.InstallLive do
               </div>
             </div>
 
+            <%!-- EVERY EXTENSION THAT REGISTERED ITSELF, and nothing written down here. The list is
+                  `MishkaInstaller`'s own registry of plugins on `installer:extension:install`, so an
+                  extension that is installed offers itself and one that is not cannot appear. --%>
+            <div :if={@extensions != []} class="inst-mod">
+              <div class="inst-mod-head">
+                <div class="inst-mod-ico"><.svg_box /></div>
+                <div>
+                  <div class="t">{gettext("Extensions")}</div>
+                  <div class="s">
+                    {gettext(
+                      "Tick what this site should start with. Everything here can also be set up later, from its own menu."
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div class="inst-mod-body">
+                <ul id="install-extensions" class="inst-ext-list">
+                  <li
+                    :for={extension <- @extensions}
+                    id={"extension-#{extension.key}"}
+                    class={["inst-ext", MapSet.member?(@extensions_chosen, extension.key) && "on"]}
+                  >
+                    <label class="inst-ext-row">
+                      <input
+                        type="checkbox"
+                        id={"toggle-extension-#{extension.key}"}
+                        checked={MapSet.member?(@extensions_chosen, extension.key)}
+                        phx-click="toggle_extension"
+                        phx-value-key={extension.key}
+                        class="inst-cbox"
+                      />
+                      <span class="nm">
+                        <span class="t">{Settings.text(extension.label)}</span>
+                        <span :if={extension.summary != ""} class="s">
+                          {Settings.text(extension.summary)}
+                        </span>
+                      </span>
+                    </label>
+
+                    <%!-- ASKED ONLY WHEN IT IS WANTED. An extension declaring no fields has nothing
+                          to open, and one that does is asked only once it has been ticked. --%>
+                    <button
+                      :if={
+                        extension.fields != [] and MapSet.member?(@extensions_chosen, extension.key)
+                      }
+                      type="button"
+                      phx-click="toggle_extension_fields"
+                      phx-value-key={extension.key}
+                      class={["inst-mod-cust", @open_extension == extension.key && "open"]}
+                    >
+                      {gettext("Settings")} <span class="ch"><.svg_chev /></span>
+                    </button>
+
+                    <div
+                      :if={
+                        @open_extension == extension.key and
+                          MapSet.member?(@extensions_chosen, extension.key)
+                      }
+                      id={"extension-fields-#{extension.key}"}
+                      class="inst-ext-fields"
+                    >
+                      <div :for={field <- extension.fields} class="inst-field">
+                        <label for={"extension-#{extension.key}-#{field_name(field)}"}>
+                          {field_label(field)}
+                        </label>
+                        <input
+                          type="text"
+                          id={"extension-#{extension.key}-#{field_name(field)}"}
+                          name={"settings[extensions][#{extension.key}][#{field_name(field)}]"}
+                          class="inst-inp"
+                        />
+                        <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
             <div class="inst-actions">
               <button id="uikit-back" type="button" phx-click="back" class={btn_ghost()}>
                 <.svg_back /> {gettext("Back")}
@@ -1163,6 +1259,17 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-soon-tag{margin-left:auto;font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--amber);
         background:#fffbeb;border:1px solid #fde68a;padding:4px 10px;border-radius:99px}
       .inst-mod-body{border-top:1px solid var(--line-2);padding:16px 18px 18px;animation:inst-rise .3s}
+
+      /* extensions */
+      .inst-ext-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+      .inst-ext{border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}
+      .inst-ext.on{border-color:var(--blue);background:var(--blue-l)}
+      .inst-ext-row{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+      .inst-ext-row .nm{display:flex;flex-direction:column;gap:2px}
+      .inst-ext-row .t{font-weight:700;font-size:14px}
+      .inst-ext-row .s{font-size:12.5px;color:var(--dim)}
+      .inst-ext-fields{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}
+      .inst-ext-fields .inst-field:last-child{margin-bottom:0}
 
       /* component picker */
       .inst-comp-tools{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
@@ -1794,6 +1901,24 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  defp svg_box(assigns) do
+    ~H"""
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      aria-hidden="true"
+    >
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+    """
+  end
+
   defp svg_lock(assigns) do
     ~H"""
     <svg
@@ -1976,10 +2101,14 @@ defmodule MishkaCmsWeb.InstallLive do
     # unregistered key silently and the step would never run.
     {starter, settings} = Map.pop(settings, "starter_content", "true")
 
+    {answers, settings} = Map.pop(settings, "extensions", %{})
+
     params =
       socket.assigns.config
       |> bootstrap_params(selection, settings)
       |> Map.put(:starter_content, starter == "true")
+      |> Map.put(:extensions, MapSet.to_list(socket.assigns.extensions_chosen))
+      |> Map.put(:extension_answers, extension_answers(answers))
 
     lv = self()
 
@@ -2057,6 +2186,22 @@ defmodule MishkaCmsWeb.InstallLive do
     required = UiKitCatalog.required_closure(socket.assigns.catalog, selected)
     assign(socket, selected: selected, required: required)
   end
+
+  # A FIELD IS AN EXTENSION'S OWN SHAPE, read for either kind of key: it was written in a plugin's
+  # `initial:` and has been through Mnesia and a struct builder on the way here.
+  defp field_name(field), do: field |> field_key(:name) |> to_string()
+  defp field_label(field), do: Settings.text(field_key(field, :label)) || field_name(field)
+  defp field_hint(field), do: Settings.text(field_key(field, :hint)) || ""
+
+  defp field_key(field, key) when is_map(field),
+    do: Map.get(field, key) || Map.get(field, to_string(key))
+
+  defp field_key(_field, _key), do: nil
+
+  # WHAT THE TICKED EXTENSIONS WERE TOLD, keyed the way `Bootstrap` hands it to each of them. The
+  # form nests them under the extension's key, so an answer cannot reach the wrong one.
+  defp extension_answers(answers) when is_map(answers), do: answers
+  defp extension_answers(_absent), do: %{}
 
   defp toggle(selected, name) do
     if MapSet.member?(selected, name),

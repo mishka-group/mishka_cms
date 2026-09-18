@@ -815,4 +815,74 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#install-complete")
     end
   end
+
+  # THE PICKER IS THE INSTALLER'S OWN REGISTRY DRAWN. Nothing in the wizard names an extension, so
+  # these register a plugin the way a real one registers itself and assert the screen follows.
+  describe "the extensions step" do
+    setup do
+      {:ok, _registered} = MishkaBlog.Plugins.Installer.register()
+
+      :ok =
+        MishkaInstaller.Event.EventHandler.do_compile(
+          MishkaBlog.Plugins.Installer.config(:__event__),
+          :start,
+          false
+        )
+
+      :ok
+    end
+
+    test "offers every registered extension, with the label the plugin declared", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      assert has_element?(view, "#install-extensions")
+      assert has_element?(view, "#extension-mishka_blog")
+      assert render(view) =~ "Blog"
+    end
+
+    test "installs the one that was ticked", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      view |> element("#uikit-clear-all") |> render_click()
+      view |> element("#toggle-chelekom-button") |> render_click()
+      view |> element("#toggle-extension-mishka_blog") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      view
+      |> form("#install-settings-form",
+        settings: %{"site.title" => "Acme", "mailer.from" => "a@b.c"}
+      )
+      |> render_submit()
+
+      render_async(view, 30_000)
+
+      assert has_element?(view, "#install-complete")
+      assert "blog-post-list" in installed_components()
+    end
+
+    # TICKING NOTHING IS AN ANSWER, and the step still runs — it just has nothing to install.
+    test "installs none of it when none was ticked", %{conn: conn} do
+      view = to_settings(conn)
+
+      view
+      |> form("#install-settings-form",
+        settings: %{"site.title" => "Acme", "mailer.from" => "a@b.c"}
+      )
+      |> render_submit()
+
+      render_async(view, 30_000)
+
+      assert has_element?(view, "#install-complete")
+      refute "blog-post-list" in installed_components()
+    end
+  end
+
+  defp installed_components do
+    MishkaCmsCore.Runtime.Component
+    |> Ash.Query.for_read(:read_any, %{}, authorize?: false)
+    |> Ash.Query.select([:name])
+    |> Ash.read!(authorize?: false, page: [limit: 500])
+    |> Map.fetch!(:results)
+    |> Enum.map(& &1.name)
+  end
 end
