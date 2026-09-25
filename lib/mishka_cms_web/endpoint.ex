@@ -37,6 +37,11 @@ defmodule MishkaCmsWeb.Endpoint do
     longpoll: [connect_info: [:uri]],
     auth_token: true
 
+  # WHO IS ASKING, behind the reverse proxies: `conn.remote_ip` becomes the client `x-forwarded-for`
+  # names, read right to left past private addresses and the trusted proxies — see
+  # `MishkaCmsCore.Accounts.AuthRateLimit.remote_ip_options/0`.
+  plug RemoteIp, MishkaCmsCore.Accounts.AuthRateLimit.remote_ip_options()
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

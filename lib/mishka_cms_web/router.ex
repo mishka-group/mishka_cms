@@ -63,6 +63,7 @@ defmodule MishkaCmsWeb.Router do
     plug :accepts, ["json"]
     plug MishkaCmsCore.Runtime.Plugs.ApiTenantLookupPlug
     plug MishkaCmsCore.Runtime.Plugs.ApiCorsPlug
+    plug MishkaCmsCore.Runtime.Plugs.AuthRateLimitPlug
     plug :load_from_bearer
     plug :confirm_bearer_tenant
     plug :set_actor, :user

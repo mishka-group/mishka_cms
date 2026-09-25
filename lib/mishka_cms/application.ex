@@ -4,6 +4,10 @@ defmodule MishkaCms.Application do
 
   @impl true
   def start(_type, _args) do
+    # A malformed TRUSTED_PROXY_RANGES entry stops the boot, named, rather than failing every request
+    # in the endpoint's `plug RemoteIp`
+    :ok = MishkaCmsCore.Accounts.AuthRateLimit.validate_trusted_proxies!()
+
     # Start the partition counter for module compilation that we need to use in worker
     counter_ref = :atomics.new(1, signed: false)
     :persistent_term.put(:module_compiler_partition_counter, counter_ref)

@@ -129,6 +129,29 @@ if config_env() == :prod do
     mnesia_dir: Path.join(mishka_data, "mnesia"),
     essential: [MishkaInstaller.Event.Event, MishkaInstaller.Installer.Installer]
 
+  # WHO IS ASKING, BEHIND THE REVERSE PROXIES. Every request reaches the CMS from a proxy, so
+  # `RemoteIp` reads the visitor from `x-forwarded-for`, right to left, passing over private addresses
+  # (Coolify's own network) and these: Cloudflare's, as production runs
+  # (https://www.cloudflare.com/ips/), or TRUSTED_PROXY_RANGES, IPs and CIDR ranges separated by
+  # commas, for other proxies in front. That is the visitor only while Coolify's proxy trusts
+  # Cloudflare's addresses (its entrypoints' `forwardedHeaders.trustedIPs`); otherwise it drops what
+  # Cloudflare forwarded and every visitor is counted as Coolify's address. The sign-in limits count
+  # per visitor — see `MishkaCmsCore.Accounts.AuthRateLimit.remote_ip_options/0`. An entry that is
+  # no IP or CIDR range stops the boot (`MishkaCms.Application`).
+  cloudflare =
+    "173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18," <>
+      "108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17," <>
+      "162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22," <>
+      "2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32," <>
+      "2a06:98c0::/29,2c0f:f248::/32"
+
+  config :mishka_cms_core,
+         :trusted_proxies,
+         "TRUSTED_PROXY_RANGES"
+         |> System.get_env(cloudflare)
+         |> String.split(",", trim: true)
+         |> Enum.map(&String.trim/1)
+
   # ## SSL Support
   #
   # SSL is handled by reverse proxy (Cloudflare/Coolify)
