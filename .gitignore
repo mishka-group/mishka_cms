@@ -53,6 +53,8 @@ npm-debug.log
 /assets/js/packages
 __extensions/ash*/
 __extensions/mishka_gervaz/
+/priv/static/uploads
+/priv/static/uploads_archived
 __extensions/.keep
 
 # Assets are a bun project. An npm lockfile beside bun.lock is not a second opinion, it is a second

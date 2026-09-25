@@ -42,6 +42,18 @@ defmodule MishkaCmsWeb.Endpoint do
   # `MishkaCmsCore.Accounts.AuthRateLimit.remote_ip_options/0`.
   plug RemoteIp, MishkaCmsCore.Accounts.AuthRateLimit.remote_ip_options()
 
+  # A site's uploaded files are served only while that site is up, and sent `no-cache` so a browser
+  # or a CDN asks again before every reuse — a copy kept from while the site was up would outlive it.
+  plug MishkaCms.Plugs.UploadsGate, session: @session_options
+
+  plug Plug.Static,
+    at: "/",
+    from: :mishka_cms,
+    gzip: !code_reloading?,
+    only: ~w(uploads),
+    cache_control_for_etags: "no-cache",
+    cache_control_for_vsn_requests: "no-cache"
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
@@ -51,7 +63,7 @@ defmodule MishkaCmsWeb.Endpoint do
     at: "/",
     from: :mishka_cms,
     gzip: !code_reloading?,
-    only: MishkaCmsWeb.static_paths()
+    only: MishkaCmsWeb.static_paths() -- ~w(uploads)
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
