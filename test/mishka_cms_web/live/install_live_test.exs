@@ -14,6 +14,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
   alias MishkaCmsCore.Accounts.User
   alias MishkaCmsCore.Install
+  alias MishkaCmsCore.Runtime.Languages
   alias MishkaCmsCore.Runtime.Site
   alias MishkaCmsCore.Runtime.States.SettingsState
   alias MishkaCmsCore.Settings
@@ -735,6 +736,218 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#installer-settings")
       refute Install.installed?()
     end
+  end
+
+  describe "the languages on the settings step" do
+    test "English starts as the primary, with no remove button, and a crafted remove keeps it", %{
+      conn: conn
+    } do
+      view = to_settings(conn)
+
+      assert has_element?(view, "#install-language-list li:first-child#install-language-en")
+      assert has_element?(view, "#install-language-en.is-primary")
+      refute has_element?(view, "#install-language-remove-en")
+      refute has_element?(view, "#install-language-primary-en")
+      refute has_element?(view, "#install-language-option-en")
+
+      render_click(view, "remove_language", %{"code" => "en"})
+
+      assert has_element?(view, "#install-language-en.is-primary")
+    end
+
+    test "an empty search lists every language not chosen yet", %{conn: conn} do
+      view = to_settings(conn)
+
+      assert has_element?(view, "#install-language-search-form #install-language-search")
+      assert has_element?(view, "#install-language-options[role=listbox]")
+      assert has_element?(view, "#install-language-option-fa[role=option][type=button]")
+
+      assert language_options(view) ==
+               Enum.sort_by(Languages.known() -- ["en"], &Languages.name/1)
+
+      refute has_element?(view, "#install-language-none")
+    end
+
+    test "a search narrows the list by name, in any case and trimmed", %{conn: conn} do
+      view = to_settings(conn)
+
+      for query <- ["pers", "  PERS  ", "Persian"] do
+        search_languages(view, query)
+
+        assert language_options(view) == ["fa"], inspect(query)
+      end
+    end
+
+    test "a search narrows the list by code", %{conn: conn} do
+      view = to_settings(conn)
+
+      for query <- ["fa", " FA "] do
+        search_languages(view, query)
+
+        assert language_options(view) == ["fa"], inspect(query)
+      end
+    end
+
+    test "a search nothing matches says so instead of listing", %{conn: conn} do
+      view = to_settings(conn)
+
+      search_languages(view, "  zzz ")
+
+      assert has_element?(view, "#install-language-none", "zzz")
+      refute has_element?(view, "#install-language-options")
+
+      search_languages(view, "")
+
+      refute has_element?(view, "#install-language-none")
+      assert has_element?(view, "#install-language-option-fa")
+    end
+
+    test "a language chosen from the list is added and the search is cleared", %{conn: conn} do
+      view = to_settings(conn)
+
+      search_languages(view, "pers")
+      view |> element("#install-language-option-fa") |> render_click()
+
+      assert has_element?(view, "#install-language-list li:first-child#install-language-en")
+      assert has_element?(view, "#install-language-list li:nth-child(2)#install-language-fa")
+      assert has_element?(view, "#install-language-remove-fa")
+      assert has_element?(view, "#install-language-primary-fa")
+      assert has_element?(view, "#install-language-search[value='']")
+
+      assert language_options(view) ==
+               Enum.sort_by(Languages.known() -- ["en", "fa"], &Languages.name/1)
+
+      refute has_element?(view, "#install-language-error")
+
+      view |> element("#install-language-remove-fa") |> render_click()
+
+      refute has_element?(view, "#install-language-fa")
+      assert has_element?(view, "#install-language-option-fa")
+    end
+
+    test "Enter adds the only match and does nothing else, never the install", %{conn: conn} do
+      view = to_settings(conn)
+
+      view |> form("#install-language-search-form", language_query: "an") |> render_submit()
+
+      assert has_element?(view, "#installer-settings")
+      refute has_element?(view, "#install-progress")
+      refute has_element?(view, "#install-language-list li:nth-child(2)")
+      assert has_element?(view, "#install-language-search[value='an']")
+
+      view |> form("#install-language-search-form", language_query: "pers") |> render_submit()
+
+      assert has_element?(view, "#install-language-list li:nth-child(2)#install-language-fa")
+      assert has_element?(view, "#install-language-search[value='']")
+      refute has_element?(view, "#install-progress")
+      refute Install.installed?()
+    end
+
+    test "Make primary moves a language to the front and frees English to be removed", %{
+      conn: conn
+    } do
+      view = to_settings(conn)
+
+      view |> element("#install-language-option-fa") |> render_click()
+      view |> element("#install-language-primary-fa") |> render_click()
+
+      assert has_element?(view, "#install-language-list li:first-child#install-language-fa")
+      assert has_element?(view, "#install-language-fa.is-primary")
+      refute has_element?(view, "#install-language-remove-fa")
+      refute has_element?(view, "#install-language-primary-fa")
+      assert has_element?(view, "#install-language-list li:nth-child(2)#install-language-en")
+      refute has_element?(view, "#install-language-en.is-primary")
+      assert has_element?(view, "#install-language-primary-en")
+
+      view |> element("#install-language-remove-en") |> render_click()
+
+      assert has_element?(view, "#install-language-list li:first-child#install-language-fa")
+      refute has_element?(view, "#install-language-en")
+      refute has_element?(view, "#install-language-list li:nth-child(2)")
+      assert has_element?(view, "#install-language-option-en")
+    end
+
+    test "a crafted remove of the primary or make-primary of an unchosen code changes nothing", %{
+      conn: conn
+    } do
+      view = to_settings(conn)
+
+      view |> element("#install-language-option-fa") |> render_click()
+      view |> element("#install-language-primary-fa") |> render_click()
+
+      render_click(view, "remove_language", %{"code" => "fa"})
+
+      for code <- ["de", "xx", "", "FA"] do
+        render_click(view, "make_primary", %{"code" => code})
+      end
+
+      assert has_element?(view, "#install-language-list li:first-child#install-language-fa")
+      assert has_element?(view, "#install-language-list li:nth-child(2)#install-language-en")
+      refute has_element?(view, "#install-language-list li:nth-child(3)")
+      refute has_element?(view, "#install-language-de")
+    end
+
+    test "a code the list does not offer cannot be added", %{conn: conn} do
+      view = to_settings(conn)
+
+      for code <- ["xx", "Persian", "", "en", "FA", " fa"] do
+        render_click(view, "add_language", %{"language" => code})
+
+        assert has_element?(view, "#install-language-error"), inspect(code)
+      end
+
+      assert has_element?(view, "#install-language-en")
+      refute has_element?(view, "#install-language-list li:nth-child(2)")
+
+      view |> element("#install-language-option-fa") |> render_click()
+
+      refute has_element?(view, "#install-language-error")
+    end
+
+    test "the chosen languages and their order survive a trip back to the kit step", %{
+      conn: conn
+    } do
+      view = to_settings(conn)
+
+      view |> element("#install-language-option-fa") |> render_click()
+      view |> element("#install-language-primary-fa") |> render_click()
+      view |> element("#settings-back") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      assert has_element?(view, "#install-language-list li:first-child#install-language-fa")
+      assert has_element?(view, "#install-language-list li:nth-child(2)#install-language-en")
+    end
+
+    test "finishing the install saves them to the new site, the primary first", %{conn: conn} do
+      view = to_settings(conn)
+
+      view |> element("#install-language-option-fa") |> render_click()
+      view |> element("#install-language-primary-fa") |> render_click()
+      view |> form("#install-settings-form") |> render_submit()
+
+      assert has_element?(view, "#step-languages")
+      render_async(view, 15_000)
+      assert has_element?(view, "#install-complete")
+
+      assert [site] = Site |> Ash.read!(authorize?: false)
+      assert Settings.get_own("site.languages", nil, site.id) == ["fa", "en"]
+      assert Languages.site(site.id) == ["fa", "en"]
+      assert Languages.primary(site.id) == "fa"
+    end
+  end
+
+  defp search_languages(view, query) do
+    view
+    |> form("#install-language-search-form", language_query: query)
+    |> render_change()
+  end
+
+  defp language_options(view) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("#install-language-options [role=option]")
+    |> LazyHTML.attribute("phx-value-language")
   end
 
   describe "commit" do

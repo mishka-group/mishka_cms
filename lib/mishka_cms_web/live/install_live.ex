@@ -53,6 +53,7 @@ defmodule MishkaCmsWeb.InstallLive do
 
   alias MishkaCmsCore.Install.{Bootstrap, Extensions, UiKitCatalog}
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
+  alias MishkaCmsCore.Runtime.Languages
   alias MishkaCmsCore.Settings
 
   @install_setting_keys ["site.title", "mailer.from"]
@@ -96,6 +97,7 @@ defmodule MishkaCmsWeb.InstallLive do
        open_extension: nil
      )
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
+     |> assign(languages: Languages.default(), language_error: nil, language_query: "")
      |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
      |> assign(
@@ -249,6 +251,26 @@ defmodule MishkaCmsWeb.InstallLive do
 
   def handle_event("validate_settings", %{"settings" => params}, socket) do
     {:noreply, assign_settings_form(socket, params)}
+  end
+
+  def handle_event("search_languages", %{"language_query" => query}, socket) do
+    {:noreply, assign(socket, language_query: query)}
+  end
+
+  def handle_event("pick_language", %{"language_query" => query}, socket) do
+    {:noreply, pick_language(socket, query)}
+  end
+
+  def handle_event("add_language", %{"language" => code}, socket) do
+    {:noreply, add_language(socket, code)}
+  end
+
+  def handle_event("make_primary", %{"code" => code}, socket) do
+    {:noreply, make_primary(socket, code)}
+  end
+
+  def handle_event("remove_language", %{"code" => code}, socket) do
+    {:noreply, remove_language(socket, code)}
   end
 
   def handle_event("install", %{"settings" => params}, socket) do
@@ -543,6 +565,10 @@ defmodule MishkaCmsWeb.InstallLive do
             </span>
           </label>
         </.form>
+
+        <div class="inst-divider"></div>
+
+        <.language_picker languages={@languages} error={@language_error} query={@language_query} />
 
         <div class="inst-actions">
           <button id="settings-back" type="button" phx-click="back" class={btn_ghost()}>
@@ -1353,6 +1379,48 @@ defmodule MishkaCmsWeb.InstallLive do
 
       .inst-divider{height:1px;background:var(--line-2);margin:30px 0}
 
+      /* languages */
+      .inst-lang-list{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0 0 16px;padding:0}
+      .inst-lang{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px 8px;max-width:100%;
+        padding:6px 8px 6px 13px;border:1.5px solid var(--line);border-radius:99px;background:#fff;
+        font-size:13.5px}
+      .inst-lang.is-primary{border-color:var(--blue);background:var(--blue-l);padding-right:10px}
+      .inst-lang .nm,.inst-lang-opt .nm{font-weight:600;color:var(--ink)}
+      .inst-lang .cd,.inst-lang-opt .cd{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+        font-size:11px;color:var(--faint)}
+      .inst-lang-dir{font-size:10.5px;font-weight:600;color:var(--dim);background:#f1f5f9;
+        border-radius:99px;padding:2px 8px;white-space:nowrap}
+      .inst-lang-badge{font-size:10.5px;font-weight:600;color:#fff;background:var(--blue);
+        border-radius:99px;padding:2px 8px;white-space:nowrap}
+      .inst-lang-mk{border:none;background:none;border-radius:99px;padding:3px 8px;cursor:pointer;
+        font-size:11.5px;font-weight:600;color:var(--blue);outline:none;transition:background .12s;
+        white-space:nowrap}
+      .inst-lang-mk:hover,.inst-lang-mk:focus-visible{background:var(--blue-l)}
+      .inst-lang-mk:focus-visible{box-shadow:0 0 0 2px var(--blue)}
+      .inst-lang-rm{width:24px;height:24px;border-radius:50%;border:none;background:none;
+        color:var(--faint);cursor:pointer;display:grid;place-items:center;padding:0;outline:none}
+      .inst-lang-rm:hover,.inst-lang-rm:focus-visible{background:#fef2f2;color:#dc2626}
+      .inst-lang-rm:focus-visible{box-shadow:0 0 0 2px #fca5a5}
+      .inst-lang-find{position:relative}
+      .inst-lang-find svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);
+        color:var(--faint);pointer-events:none}
+      .inst-lang-find .inst-inp{padding:12px 14px 12px 40px}
+      .inst-lang-opts{display:flex;flex-direction:column;gap:2px;margin-top:8px;padding:4px;
+        max-height:264px;overflow-y:auto;overscroll-behavior:contain;
+        border:1.5px solid var(--line);border-radius:10px;background:#fff}
+      .inst-lang-opt{display:flex;align-items:center;gap:8px;width:100%;flex-shrink:0;
+        padding:8px 10px;border:none;border-radius:7px;background:none;cursor:pointer;
+        font-size:13.5px;text-align:start;color:var(--ink-2);outline:none;transition:background .12s}
+      .inst-lang-opt:hover{background:var(--bg-2)}
+      .inst-lang-opt:focus-visible{background:var(--blue-l);box-shadow:inset 0 0 0 1.5px var(--blue)}
+      .inst-lang-opt .add{margin-left:auto;display:grid;place-items:center;color:var(--faint);
+        transition:color .12s}
+      .inst-lang-opt:hover .add,.inst-lang-opt:focus-visible .add{color:var(--blue)}
+      .inst-lang-none{margin:8px 0 0;padding:16px;text-align:center;font-size:13.5px;color:var(--faint);
+        border:1.5px dashed var(--line);border-radius:10px}
+      .inst-lang-opts~.inst-hint,.inst-lang-opts~.inst-error,
+      .inst-lang-none~.inst-hint,.inst-lang-none~.inst-error{margin-top:10px}
+
       /* password strength */
       .inst-meter{display:flex;gap:5px;margin-top:9px}
       .inst-meter i{height:4px;flex:1;border-radius:99px;background:var(--line);transition:background .25s}
@@ -1772,6 +1840,127 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  attr :languages, :list, required: true
+  attr :error, :string, default: nil
+  attr :query, :string, default: ""
+
+  defp language_picker(assigns) do
+    assigns =
+      assign(assigns,
+        primary: List.first(assigns.languages),
+        needle: String.trim(assigns.query),
+        matches: matching_languages(assigns.languages, assigns.query)
+      )
+
+    ~H"""
+    <section id="install-languages">
+      <h3 class="inst-sec-h"><.svg_globe /> {gettext("Languages")}</h3>
+      <ul id="install-language-list" class="inst-lang-list">
+        <li
+          :for={code <- @languages}
+          id={"install-language-#{code}"}
+          class={["inst-lang", code == @primary && "is-primary"]}
+        >
+          <span class="nm">{Languages.name(code)}</span>
+          <span class="cd">{code}</span>
+          <span :if={Languages.direction(code) == "rtl"} class="inst-lang-dir">
+            {gettext("right to left")}
+          </span>
+          <span :if={code == @primary} class="inst-lang-badge">{gettext("primary")}</span>
+          <button
+            :if={code != @primary}
+            id={"install-language-primary-#{code}"}
+            type="button"
+            phx-click="make_primary"
+            phx-value-code={code}
+            aria-label={
+              gettext("Make %{language} the primary language", language: Languages.name(code))
+            }
+            class="inst-lang-mk"
+          >
+            {gettext("Make primary")}
+          </button>
+          <button
+            :if={code != @primary}
+            id={"install-language-remove-#{code}"}
+            type="button"
+            phx-click="remove_language"
+            phx-value-code={code}
+            aria-label={gettext("Remove %{language}", language: Languages.name(code))}
+            class="inst-lang-rm"
+          >
+            <.svg_x />
+          </button>
+        </li>
+      </ul>
+      <div class="inst-field">
+        <form
+          id="install-language-search-form"
+          phx-change="search_languages"
+          phx-submit="pick_language"
+        >
+          <label for="install-language-search">{gettext("Add a language")}</label>
+          <div class="inst-lang-find">
+            <.svg_search />
+            <input
+              id="install-language-search"
+              type="text"
+              name="language_query"
+              value={@query}
+              placeholder={gettext("Search by name or code…")}
+              autocomplete="off"
+              spellcheck="false"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={to_string(@matches != [])}
+              aria-controls="install-language-options"
+              phx-debounce="150"
+              class="inst-inp"
+            />
+          </div>
+        </form>
+        <div
+          :if={@matches != []}
+          id="install-language-options"
+          role="listbox"
+          aria-label={gettext("Languages to add")}
+          class="inst-lang-opts"
+        >
+          <button
+            :for={code <- @matches}
+            id={"install-language-option-#{code}"}
+            type="button"
+            role="option"
+            aria-selected="false"
+            phx-click="add_language"
+            phx-value-language={code}
+            class="inst-lang-opt"
+          >
+            <span class="nm">{Languages.name(code)}</span>
+            <span class="cd">{code}</span>
+            <span :if={Languages.direction(code) == "rtl"} class="inst-lang-dir">
+              {gettext("right to left")}
+            </span>
+            <span class="add"><.svg_plus /></span>
+          </button>
+        </div>
+        <p :if={@matches == [] and @needle != ""} id="install-language-none" class="inst-lang-none">
+          {gettext("No language matches “%{query}”.", query: @needle)}
+        </p>
+        <p :if={@matches == [] and @needle == ""} id="install-language-all" class="inst-lang-none">
+          {gettext("Every language this install offers is on the list.")}
+        </p>
+        <p :if={@error} id="install-language-error" class="inst-error">{@error}</p>
+        <p :if={is_nil(@error)} class="inst-hint">
+          {gettext(
+            "A visitor whose address names no language is answered in the primary one. Every page this install writes answers each language here; the settings page changes the list later."
+          )}
+        </p>
+      </div>
+    </section>
+    """
+  end
+
   attr :password, :any, default: nil
 
   defp strength_meter(assigns) do
@@ -2097,6 +2286,42 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  defp svg_x(assigns) do
+    ~H"""
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.4"
+      stroke-linecap="round"
+      aria-hidden="true"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+    """
+  end
+
+  defp svg_plus(assigns) do
+    ~H"""
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.4"
+      stroke-linecap="round"
+      aria-hidden="true"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+    """
+  end
+
   defp svg_github(assigns) do
     ~H"""
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -2270,6 +2495,7 @@ defmodule MishkaCmsWeb.InstallLive do
       |> Map.put(:starter_content, starter == "true")
       |> Map.put(:extensions, MapSet.to_list(socket.assigns.extensions_chosen))
       |> Map.put(:extension_answers, extension_answers(answers))
+      |> Map.put(:languages, socket.assigns.languages)
 
     lv = self()
 
@@ -2454,6 +2680,65 @@ defmodule MishkaCmsWeb.InstallLive do
     socket
     |> assign(step: :settings, settings_submitted?: false)
     |> assign(settings_form: to_form(values, as: :settings))
+  end
+
+  # ONLY A CODE THE LIST OFFERS, so an event naming anything else stores nothing.
+  defp add_language(socket, code) do
+    if code in addable_languages(socket.assigns.languages) do
+      assign(socket,
+        languages: socket.assigns.languages ++ [code],
+        language_error: nil,
+        language_query: ""
+      )
+    else
+      assign(socket, language_error: gettext("Choose a language from the list."))
+    end
+  end
+
+  # Enter in the search box: the submitted query, not the assign, which a debounce may not have
+  # reached yet. Adds the language only when the query leaves exactly one.
+  defp pick_language(socket, query) do
+    case matching_languages(socket.assigns.languages, query) do
+      [code] -> add_language(socket, code)
+      _none_or_several -> assign(socket, language_query: query)
+    end
+  end
+
+  # The first code is the primary; a code not on the list is left alone.
+  defp make_primary(%{assigns: %{languages: languages}} = socket, code) do
+    if code in languages,
+      do: assign(socket, languages: [code | List.delete(languages, code)], language_error: nil),
+      else: socket
+  end
+
+  # The primary stays, so the list always keeps one language.
+  defp remove_language(%{assigns: %{languages: [primary | rest]}} = socket, code)
+       when code != primary do
+    assign(socket, languages: [primary | List.delete(rest, code)], language_error: nil)
+  end
+
+  defp remove_language(socket, _code), do: socket
+
+  # The codes with a name, not chosen yet and allowed by the master, by their names.
+  defp addable_languages(chosen) do
+    Languages.known()
+    |> Enum.reject(&(&1 in chosen))
+    |> Enum.filter(&Languages.valid?([&1]))
+    |> Enum.sort_by(&Languages.name/1)
+  end
+
+  # The addable codes whose name or code holds the query, trimmed and in any case; every one of them
+  # for a blank query.
+  defp matching_languages(chosen, query) do
+    needle = query |> String.trim() |> String.downcase()
+    Enum.filter(addable_languages(chosen), &language_matches?(&1, needle))
+  end
+
+  defp language_matches?(_code, ""), do: true
+
+  defp language_matches?(code, needle) do
+    String.contains?(code, needle) or
+      String.contains?(String.downcase(Languages.name(code)), needle)
   end
 
   defp install_settings do
