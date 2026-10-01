@@ -435,6 +435,36 @@ const DashboardTray = {
 // server genuinely cannot do — pointer geometry, key handling, and bridging the canvas iframe.
 // ---------------------------------------------------------------------------------------------
 
+// Copy-to-clipboard for the Studio's generated export. The text is on the button as a data
+// attribute rather than fetched, because the server already rendered exactly what is on screen —
+// copying anything else would hand over something the reader never saw.
+const PbCopy = {
+  mounted() {
+    this.onClick = async () => {
+      const text = this.el.dataset.copy || "";
+      try {
+        await navigator.clipboard.writeText(text);
+        this.flash("Copied");
+      } catch {
+        this.flash("Press ⌘C");
+      }
+    };
+
+    this.flash = (label) => {
+      const original = this.el.textContent;
+      this.el.textContent = label;
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => (this.el.textContent = original), 1400);
+    };
+
+    this.el.addEventListener("click", this.onClick);
+  },
+  destroyed() {
+    clearTimeout(this.timer);
+    this.el.removeEventListener("click", this.onClick);
+  },
+};
+
 // A horizontal strip you can pan by dragging it, for the palette's category chips. The row is
 // deliberately scrollbar-less — a scrollbar under a row of chips eats a line of pixels and reads as
 // a defect — so without this the overflow would be reachable by wheel alone.
@@ -493,6 +523,313 @@ const PbDragScroll = {
     this.el.removeEventListener("pointerup", this.onUp);
     this.el.removeEventListener("pointercancel", this.onUp);
     this.el.removeEventListener("click", this.onClick, true);
+  },
+};
+
+// A 6px column/row grip. Pointer capture means the drag survives the cursor leaving the element —
+// including the canvas iframe, which would otherwise swallow the rest of the gesture.
+//
+// The size belongs to the BROWSER while the pointer is down. It used to be pushed on every
+// pointermove, and a mouse reports sixty to a hundred and twenty times a second: each report was a
+// socket round trip that re-rendered the panel, so the divider trailed the cursor and then kept
+// sliding for seconds after the mouse came up, draining a queue nobody could stop. Measured on this
+// page: sixty moves in one drag, sixty messages, five seconds to settle.
+//
+// So the drag paints locally, one style write per animation frame, and the server is told once —
+// when the gesture ends — because the assign is what any later re-render, reconnect or reload
+// renders the panel from. `data-min`/`data-max` come from the same bounds the LiveView clamps to,
+// so the local drag stops exactly where the server would have stopped it and nothing snaps back.
+const PbGrip = {
+  mounted() {
+    this.panel = this.el.dataset.panel;
+    this.min = Number(this.el.dataset.min) || -Infinity;
+    this.max = Number(this.el.dataset.max) || Infinity;
+    this.prop = this.el.dataset.var;
+    this.onDown = (event) => this.begin(event);
+    this.el.addEventListener("pointerdown", this.onDown);
+  },
+
+  // A hook whose element is gone cannot talk to the server — collapsing the panel mid-drag removes
+  // this grip — so teardown only unbinds. The size the drag reached is lost with the panel it sized,
+  // which is the same thing the reader just did by collapsing it.
+  destroyed() {
+    this.el.removeEventListener("pointerdown", this.onDown);
+    this.finish(false);
+  },
+
+  begin(event) {
+    const target = this.target();
+    if (!target || this.dragging) return;
+
+    event.preventDefault();
+    this.el.setPointerCapture(event.pointerId);
+
+    this.dragging = target;
+    this.frame = null;
+    this.value = null;
+    this.origin = {
+      x: event.clientX,
+      y: event.clientY,
+      size: this.vertical() ? target.offsetHeight : target.offsetWidth,
+    };
+
+    this.onMove = (ev) => this.track(ev);
+    this.onEnd = () => this.finish();
+
+    this.el.addEventListener("pointermove", this.onMove);
+    this.el.addEventListener("pointerup", this.onEnd);
+    this.el.addEventListener("pointercancel", this.onEnd);
+    // Alt-tab, a system gesture or the element being patched away all end the drag without a
+    // pointerup. Without this the listeners would outlive the gesture and the size would never
+    // reach the server.
+    this.el.addEventListener("lostpointercapture", this.onEnd);
+  },
+
+  track(ev) {
+    this.value = this.clamp(this.origin.size + this.delta(ev));
+
+    // One write per frame. A pointer reports faster than the screen redraws, and a style write per
+    // report is work no one can see.
+    if (this.frame) return;
+
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      this.paint();
+    });
+  },
+
+  finish(tell = true) {
+    if (!this.dragging) return;
+
+    this.el.removeEventListener("pointermove", this.onMove);
+    this.el.removeEventListener("pointerup", this.onEnd);
+    this.el.removeEventListener("pointercancel", this.onEnd);
+    this.el.removeEventListener("lostpointercapture", this.onEnd);
+
+    if (this.frame) cancelAnimationFrame(this.frame);
+    this.frame = null;
+    this.paint();
+
+    // The one message of the whole gesture. `value` is null when the pointer went down and came up
+    // without moving — a click on the divider is not a resize.
+    if (tell && this.value !== null) {
+      this.pushEvent("resize", { panel: this.panel, value: this.value });
+    }
+
+    this.dragging = null;
+    this.value = null;
+  },
+
+  // Written to `<html>`, not to the panel. The panel's own `style` is re-emitted by the server on
+  // every render of the editor — these panels are called with a bare `{assigns}` splat, which turns
+  // LiveView's change tracking off for them — so anything written on the element itself is stamped
+  // back to the last value the server knows the moment an autosave tick or another editor's edit
+  // lands mid-gesture. The custom property is outside the LiveView, and the element's style reads
+  // `width:var(--pb-left-w, 272px)`: the server's number stays the fallback, the drag out-specifies
+  // it, and the patch it keeps rewriting says exactly the same thing either way.
+  paint() {
+    if (!this.dragging || this.value === null || !this.prop) return;
+    document.documentElement.style.setProperty(this.prop, `${this.value}px`);
+  },
+
+  // The drawer grows UPWARDS and the right panel leftwards, so both read the cursor backwards.
+  delta(ev) {
+    if (this.panel === "left") return ev.clientX - this.origin.x;
+    if (this.panel === "right") return this.origin.x - ev.clientX;
+    return this.origin.y - ev.clientY;
+  },
+
+  clamp(value) {
+    return Math.round(Math.min(this.max, Math.max(this.min, value)));
+  },
+
+  vertical() {
+    return this.panel === "drawer";
+  },
+
+  target() {
+    if (this.panel === "left") return document.getElementById("pb-left");
+    if (this.panel === "right") return document.getElementById("pb-right");
+    return document.querySelector('[data-role="pb-drawer"]');
+  },
+};
+
+// THE CANVAS ZOOM, PAINTED IN THE BROWSER AND TOLD TO THE SERVER ONCE THE CLICKING STOPS.
+//
+// Mount `PbZoom` on every element whose markup shows a zoom, and give it:
+//   - `data-zoom`: the zooms it shows, space-separated ("single", "frame")
+//   - `data-<zoom>-zoom`: the server's value of each, in percent
+//   - `data-zoom-root` when it carries `--pb-<zoom>-zoom` (the value / 100) for the frames under it
+//   - `data-min`, `data-max` and `data-event` when it holds the buttons of one zoom: a
+//     `data-zoom-step` button adds its step, a `data-zoom-reset` button sets its own value
+// Put `data-zoom-label="<zoom>"` on any element whose whole text is the value and a "%".
+//
+// A click repaints every one of those for its zoom at once and pushes `data-event` with `{ value }`
+// a single time, `ZOOM_SETTLE_MS` after the last click. A patch that renders the value the server
+// already had is painted over with the browser's; one that renders a value the browser never sent
+// is the server changing the zoom itself, and the browser takes it.
+const ZOOM_SETTLE_MS = 300;
+
+const zoomKinds = (el) => (el.dataset.zoom || "").split(/\s+/).filter(Boolean);
+
+// The server's value of `kind` as this element renders it, or null when it renders none.
+const renderedZoom = (el, kind) => {
+  const raw = el.getAttribute(`data-${kind}-zoom`);
+  const value = raw === null || raw === "" ? NaN : Number(raw);
+
+  return Number.isInteger(value) ? value : null;
+};
+
+const PB_ZOOM = {
+  hooks: new Set(),
+  zooms: {},
+
+  // `value` is on screen, `server` is the last value a patch rendered, `sent` the values pushed and
+  // not yet rendered back, oldest first.
+  zoom(kind) {
+    if (!this.zooms[kind]) {
+      this.zooms[kind] = {
+        value: null,
+        server: null,
+        sent: [],
+        timer: null,
+        event: null,
+        from: null,
+      };
+    }
+
+    return this.zooms[kind];
+  },
+
+  receive(kind, rendered) {
+    const zoom = this.zoom(kind);
+    if (rendered === null || rendered === zoom.server) return;
+
+    zoom.server = rendered;
+
+    const ours = zoom.sent.indexOf(rendered);
+    if (ours !== -1) {
+      zoom.sent.splice(0, ours + 1);
+      return;
+    }
+
+    clearTimeout(zoom.timer);
+    zoom.timer = null;
+    zoom.sent = [];
+    zoom.value = rendered;
+  },
+
+  set(kind, value, from) {
+    const zoom = this.zoom(kind);
+
+    zoom.value = value;
+    zoom.event = from.el.dataset.event;
+    zoom.from = from;
+    this.paint(kind);
+
+    clearTimeout(zoom.timer);
+    zoom.timer = setTimeout(() => this.flush(kind), ZOOM_SETTLE_MS);
+  },
+
+  // Pushes the settled value from the hook that was clicked, or from any hook still mounted once
+  // that one is gone. A value the server already has, or is about to, is not pushed again.
+  flush(kind) {
+    const zoom = this.zoom(kind);
+    zoom.timer = null;
+
+    const coming = zoom.sent.length ? zoom.sent[zoom.sent.length - 1] : zoom.server;
+    if (zoom.value === coming || !zoom.event) return;
+
+    const hook = this.hooks.has(zoom.from) ? zoom.from : this.hooks.values().next().value;
+    if (!hook) return;
+
+    zoom.sent.push(zoom.value);
+    hook.pushEvent(zoom.event, { value: zoom.value });
+  },
+
+  // Writes only what differs, so an element already showing the server's value keeps the exact
+  // markup the server rendered.
+  paint(kind) {
+    const value = this.zoom(kind).value;
+    if (value === null) return;
+
+    const prop = `--pb-${kind}-zoom`;
+    const scale = value / 100;
+    const text = `${value}%`;
+
+    for (const root of document.querySelectorAll("[data-zoom-root]")) {
+      if (!zoomKinds(root).includes(kind)) continue;
+      if (Number(root.style.getPropertyValue(prop)) !== scale) {
+        root.style.setProperty(prop, String(scale));
+      }
+    }
+
+    for (const label of document.querySelectorAll(`[data-zoom-label="${kind}"]`)) {
+      if (label.textContent !== text) label.textContent = text;
+    }
+
+    for (const group of document.querySelectorAll("[data-zoom][data-event]")) {
+      if (group.dataset.zoom !== kind) continue;
+
+      const min = Number(group.dataset.min);
+      const max = Number(group.dataset.max);
+
+      for (const button of group.querySelectorAll("[data-zoom-step]")) {
+        const off = Number(button.dataset.zoomStep) < 0 ? value <= min : value >= max;
+        if (button.disabled !== off) button.disabled = off;
+      }
+    }
+  },
+
+  // The last hook to go takes the state with it, so the next editor starts from its own render.
+  release(hook) {
+    this.hooks.delete(hook);
+    if (this.hooks.size) return;
+
+    for (const zoom of Object.values(this.zooms)) clearTimeout(zoom.timer);
+    this.zooms = {};
+  },
+};
+
+const PbZoom = {
+  mounted() {
+    PB_ZOOM.hooks.add(this);
+    this.onClick = (event) => this.press(event);
+    this.el.addEventListener("click", this.onClick);
+    this.sync();
+  },
+  updated() {
+    this.sync();
+  },
+  destroyed() {
+    this.el.removeEventListener("click", this.onClick);
+    PB_ZOOM.release(this);
+  },
+
+  sync() {
+    for (const kind of zoomKinds(this.el)) {
+      PB_ZOOM.receive(kind, renderedZoom(this.el, kind));
+      PB_ZOOM.paint(kind);
+    }
+  },
+
+  press(event) {
+    const button =
+      event.target.closest && event.target.closest("[data-zoom-step], [data-zoom-reset]");
+    if (!button || !this.el.contains(button) || button.disabled) return;
+
+    const [kind] = zoomKinds(this.el);
+    const current = PB_ZOOM.zoom(kind).value;
+    const wanted = button.hasAttribute("data-zoom-reset")
+      ? Number(button.dataset.zoomReset)
+      : current + Number(button.dataset.zoomStep);
+    const min = Number(this.el.dataset.min);
+    const max = Number(this.el.dataset.max);
+    const next = Math.min(max, Math.max(min, wanted));
+
+    if (!Number.isInteger(next) || next === current) return;
+
+    PB_ZOOM.set(kind, next, this);
   },
 };
 
@@ -647,6 +984,70 @@ const PbShortcuts = {
     window.removeEventListener("keydown", this.onKey);
     window.removeEventListener("message", this.onMessage);
     window.removeEventListener("dragend", this.onDragEnd, true);
+  },
+};
+
+const PbTheme = {
+  mounted() {
+    this.onClick = () => {
+      const root = document.documentElement;
+      const dark = root.getAttribute("data-theme") === "dark";
+      const next = dark ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try {
+        localStorage.setItem("phx:theme", next);
+      } catch (_denied) {
+        // Private browsing refuses localStorage; the theme still applies for this page.
+      }
+      // The prototype paints the page behind the editor too, so a short page has no light band.
+      document.body.style.background = next === "dark" ? "#100f16" : "#f6f5f2";
+    };
+    this.el.addEventListener("click", this.onClick);
+  },
+  destroyed() {
+    this.el.removeEventListener("click", this.onClick);
+  },
+};
+
+// PUBLISH MODE WRITES NOTHING, which is the whole point of it — a refresh brings the original back.
+// The cost is that leaving is indistinguishable from discarding, so this is the one place the editor
+// asks before losing work.
+//
+// Two exits, two mechanisms. Closing the tab, reloading and typing a URL are `beforeunload`, where
+// the browser owns the wording and all we can do is object. An in-app `<.link navigate>` never
+// unloads anything — it is a pushState — so nothing native fires and the click is caught here, on
+// the way down, and handed to the server, which can offer to keep the work as a draft rather than
+// only asking twice. `patch` links are left alone: they change the URL of the editor you are
+// already in.
+const PbLeaveGuard = {
+  mounted() {
+    this.armed = () => this.el.dataset.armed === "true";
+
+    this.warn = (event) => {
+      if (!this.armed()) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    this.intercept = (event) => {
+      if (!this.armed() || event.defaultPrevented || event.button > 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const link =
+        event.target.closest && event.target.closest('a[data-phx-link="redirect"]');
+      if (!link || link.target === "_blank") return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      this.pushEvent("leaving", { to: link.getAttribute("href") });
+    };
+
+    window.addEventListener("beforeunload", this.warn);
+    document.addEventListener("click", this.intercept, true);
+  },
+  destroyed() {
+    window.removeEventListener("beforeunload", this.warn);
+    document.removeEventListener("click", this.intercept, true);
   },
 };
 
@@ -3102,8 +3503,13 @@ export default {
   MentionBox,
   DashboardGrid,
   DashboardTray,
+  PbCopy,
   PbDragScroll,
+  PbGrip,
+  PbZoom,
   PbShortcuts,
+  PbTheme,
+  PbLeaveGuard,
   PbCanvas,
   PbPalettePrefs,
   PbContextMenu,
