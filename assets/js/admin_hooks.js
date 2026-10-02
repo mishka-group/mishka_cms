@@ -3493,8 +3493,87 @@ const SidebarScroll = {
   },
 };
 
+// THE SEO TAB'S VARIABLE CHIPS. A chip — `data-seo-var="{{page.title}}"` — puts its variable where
+// the caret last was in one of the form's text fields marked `data-seo-vars`, and announces the
+// change so the form's `phx-change` sends it. Nothing happens before such a field has been focused.
+//
+// The field is remembered by its `name`, so the one found on the click is the one on the page now,
+// whatever a patch has done to the element in between.
+const PbSeoFields = {
+  mounted() {
+    this.fieldName = null;
+
+    // A field that takes no variables, such as a select's free value, forgets the last one that did.
+    this.onFocus = (event) => {
+      const target = event.target;
+
+      if (seoTextField(target)) this.fieldName = target.name;
+      else if (target.matches("input[type='text'], textarea")) this.fieldName = null;
+    };
+
+    this.onClick = (event) => {
+      const chip = event.target.closest("[data-seo-var]");
+
+      if (!chip || !this.el.contains(chip)) return;
+
+      event.preventDefault();
+
+      // The field last typed in, else the first that takes a variable — the title — at its end, so
+      // a chip always lands somewhere the author can see.
+      const fields = [...this.el.querySelectorAll("input, textarea")].filter(seoTextField);
+      const remembered = fields.find((candidate) => candidate.name === this.fieldName);
+      const field = remembered || fields[0];
+
+      if (!field) return;
+
+      if (!remembered) field.setSelectionRange(field.value.length, field.value.length);
+      this.fieldName = field.name;
+      insertAtCaret(field, chip.dataset.seoVar);
+    };
+
+    this.el.addEventListener("focusin", this.onFocus);
+    this.el.addEventListener("click", this.onClick);
+
+    // A value the editor chose for a field, such as the share image picked from Media: it is typed
+    // in, so the field's own change writes it.
+    this.handleEvent("pb-seo-set", ({ id, value }) => {
+      const field = [...this.el.querySelectorAll("input, textarea")].find((el) => el.id === id);
+
+      if (field) {
+        field.value = value;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  },
+  destroyed() {
+    this.el.removeEventListener("focusin", this.onFocus);
+    this.el.removeEventListener("click", this.onClick);
+  },
+};
+
+function seoTextField(el) {
+  if (!el || !el.name || !el.hasAttribute("data-seo-vars")) return false;
+  if (el.tagName === "TEXTAREA") return true;
+
+  return el.tagName === "INPUT" && (el.type === "text" || el.type === "url");
+}
+
+// The text goes in place of the selection, the caret lands after it, and an `input` event tells
+// LiveView the field changed.
+function insertAtCaret(field, text) {
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? start;
+  const caret = start + text.length;
+
+  field.value = field.value.slice(0, start) + text + field.value.slice(end);
+  field.focus();
+  field.setSelectionRange(caret, caret);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 export default {
   FrameLoader,
+  PbSeoFields,
   NumberBounds,
   SidebarScroll,
   PbFrameBusy,
