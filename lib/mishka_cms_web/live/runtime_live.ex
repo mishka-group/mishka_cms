@@ -69,10 +69,16 @@ defmodule MishkaCmsWeb.RuntimeLive do
         (`MishkaCmsCore.Runtime.Seo.variables/0`). Strings, or numbers.
       * `var_docs` — `[]`. The variables this plugin fills, `[%{key: "post.title", label: "Post
         title"}]`, so an editor can list them. Return them whether or not this request filled them.
+      * `permissions` — `[]`. The record's own permission names. Named, the address opens only for
+        whoever holds one of them, after the page's own: nobody signed in is sent to sign in, and
+        somebody signed in without one gets the 404. The head says `noindex, nofollow`.
       * `page`, `site_id`, `params` — the `:page` section of `__page_information__/0`, the site, and
         `@query_params`: the path's captures (`"slug"`) and the query string. Read only. The
         visual editor asks with `params` empty, for `var_docs` and a preview, or with a sample
         record's.
+      * `record` — the kind of record the page shows, `"blog:post"`, from its `extra`
+        (`MishkaCmsCore.Runtime.Seo.record_of/1`); `nil` for none. Read only. A plugin answers for
+        its own kinds, which it names on `runtime:page:records`.
 
     A key returned with the wrong type keeps the given value
     (`MishkaCmsCore.Runtime.Seo.accept/2`). Every default tag is built from the answer, so a plugin
@@ -349,10 +355,15 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> assign(:current_path, joined_path)
                   |> assign(:query_params, query_params(params, captured))
                   |> assign_page_seo(uri)
-                  |> then(fn socket ->
-                    new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
-                    {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
-                  end)
+                  |> admit_record(page_module)
+                  |> case do
+                    {:ok, socket} ->
+                      new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
+                      {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
+
+                    {:sign_in, socket} ->
+                      {:noreply, sign_in(socket, params)}
+                  end
 
                 {:sign_in, socket} ->
                   {:noreply, sign_in(socket, params)}
@@ -417,6 +428,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
         # which brings the module up to the row before anything else runs — see `align_page_module/2`.
         socket
         |> readmit(page_module.__page_information__([:acl, :permissions]))
+        |> readmit_record()
         |> case do
           {:refused, socket} ->
             {{:noreply, refuse(socket)}, %{}}
@@ -860,6 +872,27 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   defp admit(not_compiled, _page_module, socket), do: {not_compiled, socket}
 
+  # A PAGE THAT SHOWS A RECORD OPENS ONLY FOR WHOEVER THE RECORD ADMITS TOO, asked after `admit/3`
+  # admitted them to the page. The record's permissions are what the plugin answering for its kind
+  # put in the head (`assign_page_seo/2`), read with the record itself, and they are asked the way
+  # `admit/3` asks a page's: nobody signed in is sent to sign in, somebody signed in without one gets
+  # the 404. A record naming none asks nothing and loads nobody.
+  defp admit_record(%{assigns: %{page_seo: %{permissions: [_ | _] = required}}} = socket, page) do
+    socket = MishkaCmsCore.LiveUserAuth.load_current_user(socket)
+
+    case socket.assigns[:current_user] do
+      nil ->
+        {:sign_in, socket}
+
+      user ->
+        if AccessPermissions.match?(user, %{}, permissions: required),
+          do: {:ok, socket},
+          else: refuse_as_missing(socket, page, required, user)
+    end
+  end
+
+  defp admit_record(socket, _page_module), do: {:ok, socket}
+
   # A PAGE SOMEBODY MAY NOT OPEN ANSWERS WHAT A PAGE THAT IS NOT THERE ANSWERS — the site's 404, with
   # the same exception, status and sentence `WebRunTimeMetaDataState.resolve!/3` raises for an address
   # nothing is stored at. A 403 tells whoever asks that the address exists and is worth asking about
@@ -916,6 +949,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
   end
 
   defp readmit(socket, _unreadable), do: {:refused, socket}
+
+  # And the record the page shows, as `admit_record/2` asked it on the way in.
+  defp readmit_record({:ok, %{assigns: %{page_seo: %{permissions: required}}} = socket}),
+    do: readmit(socket, required)
+
+  defp readmit_record(answer), do: answer
 
   # BACK TO THE ADDRESS, AS A REQUEST RATHER THAN A NAVIGATION. Refusing here would mean writing a
   # second copy of what `mount/3` already decides — the 403 for somebody signed in, the sign-in with
