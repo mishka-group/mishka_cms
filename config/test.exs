@@ -51,6 +51,11 @@ config :mishka_cms_core, :env_test?, true
 # their own through the settings.
 config :mishka_cms_core, MishkaCmsCore.Accounts.AuthRateLimit, limit: 1_000_000
 
+# A captcha provider's verify request never leaves the machine: a test answers it with
+# `Req.Test.stub(MishkaCmsCore.Captcha, ...)` — see `MishkaCmsCore.Captcha.Provider.siteverify/2`.
+config :mishka_cms_core, MishkaCmsCore.Captcha.Provider,
+  req_options: [plug: {Req.Test, MishkaCmsCore.Captcha}]
+
 # mishka_installer decides whether to start its own supervision tree (Mnesia registry, event and
 # compile handlers) from `MishkaInstaller.__information__().env`, so that ITS suite runs without
 # them — but a dependency is built in the host's env, so our test run inherited that and every
