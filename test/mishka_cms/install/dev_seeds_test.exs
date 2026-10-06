@@ -15,6 +15,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   alias MishkaCmsCore.Dev.SeedMedia
   alias MishkaCmsCore.Dev.Seeds
   alias MishkaCmsCore.Runtime.Compilers.JavaScriptCompiler
+  alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
   alias MishkaCmsCore.Runtime.JsHook
   alias MishkaCmsCore.Runtime.Compilers.Helpers, as: CompilerHelpers
   alias MishkaCmsCore.Runtime.LiveViewHelpers
@@ -665,12 +666,25 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     |> Ash.read_one!(authorize?: false)
   end
 
-  test "steps/1 always starts with :core and adds :chelekom + extensions when selected" do
-    assert [{:core, _} | _] = Seeds.steps([])
-    assert Seeds.steps([:chelekom]) |> Enum.map(&elem(&1, 0)) == [:core, :chelekom]
+  test "steps/1 always starts with :core and adds the extensions selected" do
+    assert Seeds.steps([]) |> Enum.map(&elem(&1, 0)) == [:core]
+    assert Seeds.steps([:blog]) |> Enum.map(&elem(&1, 0)) == [:core, :blog]
+  end
 
-    ids = Seeds.steps([:chelekom, :blog]) |> Enum.map(&elem(&1, 0))
-    assert ids == [:core, :chelekom, :blog]
+  # NOTHING TO CHOOSE. A dev database is where every component gets tried, so the seed installs all
+  # of every kit on disk — the picker's "only what every site needs" is the production install's.
+  test "the core seed installs every component of every kit" do
+    seed_core()
+
+    for kit <- UiKitHandler.available_kits() do
+      installed =
+        Component
+        |> Ash.Query.for_read(:read_any)
+        |> Ash.Query.filter(extra["ui_kit"] == ^kit.name and is_nil(site_id))
+        |> Ash.count!(authorize?: false)
+
+      assert installed == kit.components, "#{kit.name}: #{installed} of #{kit.components}"
+    end
   end
 
   # A ROW IS NOT A FILE. Every media row a seed wrote used to be invented whole — a random size and a

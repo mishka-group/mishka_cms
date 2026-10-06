@@ -80,8 +80,15 @@ config :mishka_installer, MishkaInstaller.MnesiaRepo,
 # back to the other source, so neither dead-ends.
 config :mishka_cms_core, :prefer_local_ui_kits, true
 
-# THE SHIPPED STYLED KIT, FROM DISK, WITH NOTHING TO DOWNLOAD. The code default also offers the
-# headless package, which is not in `priv/cms_ui_kits/`, so every cold catalogue — the install
+# THE STYLED KIT FROM A FIXTURE, WITH NOTHING TO DOWNLOAD. A server downloads its kits into
+# `priv/cms_ui_kits/` at install, and none ships there; the tests read the copy of Chelekom's styled
+# bundle mishka_cms_core keeps in its `test/fixtures/cms_ui_kits/`.
+config :mishka_cms_core,
+       :ui_kits_dir,
+       Path.expand("../__extensions/mishka_cms_core/test/fixtures/cms_ui_kits", __DIR__)
+
+# The code default also offers the headless package, which is not among the fixtures, so every cold
+# catalogue — the install
 # wizard, the Studio sheet — fell through to a real HTTP request and parsed Chelekom behind it, and a
 # test waiting on that render timed out whenever the internet was slow. `url: nil` fails without a
 # request, so a missing file is reported rather than fetched. A test about downloading configures

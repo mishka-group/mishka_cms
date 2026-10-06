@@ -1210,19 +1210,6 @@ defmodule MishkaCmsWeb.InstallLive do
     >
       <div id="installer-seeds">
         <div class="inst-smp">
-          <label id="seed-chelekom" class="inst-smp-row">
-            <input
-              type="checkbox"
-              checked={MapSet.member?(@seed_selected, "chelekom")}
-              phx-click="toggle_seed"
-              phx-value-key="chelekom"
-              class="inst-cbox"
-            />
-            <span class="nm">
-              {gettext("Chelekom UI components")}
-              <span class="ex">{gettext("— the full kit")}</span>
-            </span>
-          </label>
           <label
             :for={category <- @seed_categories}
             id={"seed-#{category.key}"}
@@ -1239,7 +1226,8 @@ defmodule MishkaCmsWeb.InstallLive do
           </label>
           <p class="inst-smp-note">
             {raw(
-              gettext("Core data (sites, users, permissions, components) is %{included}.",
+              gettext(
+                "Core data (sites, users, permissions) and every UI-kit component are %{included}.",
                 included: strong(gettext("always included"))
               )
             )}<br />
@@ -2949,7 +2937,7 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   defp default_seed_selected do
-    MapSet.new(["chelekom" | Enum.map(dev_seed_categories(), &to_string(&1.key))])
+    MapSet.new(dev_seed_categories(), &to_string(&1.key))
   end
 
   defp seed_steps(selected) do
