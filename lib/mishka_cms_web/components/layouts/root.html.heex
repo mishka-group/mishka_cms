@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html
+  lang={MishkaCmsWeb.RuntimeLive.html_lang(assigns)}
+  dir={MishkaCmsWeb.RuntimeLive.html_dir(assigns)}
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.live_title default="Mishka CMS" suffix={if(assigns[:admin_css], do: " - Mishka CMS")}>
+      {assigns[:page_title]}
+    </.live_title>
+    {raw(MishkaInstaller.Event.Hook.call("RootHtml.MetaTags", %{html: "", assigns: assigns}).html)}<MishkaCmsWeb.RuntimeLive.page_head
+      :if={assigns[:runtime_page]}
+      seo={assigns[:page_seo]}
+      csp_nonce={assigns[:csp_nonce]}
+    />
+    <% css_href =
+      assigns[:current_site] &&
+        "/assets/css/#{assigns[:current_site][:name]}/#{MishkaCmsCore.Runtime.States.AssetsState.get!(assigns[:current_site][:name], "css")[:hash]}.css" %>
+    <% js_src =
+      assigns[:current_site] &&
+        "/assets/js/#{assigns[:current_site][:name]}/#{MishkaCmsCore.Runtime.States.AssetsState.get!(assigns[:current_site][:name], "js")[:hash]}.js" %>
+    <%!-- A SITE's stylesheet, for a site's pages. Not for the admin: the dashboard is not rendered
+         with a site's components, so its bundle was megabytes of CSS the admin never used — and on a
+         host whose site has never compiled, the href had an empty hash and 404ed. The canvas iframe
+         is the exception and asks for it deliberately, because it must show the document exactly as
+         production will; it takes the inline path instead, which is what `suppress_site_css` means. --%>
+    <link
+      :if={
+        css_href && !assigns[:suppress_site_css] && !assigns[:admin_css] && assigns[:runtime_page]
+      }
+      rel="stylesheet"
+      href={css_href}
+      id="mishka-runtime-css"
+    />
+    <%!-- The page-builder canvas wants the site's CSS so the document looks exactly as it will in
+         production, but NOT the site's JS bundle: that bundle opens its own LiveSocket, and a
+         second one inside the editor's iframe would fight the canvas LiveView for the same DOM. --%>
+    <script :if={js_src && !assigns[:suppress_site_js]} defer src={js_src}>
+    </script>
+    <script nonce={assigns[:csp_nonce]}>
+      (() => {
+        const setTheme = (theme) => {
+          if (theme === "system") {
+            localStorage.removeItem("phx:theme");
+            document.documentElement.removeAttribute("data-theme");
+          } else {
+            localStorage.setItem("phx:theme", theme);
+            document.documentElement.setAttribute("data-theme", theme);
+          }
+        };
+        if (!document.documentElement.hasAttribute("data-theme")) {
+          setTheme(localStorage.getItem("phx:theme") || "system");
+        }
+        window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
+
+        window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
+      })();
+    </script>
+    <%!-- The installer runs before any site, so no runtime CSS/JS bundle exists yet — load the
+         prebuilt static LiveView client (`app.js`) directly for interactivity. The page styles itself
+         with its own inline <style> (pure CSS, no Tailwind), so no stylesheet is needed here. --%>
+    <script :if={assigns[:standalone_assets]} defer src={~p"/assets/js/app.js"}>
+    </script>
+    <%!-- THREE INDEPENDENT DECISIONS, three assigns. `full_tailwind` used to gate all of them at once,
+         which is why the editor's canvas iframe downloaded the entire 2.5 MB admin stylesheet in order
+         to get the two web fonts its inline `font:` shorthand names. The canvas renders a SITE's
+         document and its own chrome is inline styles — it has no use for the dashboard's CSS.
+
+         admin_css   → the dashboard, the builder shell, the login page
+         admin_fonts → those, plus the canvas
+         live_tailwind → the builder and the canvas only
+
+         The admin chrome's own compiled stylesheet — see `admin_assets/admin.css` in mishka_cms_core.
+         Its OWN file, touching neither of the other two CSS paths:
+
+           * not `app.css`, because the runtime compiler inlines that into the static base and would
+             then ship the whole dashboard inside every public site's stylesheet;
+           * not the site bundle above, which is the site's own CSS and nothing to do with the admin.
+
+         Before this the dashboard had no compiled CSS at all: every utility came from the browser
+         JIT below, regenerated on every admin page from a 275 KB script. --%>
+    <link :if={assigns[:admin_css]} rel="stylesheet" href={~p"/assets/css/admin.css"} />
+    <%!-- Admin dashboard type system: Manrope (body), Space Grotesk (numerals/display), Newsreader
+         (headings). Vendored rather than fetched from Google: their stylesheet redirects to fifteen
+         `fonts.gstatic.com` files, so it was two DNS lookups and sixteen round trips before the admin
+         could paint text. 624 KB in `priv/static/fonts/`, served with the app. --%>
+    <link :if={assigns[:admin_fonts]} rel="stylesheet" href={~p"/fonts/fonts.css"} />
+    <%!-- The same two faces for a DATABASE page, because that is what the seeded and starter
+         designs are written in — `font-sans` and `font-display` in a site's `:theme` stylesheet name
+         Manrope and Space Grotesk. Gated on `runtime_page` so the hand-written marketing pages,
+         which bring their own type, render exactly the bytes they rendered before. --%>
+    <link :if={assigns[:runtime_page]} rel="stylesheet" href={~p"/fonts/fonts.css"} />
+    <%!-- THE GENERATOR, and only where a page cannot be styled ahead of time: the page builder and
+         its canvas iframe. The reader types `px-7` into the inspector, or drops a kit component whose
+         classes no build ever scanned, and the utility has to exist a frame later.
+
+         Every other admin page is served by `admin.css` above. That was measured rather than assumed:
+         the two heaviest admin pages were rendered, every class Tailwind generates for them was
+         diffed against the compiled sheet, and the answer is now zero missing. The first attempt at
+         this shipped 41 missing selectors and broke the dashboard — see `Mix.Tasks.AdminCss` for the
+         two causes, both of which were invisible without that diff.
+
+         Served locally, not from jsdelivr: measured cold the CDN answered in 780 ms, and it made
+         drawing a page depend on the public internet. `mix assets.vendor` puts it in priv. --%>
+    <%!-- A NONCE FOR A LIBRARY THAT HAS NO NONCE OPTION. The JIT below is Tailwind compiled for the
+         browser; it delivers its output by creating ONE `<style>` element, which is exactly what
+         `style-src-elem` governs, and it offers no way to mark that element as ours. Without this
+         the editor would need `style-src 'unsafe-inline'` — which re-permits every injected
+         `<style>` on the page to buy one legitimate element.
+
+         So the element is marked on the way out: `createElement` stamps the nonce on any style it
+         makes. Rules added afterwards are CSSOM writes on an already-allowed sheet and are not
+         re-checked, so this one line covers every utility the editor will ever generate.
+
+         It sits immediately above the JIT because it must be in place before that script runs, and
+         it is gated the same way so no page that lacks the JIT carries the patch. --%>
+    <%!-- THE SITE'S COMPILED CSS, ABOVE THE GENERATOR THAT HAS TO BEAT IT. It used to be rendered in
+         the canvas LiveView's own markup, which is `<body>` — while the browser generator injects
+         what it makes into `<head>`. Body comes after head, so the compiled bundle overruled every
+         class the editor generated: an author typed `pl-[30px]` onto an element whose page already
+         said `px-8`, the class landed, the rule was written, and the padding did not move.
+
+         The bundle is base styling and belongs here; anything generated while the author works is
+         appended after it and wins, which is the same order the published page has — there the
+         override and the page's own classes come out of one Tailwind pass, correctly sorted.
+
+         Linked and not inlined: a real site's bundle is megabytes, and it arrives compressed and
+         cached `immutable` behind its content hash. --%>
+    <link
+      :for={href <- assigns[:canvas_css_hrefs] || []}
+      rel="stylesheet"
+      href={href}
+    />
+    <script :if={assigns[:live_tailwind] && assigns[:csp_nonce]} nonce={assigns[:csp_nonce]}>
+      (() => {
+        const nonce = document.currentScript.nonce;
+        const make = document.createElement.bind(document);
+        document.createElement = (tag, ...rest) => {
+          const el = make(tag, ...rest);
+          if (String(tag).toLowerCase() === "style") el.setAttribute("nonce", nonce);
+          return el;
+        };
+      })();
+    </script>
+    <script :if={assigns[:live_tailwind]} src={~p"/assets/js/vendor/tailwind-browser.js"}>
+    </script>
+    <%!-- AN ADDRESS, NOT A SCRIPT. CodeMirror and its three grammars are 262 KB gzipped — bigger than
+         the rest of the admin JS together — and they are wanted only once a code box is actually on
+         screen, which on most visits to the builder never happens. So the layout publishes where the
+         bundle lives and `pb_code_editor.js` fetches it on the first mount of an editor.
+
+         It is a meta tag because the URL has to survive `mix phx.digest`, and `~p` is what knows the
+         digested name — the LiveView that renders the drawer cannot use it. --%>
+    <meta
+      :if={assigns[:code_editor]}
+      name="pb-code-editor-src"
+      content={~p"/assets/js/code_editor.js"}
+    />
+
+    <% js =
+      MishkaInstaller.Event.Hook.call("RootHtml.InlineScript", %{js: nil, assigns: assigns}).js %>
+    <script :if={!is_nil(js)} nonce={assigns[:csp_nonce]}>
+      {raw(js)}
+    </script>
+
+    {raw(
+      MishkaInstaller.Event.Hook.call("RootHtml.ExternalAssets", %{html: "", assigns: assigns}).html
+    )}
+  </head>
+  <body>
+    {@inner_content}
+  </body>
+</html>

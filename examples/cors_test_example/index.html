@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+    <head>
+        <title>CORS Test</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 50px auto;
+                padding: 20px;
+            }
+            button {
+                padding: 10px 20px;
+                margin: 10px;
+                cursor: pointer;
+                font-size: 16px;
+            }
+            .success {
+                color: green;
+            }
+            .error {
+                color: red;
+            }
+            #result {
+                margin-top: 20px;
+                padding: 20px;
+                background: #f5f5f5;
+                border-radius: 5px;
+                white-space: pre-wrap;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Test CORS to Phoenix API</h1>
+        <p>Current Origin: <strong id="origin"></strong></p>
+
+        <button onclick="testAPI()">Test API Request</button>
+        <button onclick="testAPINoTenant()">Test API (No Tenant)</button>
+        <button onclick="testPreflight()">Test Preflight</button>
+        <button onclick="clearResult()">Clear</button>
+
+        <div id="result"></div>
+
+        <script>
+            // Show current origin
+            document.getElementById("origin").textContent =
+                window.location.origin;
+
+            // API URL - Phoenix stays on localhost
+            const API_URL =
+                "http://localhost:4000/api/json/v1/auth/user/reset-request";
+
+            function clearResult() {
+                document.getElementById("result").innerHTML = "";
+            }
+
+            async function testAPI() {
+                const result = document.getElementById("result");
+                result.innerHTML = `Sending POST request to ${API_URL}...\n\n`;
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/vnd.api+json",
+                            Accept: "application/vnd.api+json",
+                        },
+                        body: JSON.stringify({
+                            data: {
+                                email: "none@example.com",
+                            },
+                        }),
+                    });
+
+                    const responseText = await response.text();
+
+                    // Note: Browsers hide CORS headers from JavaScript for security
+                    // The fact that the request succeeded means CORS is working!
+                    result.innerHTML += `<span class="success">✅ CORS is working! Request succeeded!</span>\n`;
+                    result.innerHTML += `Status: ${response.status}\n`;
+                    result.innerHTML += `Response:\n${responseText.substring(0, 500)}...`;
+                    result.innerHTML += `\n\nNote: Browsers don't expose CORS headers to JavaScript.\n`;
+                    result.innerHTML += `The successful request proves CORS is configured correctly!`;
+                } catch (error) {
+                    result.innerHTML += `<span class="error">❌ CORS blocked the request!</span>\n`;
+                    result.innerHTML += `Error: ${error.message}\n\n`;
+                    result.innerHTML += `This means your origin (${window.location.origin}) is not in allowed_origins\n`;
+                    result.innerHTML += `\nTip: Make sure to:\n`;
+                    result.innerHTML += `1. Add blog.example.com to /etc/hosts\n`;
+                    result.innerHTML += `2. Reset database with: mix ecto.reset\n`;
+                    result.innerHTML += `3. Access this page from: http://blog.example.com:3000\n`;
+                }
+            }
+
+            async function testAPINoTenant() {
+                const result = document.getElementById("result");
+                result.innerHTML = `Sending POST request with x-no-tenant: true...\n\n`;
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/vnd.api+json",
+                            Accept: "application/vnd.api+json",
+                            "x-no-tenant": "true",
+                        },
+                        body: JSON.stringify({
+                            data: {
+                                email: "master@example.com",
+                            },
+                        }),
+                    });
+
+                    const responseText = await response.text();
+
+                    result.innerHTML += `<span class="success">✅ Request completed!</span>\n`;
+                    result.innerHTML += `Status: ${response.status}\n`;
+                    result.innerHTML += `Response:\n${responseText.substring(0, 500)}...`;
+                    result.innerHTML += `\n\n⚠️ With x-no-tenant: true:\n`;
+                    result.innerHTML += `- No site context (current_site = nil)\n`;
+                    result.innerHTML += `- CORS will be denied (no site = no allowed origins)\n`;
+                    result.innerHTML += `- But if request succeeds, it means browser already passed CORS check\n`;
+                } catch (error) {
+                    result.innerHTML += `<span class="error">❌ Request failed!</span>\n`;
+                    result.innerHTML += `Error: ${error.message}\n\n`;
+                    result.innerHTML += `With x-no-tenant: true, there's no site context,\n`;
+                    result.innerHTML += `so CORS headers won't be set and browser blocks the request.\n`;
+                }
+            }
+
+            async function testPreflight() {
+                const result = document.getElementById("result");
+                result.innerHTML = "Testing preflight OPTIONS request...\n\n";
+
+                try {
+                    // This will trigger a preflight with custom header
+                    const response = await fetch(API_URL, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/vnd.api+json",
+                            "X-Custom-Header": "test", // This forces preflight
+                        },
+                        body: JSON.stringify({
+                            data: {
+                                email: "none@example.com",
+                            },
+                        }),
+                    });
+
+                    result.innerHTML += `<span class="success">✅ Preflight passed!</span>\n`;
+                    result.innerHTML += `Status: ${response.status}\n`;
+                    result.innerHTML += `CORS Header: ${response.headers.get("access-control-allow-origin") || "NOT SET"}\n`;
+                } catch (error) {
+                    result.innerHTML += `<span class="error">❌ Preflight failed!</span>\n`;
+                    result.innerHTML += `Error: ${error.message}\n`;
+                    result.innerHTML += `This likely means CORS is blocking the request.\n`;
+                }
+            }
+        </script>
+    </body>
+</html>

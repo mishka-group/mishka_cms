@@ -1,0 +1,14 @@
+/* This file is for your main application CSS */
+.mishka-test {
+    color: green;
+}
+
+/* SortableJS styles for draggable tree nodes */
+.sortable-ghost {
+    opacity: 0.4;
+    background: #4B5563;
+}
+
+.sortable-drag {
+    opacity: 1;
+}
