@@ -313,7 +313,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
             uri = URI.parse(url)
 
-            if uri.host && uri.host != expected_host,
+            if uri.host && not same_host?(uri.host, expected_host),
               do:
                 raise(MishkaCmsCore.ErrorsExceptions.ForbiddenError,
                   message: "Invalid host for this site"
@@ -1000,6 +1000,16 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # What the browser has in its address bar, from the URL `handle_params/3` was given: its path and
   # its query, and nothing that would make it point at another host.
   defp address(%URI{} = uri), do: URI.to_string(%URI{path: uri.path || "/", query: uri.query})
+
+  # LOCALHOST IS THE SITE `SiteLookupPlug` CHOSE FOR IT, the master site while no site claims
+  # localhost. Compiled under the same `:env_dev?` / `:env_test?` config as that clause, so a release
+  # has neither.
+  if Application.compile_env(:mishka_cms_core, :env_dev?, false) or
+       Application.compile_env(:mishka_cms_core, :env_test?, false) do
+    defp same_host?(browser, _site) when browser in ["localhost", "127.0.0.1"], do: true
+  end
+
+  defp same_host?(browser, site), do: browser == site
 
   # A PAGE PAYS FOR THE VISITOR ONLY WHERE IT HAS A USE FOR ONE. Two uses: permissions, which need
   # somebody to judge, and markup or code that reads `@current_user`, which
