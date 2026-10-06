@@ -60,6 +60,9 @@ defmodule MishkaCmsWeb.InstallLive do
 
   @kit_channels %{"stable" => :stable, "prerelease" => :prerelease, "master" => :master}
 
+  # Where an operator is sent when no UI-kit package can be found anywhere.
+  @support_url "https://github.com/mishka-group"
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -80,7 +83,8 @@ defmodule MishkaCmsWeb.InstallLive do
        bundle_progress: %{},
        bundle_release: nil,
        fetch_kits: [],
-       kit_channel: nil,
+       kit_channel: :stable,
+       support_url: @support_url,
        kits_configured?: false,
        custom_url: "",
        custom_error: nil,
@@ -125,6 +129,10 @@ defmodule MishkaCmsWeb.InstallLive do
   def handle_event("retry_bundle", _params, socket) do
     {:noreply, load_bundle(socket)}
   end
+
+  # A version cannot change under a download still running.
+  def handle_event("kit_channel", _params, %{assigns: %{bundle_status: :loading}} = socket),
+    do: {:noreply, socket}
 
   # Matched against the three names rather than turned into an atom: the value is the client's.
   def handle_event("kit_channel", %{"channel" => channel}, socket) do
@@ -210,6 +218,13 @@ defmodule MishkaCmsWeb.InstallLive do
   def handle_event("reset_config", %{"name" => name}, socket) do
     {:noreply, assign(socket, config_axes: Map.delete(socket.assigns.config_axes, name))}
   end
+
+  def handle_event(
+        "rail_nav",
+        _params,
+        %{assigns: %{step: :ui_kit, bundle_status: :loading}} = socket
+      ),
+      do: {:noreply, socket}
 
   def handle_event("rail_nav", %{"index" => index}, %{assigns: %{step: step}} = socket)
       when step in [:config, :ui_kit, :settings] do
@@ -328,14 +343,14 @@ defmodule MishkaCmsWeb.InstallLive do
     {:noreply,
      socket
      |> assign(
-       bundle_status: :ready,
+       bundle_status: if(bundles == [], do: :missing, else: :ready),
        catalog: catalog,
        kits: kit_names(bundles),
        bundle_sources: sources,
        bundle_failures: failures,
        bundle_release: Map.get(result, :release)
      )
-     |> recompute(MapSet.new(catalog.names))}
+     |> recompute(MapSet.new())}
   end
 
   def handle_async(:bundle, {:exit, reason}, socket) do
@@ -596,17 +611,52 @@ defmodule MishkaCmsWeb.InstallLive do
       config={@config}
       catalog={@catalog}
       wide={@picker_open}
+      busy={@bundle_status == :loading}
       title={gettext("Choose what to install")}
       subtitle={
         gettext(
-          "Ready-made pieces for building your pages, and the features your site runs on. It is all selected already — carry straight on, or open a section to install less."
+          "Ready-made pieces for building your pages, and the features your site runs on. What every site needs is selected already — carry straight on, or open a section to add more."
         )
       }
     >
       <div id="installer-uikit">
+        <%!-- WHICH CHELEKOM. The newest stable release, then the newest pre-release, then the files
+              on master: the first that has the kits is fetched as soon as this step opens, and the
+              chip lit is the one it came from. The chips stay on the page while it downloads, but
+              cannot be changed until it has finished. A host that names its kits in config gets
+              those, and no choice. --%>
+        <div :if={not @kits_configured?} id="uikit-channel" class="inst-channel">
+          <span class="gl" id="uikit-channel-label">{gettext("Kit version")}</span>
+          <div class="inst-chips" role="radiogroup" aria-labelledby="uikit-channel-label">
+            <button
+              :for={{channel, label} <- kit_channel_options()}
+              type="button"
+              id={"uikit-channel-#{channel}"}
+              role="radio"
+              aria-checked={to_string(shown_channel(@kit_channel, @bundle_release) == channel)}
+              disabled={@bundle_status == :loading}
+              phx-click="kit_channel"
+              phx-value-channel={channel}
+              class={[
+                "inst-chip",
+                shown_channel(@kit_channel, @bundle_release) == channel && "on"
+              ]}
+            >
+              {label}
+            </button>
+          </div>
+          <p
+            :if={@bundle_status == :ready and !match?(%{fallback?: true}, @bundle_release)}
+            class="inst-hint"
+            id="uikit-channel-note"
+          >
+            {channel_note(@bundle_release)}
+          </p>
+        </div>
+
         <%= cond do %>
           <% @bundle_status == :loading -> %>
-            <div id="uikit-loading" class="inst-fetch" role="status" aria-live="polite">
+            <div id="uikit-loading" class="inst-fetch is-inline" role="status" aria-live="polite">
               <div class="inst-fetch-head">
                 <div class="inst-ring is-run"></div>
                 {gettext("Fetching %{kits}…", kits: official_kit_summary())}
@@ -659,467 +709,491 @@ defmodule MishkaCmsWeb.InstallLive do
                 {gettext("Retry download")}
               </button>
             </div>
-          <% true -> %>
-            <%!-- WHICH CHELEKOM. The newest stable release unless the operator asks for a pre-release
-                  or the unreleased master; a host that names its kits in config gets those, and no
-                  choice. --%>
-            <div :if={not @kits_configured?} id="uikit-channel" class="inst-channel">
-              <span class="gl" id="uikit-channel-label">{gettext("Kit version")}</span>
-              <div class="inst-chips" role="radiogroup" aria-labelledby="uikit-channel-label">
-                <button
-                  :for={{channel, label} <- kit_channel_options()}
-                  type="button"
-                  id={"uikit-channel-#{channel}"}
-                  role="radio"
-                  aria-checked={to_string(shown_channel(@kit_channel, @bundle_release) == channel)}
-                  phx-click="kit_channel"
-                  phx-value-channel={channel}
-                  class={[
-                    "inst-chip",
-                    shown_channel(@kit_channel, @bundle_release) == channel && "on"
-                  ]}
-                >
-                  {label}
-                </button>
-              </div>
-              <p
-                :if={!match?(%{fallback?: true}, @bundle_release)}
-                class="inst-hint"
-                id="uikit-channel-note"
-              >
-                {channel_note(@bundle_release)}
-              </p>
-            </div>
-            <div
-              :if={match?(%{fallback?: true}, @bundle_release)}
-              id="uikit-channel-fallback"
-              class="inst-banner is-amber is-inline"
-            >
-              <b>{gettext("No stable release has the UI kits yet.")}</b>
+          <% @bundle_status == :missing -> %>
+            <%!-- NOTHING ANYWHERE: no release attaches the kits and master does not hold them either.
+                  The site still installs without them; the operator needs to know whom to tell. --%>
+            <div id="uikit-missing" class="inst-banner is-amber">
+              <b>{gettext("The UI-kit packages could not be found.")}</b>
+              <p>{missing_reason(@bundle_failures)}</p>
               <p>
-                {gettext("Using pre-release %{tag}, the newest release that has them.",
-                  tag: @bundle_release.tag
+                {gettext(
+                  "Please contact Mishka CMS support. You can retry, or carry on and add the components later from the admin."
                 )}
               </p>
-            </div>
-            <%!-- ONE package failing is not an error state: the step still installs everything it
-                  did reach. But it has to say what is missing, or an operator wonders later why
-                  half a kit is absent and has nothing to search for. --%>
-            <div
-              :if={@bundle_failures != []}
-              id="uikit-partial"
-              class="inst-banner is-amber is-inline"
-            >
-              <div class="inst-banner-head">
-                <b>
-                  {gettext("%{count} package(s) could not be fetched.",
-                    count: length(@bundle_failures)
-                  )}
-                </b>
-                <button
-                  id="uikit-partial-retry"
-                  type="button"
-                  phx-click="retry_bundle"
+              <div class="inst-banner-acts">
+                <a
+                  id="uikit-support"
+                  href={@support_url}
+                  target="_blank"
+                  rel="noopener"
                   class={btn_ghost()}
                 >
-                  {gettext("Retry")}
+                  {gettext("Contact Mishka CMS support")}
+                </a>
+                <button id="uikit-retry" type="button" phx-click="retry_bundle" class={btn_ghost()}>
+                  {gettext("Retry download")}
                 </button>
               </div>
-              <%!-- The URL is the longest thing here and the least often read — printed whole it
+            </div>
+          <% match?(%{fallback?: true}, @bundle_release) -> %>
+            <div id="uikit-channel-fallback" class="inst-banner is-amber is-inline">
+              <%= if @bundle_release.channel == :master do %>
+                <b>{gettext("No release has the UI kits yet.")}</b>
+                <p>
+                  {gettext(
+                    "Using the files on Chelekom's master branch, which may change at any time."
+                  )}
+                </p>
+              <% else %>
+                <b>{gettext("No stable release has the UI kits yet.")}</b>
+                <p>
+                  {gettext("Using pre-release %{tag}, the newest release that has them.",
+                    tag: @bundle_release.tag
+                  )}
+                </p>
+              <% end %>
+            </div>
+          <% true -> %>
+        <% end %>
+
+        <%!-- Everything below waits for the download: on the page, but not clickable. --%>
+        <div
+          id="uikit-sections"
+          class={["inst-sections", @bundle_status == :loading && "is-busy"]}
+          inert={@bundle_status == :loading}
+        >
+          <%!-- ONE package failing is not an error state: the step still installs everything it
+                  did reach. But it has to say what is missing, or an operator wonders later why
+                  half a kit is absent and has nothing to search for. --%>
+          <div
+            :if={@bundle_status == :ready and @bundle_failures != []}
+            id="uikit-partial"
+            class="inst-banner is-amber is-inline"
+          >
+            <div class="inst-banner-head">
+              <b>
+                {gettext("%{count} package(s) could not be fetched.",
+                  count: length(@bundle_failures)
+                )}
+              </b>
+              <button
+                id="uikit-partial-retry"
+                type="button"
+                phx-click="retry_bundle"
+                class={btn_ghost()}
+              >
+                {gettext("Retry")}
+              </button>
+            </div>
+            <%!-- The URL is the longest thing here and the least often read — printed whole it
                     wrapped to three lines and pushed the module card off the fold. Elided to host +
                     filename, with the rest on `title` and one click away on the clipboard. --%>
-              <div :for={failure <- @bundle_failures} class="inst-fail">
-                <span>{Settings.text(failure.label)} · {failure.tag} — {failure.reason}</span>
-                <%!-- Hover or focus for the whole URL, click to copy it. No `title` attribute: the
+            <div :for={failure <- @bundle_failures} class="inst-fail">
+              <span>{Settings.text(failure.label)} · {failure.tag} — {failure.reason}</span>
+              <%!-- Hover or focus for the whole URL, click to copy it. No `title` attribute: the
                       native tooltip waits a second, cannot be styled, and would sit on top of this
                       one. --%>
-                <span class="inst-tip-wrap">
-                  <button
-                    id={"uikit-fail-url-#{failure.key}"}
-                    type="button"
-                    phx-hook="CopyToClipboard"
-                    data-copy={failure.url}
-                    aria-label={
-                      gettext("Copy the URL for %{label}", label: Settings.text(failure.label))
-                    }
-                    class="inst-copy"
-                  >
-                    {short_source(failure.url)}
-                  </button>
-                  <span class="inst-tip" role="tooltip">{failure.url}</span>
-                </span>
-              </div>
-              <p>
-                {gettext("Everything below is what did load — install the rest later from the admin.")}
-              </p>
+              <span class="inst-tip-wrap">
+                <button
+                  id={"uikit-fail-url-#{failure.key}"}
+                  type="button"
+                  phx-hook="CopyToClipboard"
+                  data-copy={failure.url}
+                  aria-label={
+                    gettext("Copy the URL for %{label}", label: Settings.text(failure.label))
+                  }
+                  class="inst-copy"
+                >
+                  {short_source(failure.url)}
+                </button>
+                <span class="inst-tip" role="tooltip">{failure.url}</span>
+              </span>
             </div>
-            <%!-- ADD A PACKAGE WE DO NOT SHIP. The only route to a third-party kit at install time
+            <p>
+              {gettext("Everything below is what did load — install the rest later from the admin.")}
+            </p>
+          </div>
+          <%!-- ADD A PACKAGE WE DO NOT SHIP. The only route to a third-party kit at install time
                   was placing a file on disk, which an operator running a released image cannot do.
                   The disclaimer is shown BEFORE anything is fetched, not after it succeeds — by
                   then the components are already in their admin. --%>
-            <details class="inst-custom" id="uikit-custom">
-              <summary>{gettext("Add a package by URL")}</summary>
-              <div class="inst-custom-body">
-                <%!-- RED, where the fetch-failure banner above is amber. They can be on screen
+          <details class="inst-custom" id="uikit-custom">
+            <summary>{gettext("Add a package by URL")}</summary>
+            <div class="inst-custom-body">
+              <%!-- RED, where the fetch-failure banner above is amber. They can be on screen
                       together, and two identical-looking alerts read as one message split in half.
                       The colours also rank correctly: a package that did not download is a nuisance,
                       someone else's code running in your admin is a risk. --%>
-                <div class="inst-banner is-red is-inline" id="uikit-custom-warning">
-                  <b>{gettext("Packages from outside the official channels are not ours.")}</b>
-                  <p>
-                    {gettext(
-                      "Mishka takes no responsibility for them: their components run inside your admin and render on your visitors' pages. Install only from a source you trust."
-                    )}
-                  </p>
-                </div>
-                <form
-                  id="uikit-custom-form"
-                  phx-change="custom_url"
-                  phx-submit="add_custom_kit"
-                  class="inst-custom-row"
-                >
-                  <input
-                    type="url"
-                    name="url"
-                    id="uikit-custom-url"
-                    value={@custom_url}
-                    placeholder="https://example.com/my-kit.json"
-                    class={["inst-inp", @custom_error && "has-error"]}
-                    autocomplete="off"
-                  />
-                  <button
-                    type="submit"
-                    id="uikit-custom-add"
-                    disabled={@custom_url == ""}
-                    class={btn_ghost()}
-                    data-loading={gettext("Fetching…")}
-                  >
-                    {gettext("Fetch")}
-                  </button>
-                </form>
-                <p :if={@custom_error} class="inst-error" id="uikit-custom-error">{@custom_error}</p>
-                <p :if={is_nil(@custom_error)} class="inst-hint">
-                  {raw(
-                    gettext(
-                      "A %{schema} JSON. It is checked and cached beside the official packages before anything is installed.",
-                      schema: inline_code("mishka.ui_kit.bundle.v3")
-                    )
+              <div class="inst-banner is-red is-inline" id="uikit-custom-warning">
+                <b>{gettext("Packages from outside the official channels are not ours.")}</b>
+                <p>
+                  {gettext(
+                    "Mishka takes no responsibility for them: their components run inside your admin and render on your visitors' pages. Install only from a source you trust."
                   )}
                 </p>
               </div>
-            </details>
-            <div class="inst-mod">
-              <div class="inst-mod-head">
-                <div class="inst-mod-ico"><.svg_grid /></div>
-                <div>
-                  <%!-- The card named one kit even with two on disk. It says what is actually
+              <form
+                id="uikit-custom-form"
+                phx-change="custom_url"
+                phx-submit="add_custom_kit"
+                class="inst-custom-row"
+              >
+                <input
+                  type="url"
+                  name="url"
+                  id="uikit-custom-url"
+                  value={@custom_url}
+                  placeholder="https://example.com/my-kit.json"
+                  class={["inst-inp", @custom_error && "has-error"]}
+                  autocomplete="off"
+                />
+                <button
+                  type="submit"
+                  id="uikit-custom-add"
+                  disabled={@custom_url == ""}
+                  class={btn_ghost()}
+                  data-loading={gettext("Fetching…")}
+                >
+                  {gettext("Fetch")}
+                </button>
+              </form>
+              <p :if={@custom_error} class="inst-error" id="uikit-custom-error">{@custom_error}</p>
+              <p :if={is_nil(@custom_error)} class="inst-hint">
+                {raw(
+                  gettext(
+                    "A %{schema} JSON. It is checked and cached beside the official packages before anything is installed.",
+                    schema: inline_code("mishka.ui_kit.bundle.v3")
+                  )
+                )}
+              </p>
+            </div>
+          </details>
+          <%!-- Until the first download lands there is nothing to list yet. --%>
+          <div :if={is_nil(@catalog)} id="uikit-waiting" class="inst-mod">
+            <div class="inst-mod-head">
+              <div class="inst-mod-ico"><.svg_grid /></div>
+              <div>
+                <div class="t">{gettext("Page building blocks")}</div>
+                <div class="s">{gettext("They appear here once the UI kits are downloaded.")}</div>
+              </div>
+            </div>
+          </div>
+          <div :if={@catalog && MapSet.size(@catalog.names) > 0} class="inst-mod">
+            <div class="inst-mod-head">
+              <div class="inst-mod-ico"><.svg_grid /></div>
+              <div>
+                <%!-- The card named one kit even with two on disk. It says what is actually
                         there, which is also the first place someone notices a second kit at all. --%>
-                  <div class="t">{kit_card_title(@kits)}</div>
-                  <div class="s" id="uikit-count">
-                    <%!-- "base variant by default" describes the narrowing this install performs,
+                <div class="t">{kit_card_title(@kits)}</div>
+                <div class="s" id="uikit-count">
+                  <%!-- "base variant by default" describes the narrowing this install performs,
                           in the vocabulary of the person who built it. What a reader needs to know
                           is that the plain style is installed and the rest is optional. --%>
-                    {gettext("%{selected} of %{total} chosen · plain style, extras optional",
-                      selected: MapSet.size(@selected),
-                      total: MapSet.size(@catalog.names)
-                    )}
-                  </div>
-                  <%!-- WHICH VERSION IS BEING INSTALLED. The card said what and how many but never
+                  {gettext("%{selected} of %{total} chosen · plain style, extras optional",
+                    selected: MapSet.size(MapSet.union(@selected, @required)),
+                    total: MapSet.size(@catalog.names)
+                  )}
+                </div>
+                <%!-- WHICH VERSION IS BEING INSTALLED. The card said what and how many but never
                         which — and pinning the packages is worth nothing to an operator who cannot
                         see the pin. The `sources` come from the resolver rather than being joined
                         back to config by filename, which would be a guess. --%>
-                  <div :if={@bundle_sources != []} class="inst-kit-vers" id="uikit-versions">
-                    <span :for={source <- @bundle_sources} class="inst-kit-ver">
-                      {source.name} {version_label(source)}
-                    </span>
-                  </div>
+                <div :if={@bundle_sources != []} class="inst-kit-vers" id="uikit-versions">
+                  <span :for={source <- @bundle_sources} class="inst-kit-ver">
+                    {source.name} {version_label(source)}
+                  </span>
                 </div>
+              </div>
+              <button
+                type="button"
+                id="uikit-toggle"
+                phx-click="toggle_picker"
+                class={["inst-mod-cust", @picker_open && "open"]}
+              >
+                {if @picker_open, do: gettext("Hide"), else: gettext("Customize")}
+                <span class="ch"><.svg_chev /></span>
+              </button>
+            </div>
+
+            <div :if={@picker_open} id="uikit-body" class="inst-mod-body">
+              <div class="inst-comp-tools">
+                <form id="install-search-form" phx-change="search" class="inst-search">
+                  <.svg_search />
+                  <input
+                    type="text"
+                    name="query"
+                    value={@query}
+                    placeholder={gettext("Search components…")}
+                    phx-debounce="150"
+                  />
+                </form>
                 <button
+                  id="uikit-select-all"
                   type="button"
-                  id="uikit-toggle"
-                  phx-click="toggle_picker"
-                  class={["inst-mod-cust", @picker_open && "open"]}
+                  phx-click="select_all"
+                  class="inst-mini-btn"
                 >
-                  {if @picker_open, do: gettext("Hide"), else: gettext("Customize")}
-                  <span class="ch"><.svg_chev /></span>
+                  {gettext("Select all")}
+                </button>
+                <button
+                  id="uikit-clear-all"
+                  type="button"
+                  phx-click="clear_all"
+                  class="inst-mini-btn"
+                >
+                  {gettext("Clear")}
                 </button>
               </div>
 
-              <div :if={@picker_open} id="uikit-body" class="inst-mod-body">
-                <div class="inst-comp-tools">
-                  <form id="install-search-form" phx-change="search" class="inst-search">
-                    <.svg_search />
-                    <input
-                      type="text"
-                      name="query"
-                      value={@query}
-                      placeholder={gettext("Search components…")}
-                      phx-debounce="150"
-                    />
-                  </form>
-                  <button
-                    id="uikit-select-all"
-                    type="button"
-                    phx-click="select_all"
-                    class="inst-mini-btn"
-                  >
-                    {gettext("Select all")}
-                  </button>
-                  <button
-                    id="uikit-clear-all"
-                    type="button"
-                    phx-click="clear_all"
-                    class="inst-mini-btn"
-                  >
-                    {gettext("Clear")}
-                  </button>
-                </div>
-
-                <%!-- Two kits on disk means two vocabularies in one picker — a styled Chelekom button
+              <%!-- Two kits on disk means two vocabularies in one picker — a styled Chelekom button
                       and a headless one sit side by side under "Forms" and read identically. The
                       chips and the badges are drawn only when there IS a second kit, so a stock
                       install looks exactly as it always did. --%>
-                <div :if={length(@kits) > 1} class="inst-kits">
-                  <button
-                    type="button"
-                    id="kit-all"
-                    phx-click="filter_kit"
-                    phx-value-kit="all"
-                    class={["inst-kit-chip", is_nil(@kit_filter) && "on"]}
-                  >
-                    {gettext("All kits")}
-                  </button>
-                  <button
-                    :for={kit <- @kits}
-                    type="button"
-                    id={"kit-#{kit}"}
-                    phx-click="filter_kit"
-                    phx-value-kit={kit}
-                    class={["inst-kit-chip", @kit_filter == kit && "on"]}
-                  >
-                    {UiKitCatalog.kit_label(kit)}
-                  </button>
-                </div>
-
-                <section
-                  :for={group <- visible_groups(@catalog, @query, @kit_filter)}
-                  id={"group-#{group.key}"}
-                  class="inst-cat"
+              <div :if={length(@kits) > 1} class="inst-kits">
+                <button
+                  type="button"
+                  id="kit-all"
+                  phx-click="filter_kit"
+                  phx-value-kit="all"
+                  class={["inst-kit-chip", is_nil(@kit_filter) && "on"]}
                 >
-                  <div class="inst-cat-h">
-                    <b>{group.label}</b>
-                    <span class="c">
-                      ({group_selected_count(group, @selected, @required)}/{length(group.entries)})
-                    </span>
-                    <span class="an">
-                      <button type="button" phx-click="select_all_group" phx-value-group={group.key}>
-                        {gettext("All")}
-                      </button>
-                      <button
-                        type="button"
-                        phx-click="unselect_all_group"
-                        phx-value-group={group.key}
-                      >
-                        {gettext("None")}
-                      </button>
-                    </span>
-                  </div>
-                  <ul class={["inst-cat-grid", length(@kits) > 1 && "kits"]}>
-                    <%= for entry <- group.entries do %>
-                      <li
-                        id={"comp-#{entry.name}"}
-                        class={["inst-citem", checked?(entry.name, @selected, @required) && "on"]}
-                      >
-                        <input
-                          type="checkbox"
-                          id={"toggle-#{entry.name}"}
-                          checked={checked?(entry.name, @selected, @required)}
-                          disabled={locked?(entry.name, @selected, @required)}
-                          phx-click="toggle"
-                          phx-value-name={entry.name}
-                          class="inst-cbox"
-                        />
-                        <label for={"toggle-#{entry.name}"} class="nm">{entry.label}</label>
-                        <span :if={length(@kits) > 1 and entry[:kit]} class="inst-kit-tag">
-                          {UiKitCatalog.kit_label(entry.kit)}
-                        </span>
-                        <span
-                          :if={locked?(entry.name, @selected, @required)}
-                          title={
-                            gettext("Required by %{names}",
-                              names:
-                                Enum.join(
-                                  UiKitCatalog.required_by(@catalog, @selected, entry.name),
-                                  ", "
-                                )
-                            )
-                          }
-                          class="inst-required"
-                        >
-                          <.svg_lock /> {gettext("required")}
-                        </span>
-                        <button
-                          :if={configurable?(entry, @selected, @required)}
-                          type="button"
-                          id={"config-#{entry.name}"}
-                          phx-click="toggle_config"
-                          phx-value-name={entry.name}
-                          title={gettext("Configure options")}
-                          class={[
-                            "inst-cfg-btn",
-                            (@open_config == entry.name or Map.has_key?(@config_axes, entry.name)) &&
-                              "act"
-                          ]}
-                        >
-                          <.svg_sliders />
-                        </button>
-                      </li>
-                      <li
-                        :if={@open_config == entry.name}
-                        id={"config-panel-#{entry.name}"}
-                        class="inst-optpanel"
-                      >
-                        <div class="oh">
-                          <.svg_sliders />
-                          <span>{entry.label}</span>
-                          <button
-                            type="button"
-                            class="rst"
-                            phx-click="reset_config"
-                            phx-value-name={entry.name}
-                          >
-                            {gettext("Reset defaults")}
-                          </button>
-                        </div>
-                        <div :for={{axis, cfg} <- ordered_config(entry)} class="inst-ogroup">
-                          <div class="gl">{axis}</div>
-                          <div class="inst-chips">
-                            <label
-                              :for={value <- cfg.values}
-                              class={[
-                                "inst-chip",
-                                axis_checked?(@config_axes, entry.name, axis, value, cfg.default) &&
-                                  "on",
-                                value == cfg.default && "def"
-                              ]}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={
-                                  axis_checked?(@config_axes, entry.name, axis, value, cfg.default)
-                                }
-                                disabled={value == cfg.default}
-                                phx-click="toggle_axis"
-                                phx-value-name={entry.name}
-                                phx-value-axis={axis}
-                                phx-value-opt={value}
-                              />
-                              {if value == cfg.default,
-                                do: gettext("%{value} · default", value: value),
-                                else: value}
-                            </label>
-                          </div>
-                        </div>
-                      </li>
-                    <% end %>
-                  </ul>
-                </section>
-
-                <p :if={visible_groups(@catalog, @query, @kit_filter) == []} class="inst-empty">
-                  {gettext("No components match “%{query}”.", query: @query)}
-                </p>
+                  {gettext("All kits")}
+                </button>
+                <button
+                  :for={kit <- @kits}
+                  type="button"
+                  id={"kit-#{kit}"}
+                  phx-click="filter_kit"
+                  phx-value-kit={kit}
+                  class={["inst-kit-chip", @kit_filter == kit && "on"]}
+                >
+                  {UiKitCatalog.kit_label(kit)}
+                </button>
               </div>
-            </div>
 
-            <%!-- EVERY EXTENSION THAT REGISTERED ITSELF, and nothing written down here. The list is
-                  `MishkaInstaller`'s own registry of plugins on `installer:extension:install`, so an
-                  extension that is installed offers itself and one that is not cannot appear. --%>
-            <div :if={@extensions != []} class="inst-mod">
-              <div class="inst-mod-head">
-                <div class="inst-mod-ico"><.svg_box /></div>
-                <div>
-                  <div class="t">{gettext("Extensions")}</div>
-                  <div class="s">
-                    {gettext(
-                      "Tick what this site should start with. Everything here can also be set up later, from its own menu."
-                    )}
-                  </div>
+              <section
+                :for={group <- visible_groups(@catalog, @query, @kit_filter)}
+                id={"group-#{group.key}"}
+                class="inst-cat"
+              >
+                <div class="inst-cat-h">
+                  <b>{group.label}</b>
+                  <span class="c">
+                    ({group_selected_count(group, @selected, @required)}/{length(group.entries)})
+                  </span>
+                  <span class="an">
+                    <button type="button" phx-click="select_all_group" phx-value-group={group.key}>
+                      {gettext("All")}
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="unselect_all_group"
+                      phx-value-group={group.key}
+                    >
+                      {gettext("None")}
+                    </button>
+                  </span>
                 </div>
-              </div>
-
-              <div class="inst-mod-body">
-                <ul id="install-extensions" class="inst-ext-list">
-                  <li
-                    :for={extension <- @extensions}
-                    id={"extension-#{extension.key}"}
-                    class={["inst-ext", MapSet.member?(@extensions_chosen, extension.key) && "on"]}
-                  >
-                    <label class="inst-ext-row">
+                <ul class={["inst-cat-grid", length(@kits) > 1 && "kits"]}>
+                  <%= for entry <- group.entries do %>
+                    <li
+                      id={"comp-#{entry.name}"}
+                      class={["inst-citem", checked?(entry.name, @selected, @required) && "on"]}
+                    >
                       <input
                         type="checkbox"
-                        id={"toggle-extension-#{extension.key}"}
-                        checked={MapSet.member?(@extensions_chosen, extension.key)}
-                        phx-click="toggle_extension"
-                        phx-value-key={extension.key}
+                        id={"toggle-#{entry.name}"}
+                        checked={checked?(entry.name, @selected, @required)}
+                        disabled={locked?(entry.name, @selected, @required)}
+                        phx-click="toggle"
+                        phx-value-name={entry.name}
                         class="inst-cbox"
                       />
-                      <span class="nm">
-                        <span class="t">{Settings.text(extension.label)}</span>
-                        <span :if={extension.summary != ""} class="s">
-                          {Settings.text(extension.summary)}
-                        </span>
+                      <label for={"toggle-#{entry.name}"} class="nm">{entry.label}</label>
+                      <span :if={length(@kits) > 1 and entry[:kit]} class="inst-kit-tag">
+                        {UiKitCatalog.kit_label(entry.kit)}
                       </span>
-                    </label>
-
-                    <%!-- ASKED ONLY WHEN IT IS WANTED. An extension declaring no fields has nothing
-                          to open, and one that does is asked only once it has been ticked. --%>
-                    <button
-                      :if={
-                        extension.fields != [] and MapSet.member?(@extensions_chosen, extension.key)
-                      }
-                      type="button"
-                      phx-click="toggle_extension_fields"
-                      phx-value-key={extension.key}
-                      class={["inst-mod-cust", @open_extension == extension.key && "open"]}
+                      <span
+                        :if={locked?(entry.name, @selected, @required)}
+                        title={
+                          gettext("Required by %{names}",
+                            names:
+                              Enum.join(
+                                UiKitCatalog.required_by(@catalog, @selected, entry.name),
+                                ", "
+                              )
+                          )
+                        }
+                        class="inst-required"
+                      >
+                        <.svg_lock /> {gettext("required")}
+                      </span>
+                      <button
+                        :if={configurable?(entry, @selected, @required)}
+                        type="button"
+                        id={"config-#{entry.name}"}
+                        phx-click="toggle_config"
+                        phx-value-name={entry.name}
+                        title={gettext("Configure options")}
+                        class={[
+                          "inst-cfg-btn",
+                          (@open_config == entry.name or Map.has_key?(@config_axes, entry.name)) &&
+                            "act"
+                        ]}
+                      >
+                        <.svg_sliders />
+                      </button>
+                    </li>
+                    <li
+                      :if={@open_config == entry.name}
+                      id={"config-panel-#{entry.name}"}
+                      class="inst-optpanel"
                     >
-                      {gettext("Settings")} <span class="ch"><.svg_chev /></span>
-                    </button>
-
-                    <div
-                      :if={
-                        @open_extension == extension.key and
-                          MapSet.member?(@extensions_chosen, extension.key)
-                      }
-                      id={"extension-fields-#{extension.key}"}
-                      class="inst-ext-fields"
-                    >
-                      <div :for={field <- extension.fields} class="inst-field">
-                        <label for={"extension-#{extension.key}-#{field_name(field)}"}>
-                          {field_label(field)}
-                        </label>
-                        <input
-                          type="text"
-                          id={"extension-#{extension.key}-#{field_name(field)}"}
-                          name={"settings[extensions][#{extension.key}][#{field_name(field)}]"}
-                          class="inst-inp"
-                        />
-                        <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
+                      <div class="oh">
+                        <.svg_sliders />
+                        <span>{entry.label}</span>
+                        <button
+                          type="button"
+                          class="rst"
+                          phx-click="reset_config"
+                          phx-value-name={entry.name}
+                        >
+                          {gettext("Reset defaults")}
+                        </button>
                       </div>
-                    </div>
-                  </li>
+                      <div :for={{axis, cfg} <- ordered_config(entry)} class="inst-ogroup">
+                        <div class="gl">{axis}</div>
+                        <div class="inst-chips">
+                          <label
+                            :for={value <- cfg.values}
+                            class={[
+                              "inst-chip",
+                              axis_checked?(@config_axes, entry.name, axis, value, cfg.default) &&
+                                "on",
+                              value == cfg.default && "def"
+                            ]}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={
+                                axis_checked?(@config_axes, entry.name, axis, value, cfg.default)
+                              }
+                              disabled={value == cfg.default}
+                              phx-click="toggle_axis"
+                              phx-value-name={entry.name}
+                              phx-value-axis={axis}
+                              phx-value-opt={value}
+                            />
+                            {if value == cfg.default,
+                              do: gettext("%{value} · default", value: value),
+                              else: value}
+                          </label>
+                        </div>
+                      </div>
+                    </li>
+                  <% end %>
                 </ul>
+              </section>
+
+              <p :if={visible_groups(@catalog, @query, @kit_filter) == []} class="inst-empty">
+                {gettext("No components match “%{query}”.", query: @query)}
+              </p>
+            </div>
+          </div>
+
+          <%!-- EVERY EXTENSION THAT REGISTERED ITSELF, and nothing written down here. The list is
+                  `MishkaInstaller`'s own registry of plugins on `installer:extension:install`, so an
+                  extension that is installed offers itself and one that is not cannot appear. --%>
+          <div :if={@extensions != []} class="inst-mod">
+            <div class="inst-mod-head">
+              <div class="inst-mod-ico"><.svg_box /></div>
+              <div>
+                <div class="t">{gettext("Extensions")}</div>
+                <div class="s">
+                  {gettext(
+                    "Tick what this site should start with. Everything here can also be set up later, from its own menu."
+                  )}
+                </div>
               </div>
             </div>
 
-            <div class="inst-actions">
-              <button id="uikit-back" type="button" phx-click="back" class={btn_ghost()}>
-                <.svg_back /> {gettext("Back")}
-              </button>
-              <button id="uikit-next" type="button" phx-click="to_settings" class={btn_primary()}>
-                {gettext("Next: settings")} <.svg_arrow />
-              </button>
+            <div class="inst-mod-body">
+              <ul id="install-extensions" class="inst-ext-list">
+                <li
+                  :for={extension <- @extensions}
+                  id={"extension-#{extension.key}"}
+                  class={["inst-ext", MapSet.member?(@extensions_chosen, extension.key) && "on"]}
+                >
+                  <label class="inst-ext-row">
+                    <input
+                      type="checkbox"
+                      id={"toggle-extension-#{extension.key}"}
+                      checked={MapSet.member?(@extensions_chosen, extension.key)}
+                      phx-click="toggle_extension"
+                      phx-value-key={extension.key}
+                      class="inst-cbox"
+                    />
+                    <span class="nm">
+                      <span class="t">{Settings.text(extension.label)}</span>
+                      <span :if={extension.summary != ""} class="s">
+                        {Settings.text(extension.summary)}
+                      </span>
+                    </span>
+                  </label>
+
+                  <%!-- ASKED ONLY WHEN IT IS WANTED. An extension declaring no fields has nothing
+                          to open, and one that does is asked only once it has been ticked. --%>
+                  <button
+                    :if={extension.fields != [] and MapSet.member?(@extensions_chosen, extension.key)}
+                    type="button"
+                    phx-click="toggle_extension_fields"
+                    phx-value-key={extension.key}
+                    class={["inst-mod-cust", @open_extension == extension.key && "open"]}
+                  >
+                    {gettext("Settings")} <span class="ch"><.svg_chev /></span>
+                  </button>
+
+                  <div
+                    :if={
+                      @open_extension == extension.key and
+                        MapSet.member?(@extensions_chosen, extension.key)
+                    }
+                    id={"extension-fields-#{extension.key}"}
+                    class="inst-ext-fields"
+                  >
+                    <div :for={field <- extension.fields} class="inst-field">
+                      <label for={"extension-#{extension.key}-#{field_name(field)}"}>
+                        {field_label(field)}
+                      </label>
+                      <input
+                        type="text"
+                        id={"extension-#{extension.key}-#{field_name(field)}"}
+                        name={"settings[extensions][#{extension.key}][#{field_name(field)}]"}
+                        class="inst-inp"
+                      />
+                      <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
+                    </div>
+                  </div>
+                </li>
+              </ul>
             </div>
-        <% end %>
+          </div>
+
+          <div class="inst-actions">
+            <button id="uikit-back" type="button" phx-click="back" class={btn_ghost()}>
+              <.svg_back /> {gettext("Back")}
+            </button>
+            <button
+              id="uikit-next"
+              type="button"
+              phx-click="to_settings"
+              disabled={@bundle_status == :loading}
+              class={btn_primary()}
+            >
+              {gettext("Next: settings")} <.svg_arrow />
+            </button>
+          </div>
+        </div>
       </div>
     </.shell>
     """
@@ -1280,6 +1354,7 @@ defmodule MishkaCmsWeb.InstallLive do
   attr :subtitle, :string, default: nil
   attr :wide, :boolean, default: false
   attr :tight, :boolean, default: false
+  attr :busy, :boolean, default: false
   slot :inner_block, required: true
 
   defp shell(assigns) do
@@ -1621,6 +1696,13 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-channel .gl{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--faint);
         text-transform:uppercase}
       .inst-channel .inst-hint{flex-basis:100%;margin:0}
+      .inst-chip:disabled{opacity:.55;cursor:not-allowed}
+      /* The download box sits under the chips; what follows waits, visibly, until it is done. */
+      .inst-fetch.is-inline{padding:4px 0 22px}
+      .inst-fetch.is-inline .inst-fetch-head{justify-content:flex-start}
+      .inst-fetch.is-inline .inst-fetch-list{margin:14px 0 0;max-width:none}
+      .inst-sections.is-busy{opacity:.5;transition:opacity .2s}
+      .inst-banner-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
       .inst-fetch-head{display:flex;align-items:center;justify-content:center;gap:12px;
         color:var(--blue);font-weight:600;font-size:14.5px}
       .inst-fetch-list{list-style:none;margin:26px auto 0;padding:0;max-width:460px;display:grid;
@@ -1789,6 +1871,9 @@ defmodule MishkaCmsWeb.InstallLive do
   defp rail_state(i, index) when i < index, do: "done"
   defp rail_state(i, index) when i == index, do: "active"
   defp rail_state(_i, _index), do: nil
+
+  # While the kits download, the step they belong to is the only place to be.
+  defp rail_can?(_i, _index, %{busy: true}), do: false
 
   defp rail_can?(i, index, %{step: step} = assigns),
     do: step in [:config, :ui_kit, :settings] and i != index and rail_open?(i, assigns)
@@ -2445,10 +2530,11 @@ defmodule MishkaCmsWeb.InstallLive do
     ]
   end
 
-  # The channel the operator picked, or the one the answer came from. Neither is a developer's own
-  # bundles read from disk, and then no chip claims to be the source.
-  defp shown_channel(nil, %{channel: channel}), do: channel
-  defp shown_channel(channel, _release), do: channel
+  # The channel the kits CAME FROM once they are here — a stable lookup that found only a pre-release
+  # lights Pre-release — and the one being tried while they download.
+  defp shown_channel(_picked, %{channel: :stable, fallback?: true}), do: :prerelease
+  defp shown_channel(_picked, %{channel: channel}), do: channel
+  defp shown_channel(picked, _release), do: picked
 
   defp channel_note(%{channel: :stable, tag: tag}),
     do: gettext("The newest stable release, %{tag}.", tag: tag)
@@ -2462,6 +2548,17 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp channel_note(nil),
     do: gettext("The kits already on this server. Pick a version to fetch one.")
+
+  # WHY THERE IS NOTHING: GitHub could not be asked at all, or it was asked and nothing has the kits.
+  defp missing_reason(failures) do
+    case Enum.find(failures, &(&1.key == :release)) do
+      %{reason: reason} ->
+        gettext("Chelekom's releases could not be looked up: %{reason}.", reason: reason)
+
+      nil ->
+        gettext("No release of Chelekom has them, and its master branch does not either.")
+    end
+  end
 
   # Nothing heard yet is a kit being read from disk or a download that has not started — the bar
   # moves without a value until bytes arrive. A server that sends no length gets the count alone.
