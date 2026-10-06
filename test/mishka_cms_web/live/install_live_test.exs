@@ -58,11 +58,12 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     # write here too, and the directory goes with the test.
     kits_dir = Path.join(System.tmp_dir!(), "install_kits_#{System.unique_integer([:positive])}")
     File.mkdir_p!(kits_dir)
+    configured = Application.fetch_env!(:mishka_cms_core, :ui_kits_dir)
     Application.put_env(:mishka_cms_core, :ui_kits_dir, kits_dir)
     serve_chelekom!()
 
     on_exit(fn ->
-      Application.delete_env(:mishka_cms_core, :ui_kits_dir)
+      Application.put_env(:mishka_cms_core, :ui_kits_dir, configured)
       File.rm_rf(kits_dir)
     end)
 
@@ -1211,8 +1212,10 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
       view |> element("#install-dev-seeds") |> render_click()
       assert has_element?(view, "#installer-seeds")
-      # The Chelekom UI-kit option + the extension seeds, all checked by default.
-      assert has_element?(view, "#seed-chelekom input[checked]")
+
+      # The extension seeds, all checked by default. Every UI-kit component is always installed, so
+      # there is nothing to choose for the kits.
+      refute has_element?(view, "#seed-chelekom")
       assert has_element?(view, "#seed-blog input[checked]")
       assert has_element?(view, "#seed-document input[checked]")
 
@@ -1226,8 +1229,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       {:ok, view, _html} = live(conn, "/install")
       view |> element("#install-dev-seeds") |> render_click()
 
-      # Trim to the core only (deselect the heavy Chelekom kit + extension seeds) for a fast test.
-      view |> element("#seed-chelekom input") |> render_click()
+      # Trim to the core only (deselect the extension seeds) for a fast test.
       view |> element("#seed-blog input") |> render_click()
       view |> element("#seed-document input") |> render_click()
 
