@@ -55,8 +55,7 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
 
   # path => why interpolation is allowed there. Every entry needs a matching `@source inline(...)`
   # in `Mix.Tasks.AdminCss`, and the second test fails if the file stops interpolating.
-  @allowed %{
-  }
+  @allowed %{}
 
   # Files whose class strings become a DATABASE TEMPLATE rather than rendered markup. The
   # interpolation runs in Elixir when the row is written, so what lands in the database is already a

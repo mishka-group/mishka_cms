@@ -14,16 +14,7 @@ env:
 
 jobs:
   test:
-    name: ${{ matrix.project }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        project:
-          - __extensions/mishka_cms_core
-          - __extensions/mishka_blog
-          - __extensions/mishka_document
-          - .
 
     services:
       postgres:
@@ -38,13 +29,35 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # __extensions/mishka_gervaz is a gitignored path dependency of every project. This step goes
-      # when mishka_gervaz comes from Hex and the extensions from their own repositories.
+      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
+      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
+      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
       - uses: actions/checkout@v7
         with:
           repository: mishka-group/mishka_gervaz
           ref: ${{ vars.GERVAZ_REF || 'master' }}
           path: __extensions/mishka_gervaz
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_cms_core
+          ref: ${{ vars.CORE_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_cms_core
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_blog
+          ref: ${{ vars.BLOG_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_blog
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_document
+          ref: ${{ vars.DOCUMENT_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_document
 
       # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
@@ -55,28 +68,23 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: |
-            ${{ matrix.project }}/deps
-            ${{ matrix.project }}/_build
-          key: ${{ runner.os }}-${{ matrix.project }}-${{ hashFiles('.tool-versions', format('{0}/mix.lock', matrix.project)) }}
-
-      # Core compiles its icon catalogue from the root's deps/heroicons, and an empty catalogue fails
-      # --warnings-as-errors, so an extension's job fetches the root's dependencies too.
-      - run: mix deps.get
-        if: matrix.project != '.'
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}
 
       - run: mix deps.get
-        working-directory: ${{ matrix.project }}
 
       - run: mix compile --warnings-as-errors
-        working-directory: ${{ matrix.project }}
 
+      # The formatter takes the DSL's paren-free calls (`table "pages"`, `reference :site, ...`)
+      # from the dependencies in .formatter.exs's import_deps, so it runs once they are fetched.
       - run: mix format --check-formatted
-        working-directory: ${{ matrix.project }}
 
-      # The root's Oban tables: the migration `mix dev_reset` writes with `oban.install`, an igniter
-      # task that the test environment does not have.
+      # The Oban tables: the migration `mix dev_reset` writes with `oban.install`, an igniter task
+      # that the test environment does not have.
       - run: |
-          cat > priv/repo/migrations/20000101000000_add_oban.exs <<'EOF'
+          mkdir -p priv/repo/migrations
+          cat > priv/repo/migrations/20000101000000_add_oban.exs <<'MIGRATION'
           defmodule MishkaCms.Repo.Migrations.AddOban do
             use Ecto.Migration
 
@@ -84,18 +92,15 @@ jobs:
 
             def down, do: Oban.Migration.down(version: 1)
           end
-          EOF
-        if: matrix.project == '.'
+          MIGRATION
 
-      # The migrations are generated, not in git, in every project: generate them before the test
-      # alias's `ash.setup` migrates the test database.
+      # The migrations are generated, not in git: generate them before the test alias's `ash.setup`
+      # migrates the test database.
       - run: mix ash.codegen ci
-        working-directory: ${{ matrix.project }}
 
       # --warnings-as-errors also fails on warnings in the test files, which a plain run can print
       # while a test captures stderr, where nobody sees them.
       - run: mix test --warnings-as-errors
-        working-directory: ${{ matrix.project }}
         env:
           POSTGRES_HOST: localhost
           DB_HOST: localhost
@@ -110,19 +115,37 @@ jobs:
       - run: bun install --frozen-lockfile && bun run test
         working-directory: assets
 
-  # The image builds from a clean checkout. It carries no root migrations (they are generated, not in
+  # The image builds from a clean checkout. It carries no migrations (they are generated, not in
   # git), so this checks the build, not a deploy.
   docker:
     runs-on: ubuntu-latest
     needs: [test, assets]
     steps:
       - uses: actions/checkout@v7
-      # The build context needs mishka_gervaz, as the test jobs do, until it comes from Hex.
+      # The build context needs the packages under __extensions/, as the test job does.
       - uses: actions/checkout@v7
         with:
           repository: mishka-group/mishka_gervaz
           ref: ${{ vars.GERVAZ_REF || 'master' }}
           path: __extensions/mishka_gervaz
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_cms_core
+          ref: ${{ vars.CORE_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_cms_core
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_blog
+          ref: ${{ vars.BLOG_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_blog
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_document
+          ref: ${{ vars.DOCUMENT_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_document
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
