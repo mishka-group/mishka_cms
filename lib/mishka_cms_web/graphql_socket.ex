@@ -145,9 +145,10 @@ defmodule MishkaCmsWeb.GraphqlSocket do
 
   # `AshAuthentication.Plug.Helpers.retrieve_from_bearer/3` and
   # `ApiTenantLookupPlug.confirm_bearer_tenant/2` themselves, on a conn that carries only the token,
-  # the site and the tenant, so a token passes here exactly when it would pass over HTTP.
+  # the site and the tenant, so a token passes here exactly when it would pass over HTTP. Neither
+  # reads the client's address, so the conn carries the unspecified one that `Plug.Conn.t()` asks for.
   defp actor(token, site, tenant, socket) when is_binary(token) do
-    %Plug.Conn{}
+    %Plug.Conn{remote_ip: {0, 0, 0, 0}}
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> token)
     |> Plug.Conn.assign(:current_site, site)
     |> Ash.PlugHelpers.set_tenant(tenant)
