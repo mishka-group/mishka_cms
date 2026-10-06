@@ -1,19 +1,24 @@
 defmodule MishkaCmsCore.Install.UiKitCatalogTest do
   @moduledoc """
-  Pure tests against the REAL shipped `chelekom.json` (136 components) — the dependency-closure /
-  required-lock logic that the picker is built on. No DB, no mocks; loads the actual bundle once.
+  Pure tests against the REAL `chelekom.json` (136 components) — the dependency-closure /
+  required-lock logic that the picker is built on. No DB, no mocks; loads the actual bundle once,
+  from the copy mishka_cms_core keeps for its tests (nothing ships one: a server downloads it).
   """
   use ExUnit.Case, async: true
 
   alias MishkaCmsCore.Install.UiKitCatalog
-  alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
+
+  @chelekom Path.join(
+              Mix.Project.deps_paths()[:mishka_cms_core],
+              "test/fixtures/cms_ui_kits/chelekom.json"
+            )
 
   setup_all do
-    bundle = UiKitHandler.ensure_bundle!()
+    bundle = @chelekom |> File.read!() |> Jason.decode!()
     {:ok, bundle: bundle, catalog: UiKitCatalog.build(bundle)}
   end
 
-  test "ensure_bundle!/1 resolves the local bundle to a parsed v3 map", %{bundle: bundle} do
+  test "the bundle is a parsed v3 map", %{bundle: bundle} do
     assert bundle["$schema"] == "mishka.ui_kit.bundle.v3"
     assert length(bundle["components"]) == 136
   end

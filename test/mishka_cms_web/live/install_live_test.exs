@@ -1,8 +1,9 @@
 defmodule MishkaCmsWeb.InstallLiveTest do
   @moduledoc """
   Real LiveView tests for the installer wizard (config → ui-kit picker → settings → done). They drive
-  the actual endpoint + router + InstallGate plug, load the real Chelekom bundle for the picker, and
-  assert the real database side effects of `Bootstrap.run/1`. `async: false` (the install flag is
+  the actual endpoint + router + InstallGate plug, download the kits the way a server does — the
+  real Chelekom bundle, served by a `Req.Test` plug from mishka_cms_core's test fixture — and assert
+  the real database side effects of `Bootstrap.run/1`. `async: false` (the install flag is
   process-global). The UI-kit install side effects are test-safe: `sync_after_bulk` is a no-op under
   `env_test?`, so the picker step's install path doesn't compile components.
   """
@@ -29,34 +30,36 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     "host" => "localhost"
   }
 
-  # THE STYLED KIT ONLY, so this suite never touches the network. The shipped default also offers a
-  # headless package whose bundle has no published URL yet, and letting every test in this file wait
-  # on that 404 made the suite both slow and dependent on the internet. The tests that care about a
-  # failing package configure one deliberately.
+  # THE STYLED KIT ONLY, downloaded from a plug, so this suite never touches the network. The tests
+  # about the release channels or a failing package configure their own sources.
   @offline_kits [
     %{
       key: :styled,
       label: "Chelekom — styled",
       file: "chelekom.json",
       tag: "test",
-      url: "https://127.0.0.1:1/never-reached.json"
+      url: "https://kits.test/chelekom.json"
     }
   ]
+
+  # Chelekom's real styled bundle. Nothing ships one; mishka_cms_core keeps a copy for its tests.
+  @chelekom Path.join(
+              Mix.Project.deps_paths()[:mishka_cms_core],
+              "test/fixtures/cms_ui_kits/chelekom.json"
+            )
 
   setup do
     :persistent_term.put(:mishka_installed, false)
     official = Application.fetch_env!(:mishka_cms_core, :official_ui_kits)
     Application.put_env(:mishka_cms_core, :official_ui_kits, @offline_kits)
 
-    # EVERY TEST GETS ITS OWN KITS DIRECTORY, holding the shipped bundle. The real one is core's
-    # priv, which the core suite writes fixture kits into while this suite runs beside it: read
-    # there, a test counts a kit it never added; swept there, it deletes one the core suite is
-    # using. The headless bundle and `add_custom_kit/2` write here, and the directory goes with
-    # the test.
+    # EVERY TEST GETS ITS OWN, EMPTY KITS DIRECTORY, as a fresh server has: the styled kit is
+    # downloaded into it when the UI-kit step opens. The headless bundle and `add_custom_kit/2`
+    # write here too, and the directory goes with the test.
     kits_dir = Path.join(System.tmp_dir!(), "install_kits_#{System.unique_integer([:positive])}")
     File.mkdir_p!(kits_dir)
-    File.ln_s!(UiKitHandler.default_bundle_path(), Path.join(kits_dir, "chelekom.json"))
     Application.put_env(:mishka_cms_core, :ui_kits_dir, kits_dir)
+    serve_chelekom!()
 
     on_exit(fn ->
       Application.delete_env(:mishka_cms_core, :ui_kits_dir)
@@ -80,41 +83,77 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     :ok
   end
 
+  # The styled kit's URL answers with Chelekom's real styled bundle; any other file is not there.
+  defp serve_chelekom! do
+    chelekom = File.read!(@chelekom)
+
+    Application.put_env(:mishka_cms_core, :ui_kit_req_options,
+      plug: fn
+        %{host: "kits.test"} = conn ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.send_resp(200, chelekom)
+
+        conn ->
+          Plug.Conn.send_resp(conn, 404, "Not Found")
+      end
+    )
+  end
+
+  # A server that installed before already holds Chelekom: the bundle is in its kits directory and
+  # is read from there, whatever the official sources say today.
+  defp chelekom_downloaded! do
+    File.cp!(@chelekom, Path.join(UiKitHandler.kits_dir(), "chelekom.json"))
+  end
+
   # Chelekom's packages from a fake GitHub: the API's release list, and each attached file a bundle
-  # of that name. The test's `chelekom.json` is a LINK to the shipped bundle, and a download writes
-  # through a link — so it goes first, and the fetched files land in the test's own directory.
-  defp github_releases!(releases) do
+  # of that name holding one component. `download:` answers every file request instead — a test
+  # holding the download open, or a host where the file is missing.
+  defp github_releases!(releases, opts \\ []) do
     Application.delete_env(:mishka_cms_core, :official_ui_kits)
-    File.rm!(Path.join(UiKitHandler.kits_dir(), "chelekom.json"))
+    download = Keyword.get(opts, :download, &named_bundle/1)
 
     Application.put_env(:mishka_cms_core, :ui_kit_req_options,
       plug: fn conn ->
         case conn.host do
-          "api.github.com" ->
-            Req.Test.json(conn, releases)
-
-          _download ->
-            [tag, file] = conn.request_path |> String.split("/", trim: true) |> Enum.take(-2)
-
-            Req.Test.json(conn, %{
-              "$schema" => "mishka.ui_kit.bundle.v3",
-              "name" => Path.rootname(file),
-              "version" => tag,
-              "components" => []
-            })
+          "api.github.com" -> Req.Test.json(conn, releases)
+          _download -> download.(conn)
         end
       end
     )
   end
 
-  defp kit_release(tag, prerelease?) do
+  defp named_bundle(conn) do
+    [tag, file] = conn.request_path |> String.split("/", trim: true) |> Enum.take(-2)
+    name = Path.rootname(file)
+
+    Req.Test.json(conn, %{
+      "$schema" => "mishka.ui_kit.bundle.v3",
+      "name" => name,
+      "version" => tag,
+      "components" => [
+        %{
+          "name" => "#{name}-panel",
+          "type" => "general",
+          "template" => "<div class={@class}>panel</div>",
+          "attrs" => [],
+          "slots" => [],
+          "helpers" => [],
+          "args" => [],
+          "extra" => %{}
+        }
+      ]
+    })
+  end
+
+  defp kit_release(tag, prerelease?, files \\ ["chelekom.json", "chelekom_headless.json"]) do
     %{
       "tag_name" => tag,
       "prerelease" => prerelease?,
       "draft" => false,
       "assets" =>
         Enum.map(
-          ["chelekom.json", "chelekom_headless.json"],
+          files,
           &%{"name" => &1, "browser_download_url" => "https://github.test/#{tag}/#{&1}"}
         )
     }
@@ -133,10 +172,11 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     {:ok, view, _html} = live(conn, "/install")
     view |> form("#install-form", install: config) |> render_submit()
 
-    # The real ~7MB Chelekom bundle is parsed in start_async — give it room past the 100ms default.
+    # The real Chelekom bundle is downloaded and parsed in start_async — give it room past the 100ms
+    # default.
     render_async(view, 15_000)
 
-    # The picker is collapsed by default (everything selected) — open it so the list + toolbar render.
+    # The picker is collapsed by default — open it so the list + toolbar render.
     view |> element("#uikit-toggle") |> render_click()
     view
   end
@@ -170,8 +210,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
   defp to_settings(conn, config \\ @valid) do
     view = to_ui_kit(conn, config)
 
-    # Trim the all-selected default to a single component so commit installs just button (+ its icon dep).
-    view |> element("#uikit-clear-all") |> render_click()
+    # One component, so commit installs just button (+ the icon every site needs).
     view |> element("#toggle-chelekom-button") |> render_click()
     view |> element("#uikit-next") |> render_click()
     view
@@ -377,6 +416,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       conn: conn
     } do
       Application.put_env(:mishka_cms_core, :official_ui_kits, [acme_release_kit()])
+      chelekom_downloaded!()
 
       Application.put_env(:mishka_cms_core, :ui_kit_req_options,
         plug: fn conn -> Plug.Conn.send_resp(conn, 404, "") end
@@ -400,9 +440,9 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       github_releases!([kit_release("v2-alpha", true), kit_release("v1.9", false)])
       view = to_ui_kit(conn)
 
-      # Nothing chosen yet: the kits already here, and no chip claiming to be their source.
-      assert has_element?(view, "#uikit-channel-note", "already on this server")
-      refute has_element?(view, "#uikit-channel .inst-chip.on")
+      # Arriving fetched the newest stable release.
+      assert has_element?(view, "#uikit-channel-stable.on[aria-checked='true']")
+      assert has_element?(view, "#uikit-channel-note", "The newest stable release, v1.9.")
 
       view |> element("#uikit-channel-prerelease") |> render_click()
       render_async(view, 15_000)
@@ -418,15 +458,14 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#uikit-channel-note", "The newest stable release, v1.9.")
     end
 
-    # TODAY'S CASE: only pre-releases attach the kits. Stable still installs, and says what it took.
+    # TODAY'S CASE: only pre-releases attach the kits. Stable still installs, lights the channel it
+    # really came from, and says what it took.
     test "stable with no stable kits takes the newest pre-release and says so", %{conn: conn} do
       github_releases!([kit_release("v2-alpha", true)])
       view = to_ui_kit(conn)
 
-      view |> element("#uikit-channel-stable") |> render_click()
-      render_async(view, 15_000)
-
-      assert has_element?(view, "#uikit-channel-stable.on")
+      assert has_element?(view, "#uikit-channel-prerelease.on")
+      refute has_element?(view, "#uikit-channel-stable.on")
 
       assert has_element?(
                view,
@@ -445,11 +484,119 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     end
   end
 
+  # THE DOWNLOAD BELONGS TO THE STEP. Arriving starts it — Stable first, then the newest
+  # pre-release, then master — and it is drawn under the version chips, with the rest of the step
+  # on the page but out of reach until it has finished.
+  describe "the kit download on the UI-kit step" do
+    test "arriving downloads Stable at once, its bars under the chips, the rest held", %{
+      conn: conn
+    } do
+      test = self()
+
+      github_releases!([kit_release("v1.9", false, ["chelekom.json"])],
+        download: fn conn ->
+          send(test, {:fetching, self()})
+          receive do: (:go -> :ok)
+          named_bundle(conn)
+        end
+      )
+
+      {:ok, view, _html} = live(conn, "/install")
+      view |> form("#install-form", install: @valid) |> render_submit()
+      assert_receive {:fetching, download}, 5_000
+
+      assert has_element?(view, "#uikit-channel-stable.on[disabled]")
+      assert has_element?(view, "#uikit-channel-master[disabled]")
+      assert has_element?(view, "#uikit-loading")
+
+      html = render(view)
+
+      [chips, bars, rest] =
+        for id <- ~w(uikit-channel uikit-loading uikit-sections),
+            do: html |> :binary.match(~s(id="#{id}")) |> elem(0)
+
+      assert chips < bars and bars < rest,
+             "the bars sit between the chips and the rest of the step"
+
+      assert has_element?(view, "#uikit-sections[inert]")
+      assert has_element?(view, "#uikit-next[disabled]")
+      refute has_element?(view, "#rail-step-0.can")
+
+      # A version cannot change under a running download.
+      render_hook(view, "kit_channel", %{"channel" => "master"})
+      assert has_element?(view, "#uikit-channel-stable.on")
+
+      send(download, :go)
+      render_async(view, 15_000)
+
+      refute has_element?(view, "#uikit-loading")
+      refute has_element?(view, "#uikit-sections[inert]")
+      refute has_element?(view, "#uikit-next[disabled]")
+      refute has_element?(view, "#uikit-channel-stable[disabled]")
+      assert has_element?(view, "#uikit-channel-stable.on")
+      assert has_element?(view, "#rail-step-0.can")
+    end
+
+    test "with no release holding the kits, master is fetched and says so", %{conn: conn} do
+      github_releases!([kit_release("v1", false, [])])
+      view = to_ui_kit(conn)
+
+      assert has_element?(view, "#uikit-channel-master.on")
+      assert has_element?(view, "#uikit-channel-fallback", "No release has the UI kits yet")
+      assert has_element?(view, "#uikit-versions", "master")
+    end
+
+    test "with the kits nowhere at all, it says so and points to support", %{conn: conn} do
+      github_releases!([kit_release("v1", false, [])],
+        download: &Plug.Conn.send_resp(&1, 404, "Not Found")
+      )
+
+      {:ok, view, _html} = live(conn, "/install")
+      view |> form("#install-form", install: @valid) |> render_submit()
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#uikit-missing", "The UI-kit packages could not be found.")
+      assert has_element?(view, "#uikit-missing", "its master branch does not either")
+      assert has_element?(view, "#uikit-support[href='https://github.com/mishka-group']")
+      assert has_element?(view, "#uikit-retry")
+      refute has_element?(view, "#uikit-toggle")
+
+      # The site still installs without them.
+      refute has_element?(view, "#uikit-sections[inert]")
+      refute has_element?(view, "#uikit-next[disabled]")
+    end
+  end
+
+  describe "the kits when GitHub cannot be reached" do
+    # NOT THE SAME AS "NOWHERE": the releases could not even be asked about, so the box says that,
+    # with the reason, rather than claiming no release has them.
+    test "with nothing on disk, it names the failed lookup and points to support", %{conn: conn} do
+      Application.delete_env(:mishka_cms_core, :official_ui_kits)
+
+      Application.put_env(:mishka_cms_core, :ui_kit_req_options,
+        plug: fn conn -> Plug.Conn.send_resp(conn, 403, "rate limited") end
+      )
+
+      {:ok, view, _html} = live(conn, "/install")
+      view |> form("#install-form", install: @valid) |> render_submit()
+      render_async(view, 15_000)
+
+      assert has_element?(
+               view,
+               "#uikit-missing",
+               "could not be looked up: GitHub answered HTTP 403"
+             )
+
+      assert has_element?(view, "#uikit-support")
+    end
+  end
+
   describe "adding a package by URL" do
     setup do
       # The Req stub is global, so an official kit left configured would be served the custom
-      # bundle too — and cached under the official kit's filename.
+      # bundle too — and cached under the official kit's filename. Chelekom is on disk already.
       Application.put_env(:mishka_cms_core, :official_ui_kits, [])
+      chelekom_downloaded!()
       :ok
     end
 
@@ -549,11 +696,23 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#toggle-chelekom-icon[checked][disabled]")
     end
 
+    # WHAT EVERY SITE NEEDS, AND NOTHING ELSE: the kit's own required components start ticked and
+    # locked; the rest is the operator's to add, one by one or all at once.
+    test "only the components every site needs start ticked", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      assert has_element?(view, "#toggle-chelekom-icon[checked][disabled]")
+      refute has_element?(view, "#toggle-chelekom-button[checked]")
+      refute has_element?(view, "#toggle-chelekom-card[checked]")
+      assert has_element?(view, "#uikit-count", "1 of 136 chosen")
+    end
+
     test "select all / clear update the selection", %{conn: conn} do
       view = to_ui_kit(conn)
 
       assert view |> element("#uikit-select-all") |> render_click() =~ "136 of 136 chosen"
-      assert view |> element("#uikit-clear-all") |> render_click() =~ "0 of 136 chosen"
+      # The icon every site needs stays, and is counted.
+      assert view |> element("#uikit-clear-all") |> render_click() =~ "1 of 136 chosen"
     end
 
     test "search filters the visible components", %{conn: conn} do
@@ -616,8 +775,10 @@ defmodule MishkaCmsWeb.InstallLiveTest do
   describe "per-component variant config" do
     test "a selected component shows a variant cog that opens a config panel", %{conn: conn} do
       view = to_ui_kit(conn)
+      refute has_element?(view, "#config-chelekom-button")
 
-      # button is selected by default and exposes variant/color axes, so it gets a cog.
+      # button exposes variant/color axes, so once it is selected it gets a cog.
+      view |> element("#toggle-chelekom-button") |> render_click()
       assert has_element?(view, "#config-chelekom-button")
       refute has_element?(view, "#config-panel-chelekom-button")
 
@@ -632,6 +793,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       conn: conn
     } do
       view = to_ui_kit(conn)
+      view |> element("#toggle-chelekom-button") |> render_click()
       view |> element("#config-chelekom-button") |> render_click()
 
       view
@@ -646,6 +808,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
     test "Reset defaults clears the component's chosen variants", %{conn: conn} do
       view = to_ui_kit(conn)
+      view |> element("#toggle-chelekom-button") |> render_click()
       view |> element("#config-chelekom-button") |> render_click()
 
       view
