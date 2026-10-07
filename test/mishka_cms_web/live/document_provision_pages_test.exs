@@ -67,10 +67,13 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
+    # The addresses below name every language, English included.
+    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
 
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
       SettingsState.delete(site.id, "site.languages")
+      SettingsState.delete(site.id, "site.language_urls")
       SiteState.clear()
     end)
 

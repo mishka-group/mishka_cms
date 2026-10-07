@@ -55,6 +55,8 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en"], site_id: site.id)
+    # The addresses below name every language, English included.
+    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
 
     # Each extension registers its plugin as it starts; registering it again keeps the one record,
     # and compiling the event here is what makes the chain hold both before the first request.
@@ -65,6 +67,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
       SettingsState.delete(site.id, "site.languages")
+      SettingsState.delete(site.id, "site.language_urls")
       SiteState.clear()
     end)
 
@@ -79,9 +82,9 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
     test "sends a visitor who is not signed in to sign in", %{site: site} do
       post = post!(site, @locked)
 
-      assert "/auth?" <> _query = redirected_to(get(on_site(site), "/en/blog/#{post.slug}"))
+      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/blog/#{post.slug}"))
 
-      assert {:error, {:redirect, %{to: "/auth?" <> _query}}} =
+      assert {:error, {:redirect, %{to: "/en/auth?" <> _query}}} =
                live(on_site(site), "/en/blog/#{post.slug}")
     end
 
@@ -134,7 +137,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       |> generate()
 
     for path <- ["/en/blog/category/#{category.slug}", "/en/blog/tag/#{tag.slug}"] do
-      assert "/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
+      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
     end
   end
 
@@ -143,7 +146,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       post = post!(site, [])
       file!(post, category!(site, @locked))
 
-      assert "/auth?" <> _query = redirected_to(get(on_site(site), "/en/blog/#{post.slug}"))
+      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/blog/#{post.slug}"))
       assert_error_sent(404, fn -> get(signed_in(site, []), "/en/blog/#{post.slug}") end)
       assert html_response(get(signed_in(site, @locked), "/en/blog/#{post.slug}"), 200)
     end
@@ -163,7 +166,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       file!(post, guides)
 
       for path <- ["/en/blog/#{post.slug}", "/en/blog/category/#{guides.slug}"] do
-        assert "/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
+        assert "/en/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
         assert html_response(get(signed_in(site, @locked), path), 200)
       end
     end
@@ -188,7 +191,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       document!(site, @locked, [])
 
       for path <- ["/en/docs/guide", "/en/docs/guide/install"] do
-        assert "/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
+        assert "/en/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
       end
 
       assert_error_sent(404, fn -> get(signed_in(site, []), "/en/docs/guide/install") end)
@@ -199,7 +202,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       document!(site, [], ["staff:*"])
 
       assert html_response(get(on_site(site), "/en/docs/guide"), 200)
-      assert "/auth?" <> _query = redirected_to(get(on_site(site), "/en/docs/guide/install"))
+      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/docs/guide/install"))
       assert_error_sent(404, fn -> get(signed_in(site, @locked), "/en/docs/guide/install") end)
       assert html_response(get(signed_in(site, ["staff:*"]), "/en/docs/guide/install"), 200)
     end
@@ -219,7 +222,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       )
 
       assert html_response(get(on_site(site), "/en/docs/guide"), 200)
-      assert "/auth?" <> _query = redirected_to(get(on_site(site), "/en/docs/guide/upgrade"))
+      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/docs/guide/upgrade"))
       assert_error_sent(404, fn -> get(signed_in(site, @locked), "/en/docs/guide/upgrade") end)
       assert html_response(get(signed_in(site, ["staff:*"]), "/en/docs/guide/upgrade"), 200)
     end

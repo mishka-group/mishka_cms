@@ -293,6 +293,34 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       refute Install.installed?()
     end
 
+    test "saves how the site's addresses name a language as the new site's own" do
+      params = Map.merge(@params, %{languages: ["en", "fa"], language_urls: "prefix_all"})
+
+      assert {:ok, %{site: site}} = Bootstrap.run(params)
+
+      assert Settings.get_own("site.language_urls", nil, site.id) == "prefix_all"
+      assert Languages.url_mode(site.id) == "prefix_all"
+    end
+
+    test "saves the URL mode even when given no languages, and leaves it unset when given none" do
+      assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :language_urls, "prefix_all"))
+      assert Settings.get_own("site.language_urls", nil, site.id) == "prefix_all"
+    end
+
+    test "leaves the site reading the global URL mode when given none" do
+      assert {:ok, %{site: site}} = Bootstrap.run(@params)
+
+      assert Settings.get_own("site.language_urls", :none, site.id) == :none
+      assert Languages.url_mode(site.id) == "prefix_others"
+    end
+
+    test "refuses a URL mode it does not know, and does not mark installed" do
+      assert {:error, {:invalid_language_urls, "sideways"}} =
+               Bootstrap.run(Map.put(@params, :language_urls, "sideways"))
+
+      refute Install.installed?()
+    end
+
     test "fires installer:languages:saved with the site and the saved list" do
       {:ok, _} =
         MishkaInstaller.Event.Event.write(%{

@@ -52,6 +52,8 @@ defmodule MishkaCmsWeb.AuthGateTest do
       })
 
     on_exit(fn -> SiteState.delete(site.id) end)
+    # The addresses below name every language, English included.
+    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
     site
   end
 

@@ -447,7 +447,7 @@ defmodule MishkaCmsWeb.PageCurrentUserTest do
       create_page!(
         [
           site_id: site.id,
-          path: "/en/lazy-#{System.unique_integer([:positive])}"
+          path: "/lazy-#{System.unique_integer([:positive])}"
         ] ++ overrides
       )
 

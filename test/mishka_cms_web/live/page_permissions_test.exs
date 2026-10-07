@@ -166,16 +166,15 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
   end
 
   describe "signing in from a page that sent the visitor there" do
-    # `/auth?return_to=…` is sent on to the site's sign-in page in its language, the query kept, and
-    # the sign-in that page starts carries `return_to` to the controller.
+    # `/auth?return_to=…` is the site's sign-in page in its first language, the query kept, and the
+    # sign-in that page starts carries `return_to` to the controller.
     test "lands back on that page", %{site: site, members: members} do
       seed_auth_pages!(site)
       user = member!(site, ["members:read"])
       asked = members.path <> "?tab=2"
 
-      "/auth?" <> query = redirected_to(get(on_site(), asked))
-      sign_in_page = redirected_to(get(on_site(), "/auth?" <> query))
-      assert sign_in_page == "/en/auth?" <> query
+      "/auth?" <> _query = sign_in_page = redirected_to(get(on_site(), asked))
+      assert html_response(get(on_site(), sign_in_page), 200) =~ ~s(id="auth-sign-in-form")
 
       {:ok, view, _html} = live(on_site(), sign_in_page)
 
@@ -196,7 +195,7 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
     page =
       create_page!(
         site_id: site.id,
-        path: "/en/members-#{System.unique_integer([:positive])}",
+        path: "/members-#{System.unique_integer([:positive])}",
         template: ~S(<div id="page-body" data-page={@page.path}>page</div>),
         permissions: permissions
       )

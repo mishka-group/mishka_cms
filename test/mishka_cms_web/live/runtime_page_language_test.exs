@@ -190,24 +190,24 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
         language_group_id: master.id
       )
 
-      doc = LazyHTML.from_document(get_page("/en/guide-#{n}"))
+      doc = LazyHTML.from_document(get_page("/guide-#{n}"))
 
       assert alternates(doc) ==
                absolute([
                  {"ar", "/ar/guide-#{n}"},
-                 {"en", "/en/guide-#{n}"},
+                 {"en", "/guide-#{n}"},
                  {"fa", "/fa/rahnama-#{n}"}
                ])
     end
   end
 
-  # `/:lang/about` WRITTEN IN ENGLISH ANSWERS `/en/about` AND NOTHING ELSE — the resolver 404s
+  # `/:lang/about` WRITTEN IN ENGLISH ANSWERS `/about` AND NOTHING ELSE — the resolver 404s
   # `/fa/about` for it — so neither the head nor a language switcher may offer that address.
   describe "a pattern page written in one language" do
     test "offers no language it does not answer", %{site: site, n: n} do
       published!(site, path: "/:lang/about-#{n}")
 
-      doc = LazyHTML.from_document(get_page("/en/about-#{n}"))
+      doc = LazyHTML.from_document(get_page("/about-#{n}"))
 
       assert alternates(doc) == []
       assert editions(doc) == []
@@ -224,9 +224,9 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
         language_group_id: master.id
       )
 
-      expected = [{"en", "/en/about-#{n}"}, {"fa", "/fa/about-#{n}"}]
+      expected = [{"en", "/about-#{n}"}, {"fa", "/fa/about-#{n}"}]
 
-      for path <- ["/en/about-#{n}", "/fa/about-#{n}"] do
+      for path <- ["/about-#{n}", "/fa/about-#{n}"] do
         doc = LazyHTML.from_document(get_page(path))
 
         assert alternates(doc) == absolute(expected), "#{path} offered a language nothing answers"
@@ -234,6 +234,63 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
       end
 
       assert_raise NotFoundError, fn -> live(on_site(), "/ar/about-#{n}") end
+    end
+  end
+
+  # ONE STORED PATH, TWO PUBLIC FORMS: the head names each edition at the address the site's URL
+  # mode gives it, and `x-default` once, at the primary language's.
+  describe "in either URL mode" do
+    setup %{site: site, n: n} do
+      master =
+        published!(site, name: "home-#{n}", path: "/:lang/home-#{n}", extra: @every_language)
+
+      on_exit(fn -> SettingsState.delete(site.id, "site.language_urls") end)
+      %{master: master}
+    end
+
+    test "the primary language has no prefix by default", %{n: n} do
+      for path <- ["/home-#{n}", "/fa/home-#{n}"] do
+        doc = LazyHTML.from_document(get_page(path))
+
+        assert alternates(doc) ==
+                 absolute([
+                   {"ar", "/ar/home-#{n}"},
+                   {"en", "/home-#{n}"},
+                   {"fa", "/fa/home-#{n}"}
+                 ])
+
+        assert x_default(doc) == [base() <> "/home-#{n}"]
+
+        assert editions(doc) == [
+                 {"ar", "/ar/home-#{n}"},
+                 {"en", "/home-#{n}"},
+                 {"fa", "/fa/home-#{n}"}
+               ]
+      end
+    end
+
+    test "every language is prefixed in prefix_all", %{site: site, n: n} do
+      {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
+
+      doc = LazyHTML.from_document(get_page("/fa/home-#{n}"))
+
+      assert alternates(doc) ==
+               absolute([
+                 {"ar", "/ar/home-#{n}"},
+                 {"en", "/en/home-#{n}"},
+                 {"fa", "/fa/home-#{n}"}
+               ])
+
+      assert x_default(doc) == [base() <> "/en/home-#{n}"]
+    end
+
+    test "x-default follows the site's first language", %{site: site, n: n} do
+      {:ok, _} = Settings.put("site.languages", ["fa", "en", "ar"], site_id: site.id)
+
+      doc = LazyHTML.from_document(get_page("/en/home-#{n}"))
+
+      assert x_default(doc) == [base() <> "/home-#{n}"]
+      assert {"fa", base() <> "/home-#{n}"} in alternates(doc)
     end
   end
 
@@ -300,7 +357,7 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
       {:ok, _} = Settings.put("site.languages", "en, fa", site_id: site.id)
       published!(site, path: "/:lang/notes-#{n}", extra: @every_language)
 
-      assert html_attrs(get_page("/en/notes-#{n}")) == {["en"], ["ltr"]}
+      assert html_attrs(get_page("/notes-#{n}")) == {["en"], ["ltr"]}
       assert_raise NotFoundError, fn -> live(on_site(), "/fa/notes-#{n}") end
     end
   end
