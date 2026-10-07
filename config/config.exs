@@ -50,6 +50,9 @@ config :mishka_cms, Oban,
   notifier: Oban.Notifiers.Postgres,
   queues: [default: 5, modules: 8, assets: 2, sitemaps: 1, maintenance: 2, notify: 5, mail: 2],
   repo: MishkaCms.Repo,
+  # A job a stopped node was running (a restart, a deploy) stays `executing` until this moves it
+  # back to `available`. Longer than any compile or asset build, so a running job is not rescued.
+  lifeline: [rescue_after: {30, :minutes}],
   plugins: [
     {Oban.Plugins.Cron, crontab: [{"0 4 * * *", MishkaCmsCore.Notify.Workers.PruneWorker}]},
     {Oban.Plugins.Pruner, max_age: 604_800}
