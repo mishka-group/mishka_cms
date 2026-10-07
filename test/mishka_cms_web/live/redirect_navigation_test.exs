@@ -82,6 +82,19 @@ defmodule MishkaCmsWeb.RedirectNavigationTest do
     assert to == page.path <> "?ref=menu"
   end
 
+  test "a navigate to a moved address, which remounts, is sent where the rule says", %{
+    conn: conn,
+    site: site,
+    page: page
+  } do
+    rule!(site, %{from_path: "/old-address", to: page.path})
+
+    {:ok, view, _html} = live(conn, page.path)
+
+    assert {:error, {:redirect, %{to: to}}} = live_redirect(view, to: "/old-address?ref=menu")
+    assert to == page.path <> "?ref=menu"
+  end
+
   test "a rule leaving the site leaves it", %{conn: conn, site: site, page: page} do
     rule!(site, %{from_path: "/elsewhere", to: "https://example.com/new"})
 

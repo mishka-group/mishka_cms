@@ -116,7 +116,15 @@ defmodule MishkaCmsWeb.RuntimeLive do
       |> speaking(session[Languages.session()], site.id)
       |> assign(:client_request, client_request(socket))
 
-    case language_target(socket, path, site) do
+    query = params |> Map.delete("path") |> URI.encode_query()
+
+    case moved_or_language_target(socket, path, "/" <> Enum.join(path, "/"), query, site) do
+      {:moved, "/" <> _ = to} ->
+        {:ok, redirect(socket, to: to)}
+
+      {:moved, to} ->
+        {:ok, redirect(socket, external: to)}
+
       {:redirect, to} ->
         {:ok, push_navigate(socket, to: to <> query_of_params(params))}
 
@@ -285,7 +293,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
   end
 
   def handle_params(%{"path" => path} = params, url, socket) do
-    case moved_or_language_target(socket, path, url) do
+    uri = URI.parse(url)
+    site = socket.assigns.current_site
+
+    case moved_or_language_target(socket, path, uri.path || "/", uri.query || "", site) do
       {:moved, "/" <> _ = to} ->
         {:noreply, redirect(socket, to: to)}
 
@@ -420,18 +431,13 @@ defmodule MishkaCmsWeb.RuntimeLive do
   end
 
   # A REDIRECT RULE ANSWERS A LIVE NAVIGATION TOO. `SiteLookupPlug` serves a site's rules on every
-  # request, but a click from one page to another never makes one — it patches this LiveView — so the
-  # rule is asked here as well, before the address picks a page.
-  defp moved_or_language_target(socket, path, url) do
-    uri = URI.parse(url)
-
-    case MishkaCmsCore.Runtime.Redirects.lookup(
-           socket.assigns.current_site.id,
-           uri.path || "/",
-           uri.query || ""
-         ) do
+  # request, but a click from one page to another never makes one — a patch reaches
+  # `handle_params/3`, a navigate remounts through `mount/3` — so both ask the rule here, before the
+  # address picks a page.
+  defp moved_or_language_target(socket, path, address, query, site) do
+    case MishkaCmsCore.Runtime.Redirects.lookup(site.id, address, query) do
       {to, _status} -> {:moved, to}
-      nil -> language_target(socket, path, socket.assigns.current_site)
+      nil -> language_target(socket, path, site)
     end
   end
 
