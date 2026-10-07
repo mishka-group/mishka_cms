@@ -170,6 +170,7 @@ defmodule MishkaCmsWeb.Router do
     pipe_through [:browser]
 
     ash_authentication_live_session :authenticated_admin_routes,
+      session: [{MishkaCmsCore.Runtime.CspNonce, :session, []}],
       on_mount: [
         {MishkaCmsCore.LiveUserAuth, :live_user_required},
         {MishkaCmsCore.LiveUserAuth, {:require_permission, [{:under, "admin:dashboard"}]}}
@@ -199,6 +200,7 @@ defmodule MishkaCmsWeb.Router do
     # `document.createElement` rather than carrying them onto every admin page for the rest of the
     # tab's life.
     ash_authentication_live_session :authenticated_admin_standalone_routes,
+      session: [{MishkaCmsCore.Runtime.CspNonce, :session, []}],
       on_mount: [
         {MishkaCmsCore.LiveUserAuth, :live_user_required},
         {MishkaCmsCore.LiveUserAuth, {:require_permission, [{:under, "admin:dashboard"}]}}
@@ -219,7 +221,7 @@ defmodule MishkaCmsWeb.Router do
   scope "/install", MishkaCmsWeb do
     pipe_through :installer
 
-    live_session :install do
+    live_session :install, session: {MishkaCmsCore.Runtime.CspNonce, :session, []} do
       live "/", InstallLive
     end
   end
@@ -234,7 +236,9 @@ defmodule MishkaCmsWeb.Router do
     # a real LiveView (full lifecycle: per-site JS bundle + hooks) with its own temporary CSS bundle.
     get "/_preview/:resource/:token/css", DraftPreviewController, :css
 
-    live_session :draft_preview, root_layout: {MishkaCmsWeb.Layouts, :preview} do
+    live_session :draft_preview,
+      root_layout: {MishkaCmsWeb.Layouts, :preview},
+      session: {MishkaCmsCore.Runtime.CspNonce, :session, []} do
       live "/_preview/:resource/:token", DraftPreviewLive
     end
 
@@ -268,7 +272,8 @@ defmodule MishkaCmsWeb.Router do
 
   @doc """
   The session a runtime page's socket is opened with: the one `AshAuthentication` would have built,
-  plus the language the response is being answered in.
+  plus the language the response is being answered in and its CSP nonce — see
+  `MishkaCmsCore.Runtime.CspNonce.session/1`.
 
   A page whose own address names a language reads it out of the address. A page at `/no-lang`, and
   every hand-written page under `mish-`, has no address to read — this is how their socket learns
@@ -280,6 +285,7 @@ defmodule MishkaCmsWeb.Router do
     conn
     |> AshAuthentication.Phoenix.LiveSession.generate_session(nil, [])
     |> Map.put(Languages.session(), LanguagePlug.spoken(conn))
+    |> Map.merge(MishkaCmsCore.Runtime.CspNonce.session(conn))
   end
 
   # Only runs before the CMS is installed: afterwards `/install` is a 404. There is no site yet, but
