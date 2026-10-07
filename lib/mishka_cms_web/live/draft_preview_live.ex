@@ -159,6 +159,8 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
     socket
     # A page that declares an upload draws `@uploads`, which only an allowed upload puts there.
     |> MishkaCmsCore.Runtime.PageUpload.allow(preview_module)
+    # A page reads the assigns it declares in `state` from its first render.
+    |> MishkaCmsCore.Runtime.PageState.assign_initial(preview_module)
     |> assign(
       preview_module: preview_module,
       layout_module: layout_module(record, asset_site),
