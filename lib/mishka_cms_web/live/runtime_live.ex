@@ -92,6 +92,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
   alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo, SiteAvailability}
   alias MishkaCmsCore.Runtime.Plugs.{LanguagePlug, SiteLookupPlug}
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
+  alias MishkaCmsCore.Runtime.PageState
   alias MishkaCmsCoreWeb.ReturnTo
   alias MishkaInstaller.Event.Hook
 
@@ -188,6 +189,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                           socket
                           |> assign(page_module: page_module)
                           |> assign(page_module.__page_information__())
+                          |> PageState.assign_initial(page_module)
                           |> assign_page_title()
                           |> assign(current_site: site)
                           |> assign(:query_params, query_params(params, captured))
@@ -348,7 +350,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   # ones mount registered. `allow_upload/3` refuses a name already registered, so
                   # `MishkaCmsCore.Runtime.PageUpload.allow/2` skips what is there and adds what the
                   # page this navigation arrived at asks for.
+                  # ANOTHER PAGE IN THE SAME PROCESS starts from its own state, and what only the
+                  # last page declared is cleared; the same page keeps the visitor's values. See
+                  # `MishkaCmsCore.Runtime.PageState.switch/3`.
                   socket
+                  |> PageState.switch(socket.assigns[:page_module], page_module)
                   |> assign(page_module: page_module)
                   |> assign(page_module.__page_information__())
                   |> assign_page_language(captured)
@@ -521,7 +527,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
     required = page_permissions(page)
     align_page_module(socket, required)
 
-    case readmit(socket, required) do
+    case socket |> align_page_state(page) |> readmit(required) do
       {:ok, socket} -> {:noreply, socket}
       {:refused, socket} -> {:noreply, refuse(socket)}
     end
@@ -985,6 +991,34 @@ defmodule MishkaCmsWeb.RuntimeLive do
   end
 
   defp align_page_module(_socket, _unreadable), do: :ok
+
+  # A KEY AN EDIT ADDED reaches an open tab together with the template that reads it, so the module
+  # is brought up to the row first and the new key given its first value; every value the visitor
+  # already has stays. A save that did not change the state's names — nearly every save — does
+  # nothing here.
+  defp align_page_state(%{assigns: %{page_module: page_module}} = socket, %{state: state})
+       when is_list(state) do
+    case Enum.map(PageState.keys(page_module), &Atom.to_string/1) == state_names(state) do
+      true ->
+        socket
+
+      false ->
+        %{page: %{path: path}, private: %{site: site, site_id: site_id}} = socket.assigns
+        ModuleCompilerHandler.compile_or_return_module(page_module, path, site, site_id, :update)
+        PageState.fill_missing(socket, page_module)
+    end
+  end
+
+  defp align_page_state(socket, _page), do: socket
+
+  defp state_names(state),
+    do:
+      for(
+        entry <- state,
+        name = entry[:name] || entry["name"],
+        PageState.valid_name?(name),
+        do: name
+      )
 
   # WHAT THE PAGE ASKS FOR, READ THE WAY THE COMPILER READS IT.
   # `MishkaCmsCore.Runtime.Compilers.LiveViewCompiler` writes `permissions || []` into the module, so
