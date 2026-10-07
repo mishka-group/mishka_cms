@@ -15,12 +15,15 @@
       seo={assigns[:page_seo]}
       csp_nonce={assigns[:csp_nonce]}
     />
+    <%!-- `nil` until the site's first compile, so a page asked for while the bundle is still building
+         takes no link at all rather than one to `/assets/css/<site>/.css`. The CSS arrives on the
+         socket when it is built — `phx:mishka:css-updated` in boot.js. --%>
     <% css_href =
       assigns[:current_site] &&
-        "/assets/css/#{assigns[:current_site][:name]}/#{MishkaCmsCore.Runtime.States.AssetsState.get!(assigns[:current_site][:name], "css")[:hash]}.css" %>
+        MishkaCmsCore.Runtime.Compilers.Shared.site_css_href(assigns[:current_site][:name]) %>
     <% js_src =
       assigns[:current_site] &&
-        "/assets/js/#{assigns[:current_site][:name]}/#{MishkaCmsCore.Runtime.States.AssetsState.get!(assigns[:current_site][:name], "js")[:hash]}.js" %>
+        MishkaCmsCore.Runtime.Compilers.Shared.site_js_href(assigns[:current_site][:name]) %>
     <%!-- A SITE's stylesheet, for a site's pages. Not for the admin: the dashboard is not rendered
          with a site's components, so its bundle was megabytes of CSS the admin never used — and on a
          host whose site has never compiled, the href had an empty hash and 404ed. The canvas iframe

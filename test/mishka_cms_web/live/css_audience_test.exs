@@ -190,6 +190,7 @@ defmodule MishkaCmsWeb.CssAudienceTest do
         updated_at: DateTime.utc_now()
       })
 
+      on_exit(fn -> AssetsState.delete_by_site(site.name) end)
       :ok
     end
 
@@ -214,6 +215,28 @@ defmodule MishkaCmsWeb.CssAudienceTest do
 
       refute html =~ @admin_sheet
       refute html =~ @public_sheet
+    end
+
+    # A PAGE ASKED FOR WHILE THE SITE'S FIRST COMPILE IS STILL RUNNING. The hash is not there yet,
+    # and the link used to be written anyway — `/assets/css/localhost/.css`, a 404 the browser
+    # refused as a stylesheet. Now there is no link until there is a sheet; the socket delivers it.
+    test "before the site's first compile a database page takes no stylesheet and no script" do
+      AssetsState.delete_by_site("localhost")
+
+      html = layout(%{runtime_page: true})
+
+      refute html =~ ~s|id="mishka-runtime-css"|
+      refute html =~ "/assets/css/localhost/"
+      refute html =~ "/assets/js/localhost/"
+    end
+
+    test "once both bundles exist the page takes each by its hash" do
+      AssetsState.save(%{id: "localhost", type: "js", value: "", hash: "cafe", updated_at: nil})
+
+      html = layout(%{runtime_page: true})
+
+      assert html =~ ~s|href="/assets/css/localhost/deadbeef.css"|
+      assert html =~ ~s|src="/assets/js/localhost/cafe.js"|
     end
 
     # The canvas renders the document with the site's CSS INLINE, so it must take neither link — a

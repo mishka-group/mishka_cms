@@ -59,7 +59,6 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
   }
 
   alias MishkaCmsCore.Runtime.SiteAvailability
-  alias MishkaCmsCore.Runtime.States.AssetsState
   alias MishkaCmsCore.ErrorsExceptions.NotFoundError
 
   # The same `/_preview/:resource/:token` URL serves a DRAFT or the live ORIGINAL — both carry a
@@ -364,8 +363,10 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
   # With the token, so the bundle is handed to whoever holds this link, on whatever address they
   # opened it — see `MishkaCmsCoreWeb.AssetsController`.
   defp site_js(%{name: name}, token) do
-    if AssetsState.exists?(name, "js"),
-      do: "/assets/js/#{name}/#{AssetsState.get!(name, "js")[:hash]}.js?preview=#{token}"
+    case MishkaCmsCore.Runtime.Compilers.Shared.site_js_href(name) do
+      nil -> nil
+      href -> "#{href}?preview=#{token}"
+    end
   end
 
   defp site_js(_record, _token), do: nil

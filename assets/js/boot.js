@@ -48,11 +48,18 @@ export function boot(Hooks) {
     if (!href || !/^\/assets\/css\/[^\/]+\/[0-9a-f]{32}\.css$/.test(href)) return;
 
     const old = document.getElementById("mishka-runtime-css");
-    if (!old || old.getAttribute("href") === href) return;
+    if (old && old.getAttribute("href") === href) return;
 
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = href;
+
+    // The page was served before the site's first compile, so it has no sheet to swap: this is it.
+    if (!old) {
+      link.id = "mishka-runtime-css";
+      document.head.appendChild(link);
+      return;
+    }
 
     link.onload = () => {
       link.id = "mishka-runtime-css";
