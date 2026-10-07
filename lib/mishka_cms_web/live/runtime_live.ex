@@ -283,7 +283,13 @@ defmodule MishkaCmsWeb.RuntimeLive do
   end
 
   def handle_params(%{"path" => path} = params, url, socket) do
-    case language_target(socket, path, socket.assigns.current_site) do
+    case moved_or_language_target(socket, path, url) do
+      {:moved, "/" <> _ = to} ->
+        {:noreply, redirect(socket, to: to)}
+
+      {:moved, to} ->
+        {:noreply, redirect(socket, external: to)}
+
       {:redirect, to} ->
         {:noreply, push_navigate(socket, to: to <> query_of(url))}
 
@@ -407,6 +413,22 @@ defmodule MishkaCmsWeb.RuntimeLive do
     # Catch-all for non-path params
     # TODO: We can send logger here to dev and production report
     {:noreply, socket}
+  end
+
+  # A REDIRECT RULE ANSWERS A LIVE NAVIGATION TOO. `SiteLookupPlug` serves a site's rules on every
+  # request, but a click from one page to another never makes one — it patches this LiveView — so the
+  # rule is asked here as well, before the address picks a page.
+  defp moved_or_language_target(socket, path, url) do
+    uri = URI.parse(url)
+
+    case MishkaCmsCore.Runtime.Redirects.lookup(
+           socket.assigns.current_site.id,
+           uri.path || "/",
+           uri.query || ""
+         ) do
+      {to, _status} -> {:moved, to}
+      nil -> language_target(socket, path, socket.assigns.current_site)
+    end
   end
 
   def handle_event(event_name, event_params, socket) do

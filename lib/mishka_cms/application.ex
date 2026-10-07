@@ -32,6 +32,8 @@ defmodule MishkaCms.Application do
       MishkaCmsCore.Runtime.States.SettingsState,
       # ETS cache for the words runtime templates ask for with t/1 — see MishkaCmsCore.Runtime.Translations
       MishkaCmsCore.Runtime.States.TranslationsState,
+      # Each site's redirect rules, read on every request — see MishkaCmsCore.Runtime.Redirects
+      MishkaCmsCore.Runtime.States.RedirectsState,
       # Who a signed-in user is to the site gates, by id — see MishkaCmsCore.Runtime.States.ViewerState
       MishkaCmsCore.Runtime.States.ViewerState,
       # Hammer's ETS counters signing in and the reset and sign-in link requests are limited by,
