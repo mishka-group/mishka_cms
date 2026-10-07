@@ -423,6 +423,25 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     assert Languages.site(site.id) == ["en", "de"]
   end
 
+  # BOTH URL MODES ARE OPEN ON EVERY RESEED: `site-a` prefixes every language, the others leave
+  # their first unprefixed.
+  test "each site is given its URL mode, and nothing overwrites one a developer changed" do
+    core = seed_core()
+
+    by_host = Map.new(core.sites, &{&1.host, Languages.url_mode(&1.id)})
+
+    assert by_host["localhost"] == "prefix_others"
+    assert by_host["site-a.localhost"] == "prefix_all"
+    assert by_host["site-b.localhost"] == "prefix_others"
+
+    site = Enum.find(core.sites, &(&1.host == "localhost"))
+    {:ok, _value} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
+
+    Seeds.run([])
+
+    assert Languages.url_mode(site.id) == "prefix_all"
+  end
+
   # THE ACCOUNTS AN END-TO-END RUN CAN TYPE IN, one per role a permission check has to be seen
   # allowing and refusing. The tenant emails used to carry a slice of the site's own uuid, so nobody
   # could sign in without reading the database first.

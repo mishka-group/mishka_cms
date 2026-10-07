@@ -41,8 +41,11 @@ defmodule MishkaCmsWeb.InstallLive do
   can be moved to the front (`make_primary`) or removed (`remove_language`); the primary cannot be
   removed, so the list never empties. A code the list does not offer is refused. The list goes to
   the bootstrap as `:languages`, which saves it in this order to the new site's `site.languages`.
-  The section sits outside the settings form, so the Install button submits that form through its
-  `form` attribute.
+  Below it, a choice of how the site's addresses name a language (`language_urls`): no prefix for
+  the primary one, the default, or a prefix for every one — see
+  `MishkaCmsCore.Runtime.Languages.url_mode/1`. It goes to the bootstrap as `:language_urls`, which
+  saves it to the new site's `site.language_urls`. The section sits outside the settings form, so
+  the Install button submits that form through its `form` attribute.
 
   It is reachable only while the CMS is uninstalled: `MishkaCms.Plugs.InstallGate`
   responds `404` for this route once `MishkaCmsCore.Install.installed?/0` is true.
@@ -54,6 +57,7 @@ defmodule MishkaCmsWeb.InstallLive do
   alias MishkaCmsCore.Install.{Bootstrap, Extensions, UiKitCatalog}
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
   alias MishkaCmsCore.Runtime.Languages
+  alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
   alias MishkaCmsCore.Settings
 
   @install_setting_keys ["site.title", "mailer.from"]
@@ -102,6 +106,7 @@ defmodule MishkaCmsWeb.InstallLive do
      )
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
      |> assign(languages: Languages.default(), language_error: nil, language_query: "")
+     |> assign(language_urls: hd(Languages.url_modes()))
      |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
      |> assign(
@@ -288,6 +293,12 @@ defmodule MishkaCmsWeb.InstallLive do
     {:noreply, remove_language(socket, code)}
   end
 
+  def handle_event("language_urls", %{"language_urls" => mode}, socket) do
+    if mode in Languages.url_modes(),
+      do: {:noreply, assign(socket, language_urls: mode)},
+      else: {:noreply, socket}
+  end
+
   def handle_event("install", %{"settings" => params}, socket) do
     socket = assign(socket, settings_submitted?: true)
 
@@ -470,7 +481,7 @@ defmodule MishkaCmsWeb.InstallLive do
         </div>
         <.link
           id="install-go-login"
-          navigate="/auth?master_user=true"
+          navigate={master_sign_in(@site)}
           class={[btn_primary(), "inst-btn-block"]}
         >
           {gettext("Go to login")} <.svg_arrow />
@@ -583,7 +594,12 @@ defmodule MishkaCmsWeb.InstallLive do
 
         <div class="inst-divider"></div>
 
-        <.language_picker languages={@languages} error={@language_error} query={@language_query} />
+        <.language_picker
+          languages={@languages}
+          error={@language_error}
+          query={@language_query}
+          language_urls={@language_urls}
+        />
 
         <div class="inst-actions">
           <button id="settings-back" type="button" phx-click="back" class={btn_ghost()}>
@@ -1483,6 +1499,14 @@ defmodule MishkaCmsWeb.InstallLive do
         border:1.5px dashed var(--line);border-radius:10px}
       .inst-lang-opts~.inst-hint,.inst-lang-opts~.inst-error,
       .inst-lang-none~.inst-hint,.inst-lang-none~.inst-error{margin-top:10px}
+      .inst-urls{border:none;margin:0;padding:0;min-width:0}
+      .inst-urls legend{display:block;font-size:13px;font-weight:600;color:var(--ink-2);
+        margin-bottom:7px;padding:0}
+      .inst-urls .inst-smp-row{padding:10px 12px;flex-wrap:wrap}
+      .inst-urls .ex{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:6px}
+      .inst-urls code{background:var(--bg-2);border:1px solid var(--line);border-radius:5px;
+        padding:1px 6px;font-size:11.5px;font-weight:500;color:var(--dim)}
+      .inst-radio{width:18px;height:18px;margin:0;accent-color:var(--blue);cursor:pointer;flex-shrink:0}
 
       /* password strength */
       .inst-meter{display:flex;gap:5px;margin-top:9px}
@@ -1916,6 +1940,7 @@ defmodule MishkaCmsWeb.InstallLive do
   attr :languages, :list, required: true
   attr :error, :string, default: nil
   attr :query, :string, default: ""
+  attr :language_urls, :string, required: true
 
   defp language_picker(assigns) do
     assigns =
@@ -2030,6 +2055,33 @@ defmodule MishkaCmsWeb.InstallLive do
           )}
         </p>
       </div>
+      <form id="install-language-urls-form" phx-change="language_urls" class="inst-field">
+        <fieldset class="inst-urls">
+          <legend>{gettext("Language in addresses")}</legend>
+          <label
+            :for={{mode, title, examples} <- url_choices(@languages)}
+            id={"install-language-urls-#{mode}"}
+            class="inst-smp-row"
+          >
+            <input
+              type="radio"
+              name="language_urls"
+              value={mode}
+              checked={mode == @language_urls}
+              class="inst-radio"
+            />
+            <span class="nm">
+              {title}
+              <span class="ex">
+                <code :for={example <- examples} dir="ltr">{example}</code>
+              </span>
+            </span>
+          </label>
+        </fieldset>
+        <p class="inst-hint">
+          {gettext("Pages keep their paths either way; the settings page changes this later.")}
+        </p>
+      </form>
     </section>
     """
   end
@@ -2581,6 +2633,7 @@ defmodule MishkaCmsWeb.InstallLive do
       |> Map.put(:extensions, MapSet.to_list(socket.assigns.extensions_chosen))
       |> Map.put(:extension_answers, extension_answers(answers))
       |> Map.put(:languages, socket.assigns.languages)
+      |> Map.put(:language_urls, socket.assigns.language_urls)
 
     lv = self()
 
@@ -2805,6 +2858,24 @@ defmodule MishkaCmsWeb.InstallLive do
   defp remove_language(socket, _code), do: socket
 
   # The codes with a name, not chosen yet and allowed by the master, by their names.
+  # The new site's sign-in page for its masters, in its first language and its URL mode.
+  defp master_sign_in(%{id: site_id}),
+    do: SiteLookupPlug.auth_address(nil, site_id) <> "?master_user=true"
+
+  defp master_sign_in(_no_site), do: "/auth?master_user=true"
+
+  # Each way an address can name its language, with how this site's own would read.
+  defp url_choices([primary | others]) do
+    other = List.first(others, primary)
+
+    [
+      {"prefix_others", gettext("No prefix for the primary language"),
+       Enum.uniq(["/blog", "/#{other}/blog"]) -- ["/#{primary}/blog"]},
+      {"prefix_all", gettext("A prefix for every language"),
+       Enum.uniq(["/#{primary}/blog", "/#{other}/blog"])}
+    ]
+  end
+
   defp addable_languages(chosen) do
     Languages.known()
     |> Enum.reject(&(&1 in chosen))

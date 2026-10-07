@@ -83,6 +83,8 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
 
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.title", "The Studio", site_id: site.id)
+    # The addresses below name every language, English included.
+    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
 
     %{site: site}
   end

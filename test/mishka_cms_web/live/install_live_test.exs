@@ -1100,6 +1100,51 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     end
   end
 
+  describe "how the site's addresses name a language" do
+    test "starts with no prefix for the primary language, each choice showing the site's own", %{
+      conn: conn
+    } do
+      view = to_settings(conn)
+
+      assert has_element?(view, "#install-language-urls-prefix_others input[checked]")
+      refute has_element?(view, "#install-language-urls-prefix_all input[checked]")
+      assert view |> element("#install-language-urls-prefix_others") |> render() =~ "/blog"
+
+      view |> element("#install-language-option-fa") |> render_click()
+
+      assert view |> element("#install-language-urls-prefix_others") |> render() =~ "/fa/blog"
+      assert view |> element("#install-language-urls-prefix_all") |> render() =~ "/en/blog"
+    end
+
+    test "the choice is saved to the new site, with its languages", %{conn: conn} do
+      view = to_settings(conn)
+
+      view |> element("#install-language-option-fa") |> render_click()
+
+      view
+      |> form("#install-language-urls-form", language_urls: "prefix_all")
+      |> render_change()
+
+      assert has_element?(view, "#install-language-urls-prefix_all input[checked]")
+
+      view |> form("#install-settings-form") |> render_submit()
+      render_async(view, 15_000)
+      assert has_element?(view, "#install-complete")
+
+      assert [site] = Site |> Ash.read!(authorize?: false)
+      assert Settings.get_own("site.language_urls", nil, site.id) == "prefix_all"
+      assert Languages.url_mode(site.id) == "prefix_all"
+    end
+
+    test "a crafted value it does not offer changes nothing", %{conn: conn} do
+      view = to_settings(conn)
+
+      render_change(view, "language_urls", %{"language_urls" => "sideways"})
+
+      assert has_element?(view, "#install-language-urls-prefix_others input[checked]")
+    end
+  end
+
   defp search_languages(view, query) do
     view
     |> form("#install-language-search-form", language_query: query)

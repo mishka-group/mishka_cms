@@ -45,6 +45,8 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
+    # The addresses below name every language, English included.
+    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
 
     # The extension registers the plugin as it starts; registering it again keeps the one record, and
     # compiling the event here is what makes the chain hold it before the first request.
@@ -54,6 +56,7 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
       SettingsState.delete(site.id, "site.languages")
+      SettingsState.delete(site.id, "site.language_urls")
       SiteState.clear()
     end)
 

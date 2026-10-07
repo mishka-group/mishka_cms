@@ -746,3 +746,23 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "The original was changed after this draft was made."
 msgstr ""
+
+#: lib/mishka_cms_web/live/install_live.ex:2059
+#, elixir-autogen, elixir-format
+msgid "Language in addresses"
+msgstr ""
+
+#: lib/mishka_cms_web/live/install_live.ex:2081
+#, elixir-autogen, elixir-format
+msgid "Pages keep their paths either way; the settings page changes this later."
+msgstr ""
+
+#: lib/mishka_cms_web/live/install_live.ex:2865
+#, elixir-autogen, elixir-format
+msgid "No prefix for the primary language"
+msgstr ""
+
+#: lib/mishka_cms_web/live/install_live.ex:2867
+#, elixir-autogen, elixir-format
+msgid "A prefix for every language"
+msgstr ""

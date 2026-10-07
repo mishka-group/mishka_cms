@@ -63,7 +63,7 @@ defmodule MishkaCmsWeb.ComponentSiteScopeTest do
     test "draws its own site's components and the global ones, and not another site's", ctx do
       slug = published!(ctx.site, tags(ctx))
 
-      html = on_site() |> get("/en/#{slug}") |> html_response(200)
+      html = on_site() |> get("/#{slug}") |> html_response(200)
       page = LazyHTML.from_document(html)
 
       assert drawn?(page, "own")
@@ -77,7 +77,7 @@ defmodule MishkaCmsWeb.ComponentSiteScopeTest do
     test "draws the same once its socket connects", ctx do
       slug = published!(ctx.site, tags(ctx))
 
-      {:ok, view, _html} = live(on_site(), "/en/#{slug}")
+      {:ok, view, _html} = live(on_site(), "/#{slug}")
       page = view |> render() |> LazyHTML.from_fragment()
 
       assert drawn?(page, "own")
@@ -103,7 +103,7 @@ defmodule MishkaCmsWeb.ComponentSiteScopeTest do
       on_exit(fn -> WebRunTimeMetaDataState.delete(layout.id) end)
       slug = published!(ctx.site, "<p data-role=\"body\">body</p>", layout_id: layout.id)
 
-      page = served("/en/#{slug}")
+      page = served("/#{slug}")
 
       assert drawn?(page, "own")
       refute drawn?(page, "foreign")

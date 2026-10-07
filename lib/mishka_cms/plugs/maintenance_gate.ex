@@ -50,6 +50,7 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
   import Plug.Conn
 
   alias MishkaCmsCore.Accounts.Helper
+  alias MishkaCmsCore.Runtime.Languages
   alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
   alias MishkaCmsCore.Runtime.States.ViewerState
   alias MishkaCmsCore.Settings
@@ -64,8 +65,8 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
   @retry_after "300"
 
   # Signing in has to work while the site is down, or the admin the bypass exists for cannot get in
-  # to turn it back on: the sign-in pages (`/<language>/auth…`, and `/auth…` that redirects there)
-  # and the AshAuthentication controller under `/api/auth` that mints the session pass, as
+  # to turn it back on: the sign-in pages (`/<language>/auth…`, and `/auth…`) and the
+  # AshAuthentication controller under `/api/auth` that mints the session pass, as
   # `SiteLookupPlug.sign_in_path?/2` names them. The dashboard passes too: it sends a signed-out
   # admin to sign in, and it is guarded by sign-in and permission, so it shows the site to nobody.
   # Whole path segments, so `/authors` or `/installation-guide` is a page like any other.
@@ -118,9 +119,15 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
       Helper.master_admin?(user, :dashboard) or
         Helper.site_admin?(user, site && site.id, :dashboard)
 
+  # THE LANGUAGE THE VISITOR READS THE SITE IN, the session's: `LanguagePlug` runs after this gate,
+  # so the page — the site's own offline entry, or the built-in one — finds it where a page would,
+  # and links the sign-in page in it.
   defp answer_offline(conn, site) do
+    language = Languages.remembered(get_session(conn, Languages.session()), site && site.id)
+
     conn =
       conn
+      |> assign(:site_language, language)
       |> put_status(503)
       |> put_resp_header("retry-after", @retry_after)
       |> put_resp_header("cache-control", "no-store")
@@ -140,7 +147,9 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
       {:error, reason} ->
         message = Settings.get("cms.maintenance_message", @default_message, site && site.id)
 
-        {maintenance_html(speak(message), conn.assigns[:csp_nonce], site),
+        sign_in = SiteLookupPlug.auth_address(conn.assigns.site_language, site && site.id)
+
+        {maintenance_html(speak(message), conn.assigns[:csp_nonce], site, sign_in),
          %{source: :built_in, reason: reason}}
     end
   end
@@ -149,13 +158,13 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
   # a whole document written by a plug, so nothing else marks its `<style>` as ours and
   # `style-src-elem` refuses it. A maintenance page that arrives unstyled is a worse first
   # impression than the outage it is announcing.
-  defp maintenance_html(message, nonce, site) do
+  defp maintenance_html(message, nonce, site, sign_in_address) do
     title = Plug.HTML.html_escape(gettext("Down for Maintenance"))
 
     sign_in =
       gettext("Administrators of this site can %{link} to continue.",
         link:
-          ~s(<a href="/auth?master_user=false">#{Plug.HTML.html_escape(gettext("sign in"))}</a>)
+          ~s(<a href="#{sign_in_address}?master_user=false">#{Plug.HTML.html_escape(gettext("sign in"))}</a>)
       )
 
     """
@@ -190,7 +199,7 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
           <h1>#{title}</h1>
           <p>#{Plug.HTML.html_escape(message)}</p>
           <p>#{sign_in}</p>
-          #{master_sign_in(site)}
+          #{master_sign_in(site, sign_in_address)}
         </div>
       </body>
     </html>
@@ -199,11 +208,11 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
 
   # A MASTER SIGNS IN ON THE MASTER SITE'S OWN ADDRESS AND NOWHERE ELSE, so only that site's page
   # offers it. Any other site's page would be pointing at a sign-in that refuses them.
-  defp master_sign_in(%{master: true}),
+  defp master_sign_in(%{master: true}, sign_in_address),
     do:
-      ~s(<p class="master"><a href="/auth?master_user=true">#{Plug.HTML.html_escape(gettext("Master sign in"))}</a></p>)
+      ~s(<p class="master"><a href="#{sign_in_address}?master_user=true">#{Plug.HTML.html_escape(gettext("Master sign in"))}</a></p>)
 
-  defp master_sign_in(_site), do: ""
+  defp master_sign_in(_site, _sign_in_address), do: ""
 
   defp speak(@default_message), do: Gettext.gettext(MishkaCmsWeb.Gettext, @default_message)
   defp speak(message), do: message

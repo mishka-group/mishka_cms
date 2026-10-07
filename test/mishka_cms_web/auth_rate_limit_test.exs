@@ -2,7 +2,7 @@ defmodule MishkaCmsWeb.AuthRateLimitTest do
   @moduledoc """
   How often someone may sign in, ask for a password reset, ask for a sign-in link and try their
   current password to change it, through the whole endpoint: the JSON:API routes, the browser's
-  `/api/auth` routes and the forms of the site's sign-in pages, `/en/auth…`, which
+  `/api/auth` routes and the forms of the site's sign-in pages, `/auth…`, which
   `MishkaCmsCore.Install.StarterContent.ensure_auth!/1` writes and `MishkaCmsWeb.RuntimeLive` serves.
 
   Each is counted by its action, per address and per account, into buckets the three share — see
@@ -187,7 +187,7 @@ defmodule MishkaCmsWeb.AuthRateLimitTest do
 
   # The site's sign-in page, from `ip`, as its socket's peer and any `headers` say.
   defp auth_page(site, ip, headers \\ []) do
-    {:ok, view, _html} = site |> from(ip, headers) |> live("/en/auth")
+    {:ok, view, _html} = site |> from(ip, headers) |> live("/auth")
     view
   end
 
