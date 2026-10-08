@@ -257,6 +257,30 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
              )
     end
 
+    # THE PLUGIN READS AS THE VISITOR THE PAGE IS DRAWN FOR, so the reader the lock opens for is the
+    # one the record is described to: the document's name on its front page, the page's title on it.
+    test "that names permissions is described in the head to a reader who may open it", %{
+      url_mode: url_mode,
+      site: site
+    } do
+      document!(site, @locked, [])
+
+      for {path, title} <- [
+            {english(url_mode, "/docs/guide"), "Guide"},
+            {english(url_mode, "/docs/guide/install"), "Install"}
+          ] do
+        doc =
+          site
+          |> signed_in(@locked)
+          |> get(path)
+          |> html_response(200)
+          |> LazyHTML.from_document()
+
+        assert doc |> LazyHTML.query("title") |> LazyHTML.text() |> String.trim() == title
+        assert robots(doc) == ["noindex, nofollow"]
+      end
+    end
+
     test "that names none leaves a page of it to its own", %{url_mode: url_mode, site: site} do
       document!(site, [], ["staff:*"])
 
