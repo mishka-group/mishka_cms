@@ -20,6 +20,7 @@ import {
 } from "./pb_drop";
 import { mentionAt, withMention } from "./pb_mention";
 import { PbCodeEditor } from "./pb_code_editor";
+import { ContentEditor } from "./pb_content_editor";
 import {
   byRecency,
   favourites,
@@ -3596,4 +3597,5 @@ export default {
   PbPaletteHover,
   PbLayers,
   PbCodeEditor,
+  ContentEditor,
 };
