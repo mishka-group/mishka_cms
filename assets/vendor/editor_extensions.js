@@ -1,6 +1,6 @@
 // Editor configuration — the CMS's own, in the file Mishka Chelekom's headless `editor` engine
 // (`editor.js` beside it, copied unchanged) imports as its extensions. Everything the CMS adds to
-// the engine is here: the component block, the palette's click and drop, the drag handle, the
+// the engine is here: the component block, the palette's click and drop, the block handle, the
 // toolbar commands the engine has no entry for, and the questions an editor asks the server.
 //
 // The engine builds every editor from this one module, so what belongs to one editor is read off
@@ -14,9 +14,8 @@
 // THE SERVER IS THE ONLY READER AND WRITER OF THE MARKER. A component block holds its marker as an
 // opaque string the server wrote; this file never reads one apart or puts one together.
 
-import { Extension, Node } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
-import DragHandle from "@tiptap/extension-drag-handle";
+import { Extension, Node, getHTMLFromFragment } from "@tiptap/core";
+import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import Image from "@tiptap/extension-image";
 
 export const COMPONENT_MIME = "application/x-mishka-component";
@@ -558,15 +557,223 @@ export const ContentBridge = Extension.create({
   },
 });
 
-const ContentDragHandle = DragHandle.configure({
-  render() {
-    const element = document.createElement("div");
+// ---- the block handle ------------------------------------------------------------------------
 
-    element.dataset.role = "content-drag-handle";
-    element.setAttribute("aria-hidden", "true");
-    element.innerHTML = ICONS.grip;
+// The top-level block beside `y` (a viewport coordinate): the one it is over, else the nearest, as
+// `{pos, node, dom}`. `null` for an empty document.
+export function blockAt(view, y) {
+  const { doc } = view.state;
+  let best = null;
 
-    return element;
+  doc.forEach((node, pos) => {
+    const dom = view.nodeDOM(pos);
+    if (!dom || dom.nodeType !== 1) return;
+
+    const rect = dom.getBoundingClientRect();
+    const distance = y < rect.top ? rect.top - y : y >= rect.bottom ? y - rect.bottom : 0;
+
+    if (best === null || distance < best.distance) best = { pos, node, dom, distance };
+  });
+
+  return best && { pos: best.pos, node: best.node, dom: best.dom };
+}
+
+function within(dom, y) {
+  const rect = dom.getBoundingClientRect();
+  return dom.isConnected && y >= rect.top && y < rect.bottom;
+}
+
+// Moves the top-level block holding the selection one place up (`-1`) or down (`1`), keeping the
+// selection on it — Alt+↑ and Alt+↓. `false` when there is nowhere to move it, or the selection
+// spans more than one block.
+export function moveBlock(view, direction) {
+  const { state } = view;
+  const { selection, doc } = state;
+  const index = selection.$from.index(0);
+
+  const single =
+    selection instanceof NodeSelection
+      ? selection.$from.depth === 0
+      : selection instanceof TextSelection && index === selection.$to.index(0);
+
+  const target = index + direction;
+  if (!single || index >= doc.childCount || target < 0 || target >= doc.childCount) return false;
+
+  let start = 0;
+  for (let i = 0; i < index; i++) start += doc.child(i).nodeSize;
+
+  const node = doc.child(index);
+  const neighbour = doc.child(target);
+  const to = direction < 0 ? start - neighbour.nodeSize : start + neighbour.nodeSize;
+  const delta = to - start;
+  const tr = state.tr.delete(start, start + node.nodeSize).insert(to, node);
+
+  tr.setSelection(
+    selection instanceof NodeSelection
+      ? NodeSelection.create(tr.doc, selection.from + delta)
+      : TextSelection.create(tr.doc, selection.anchor + delta, selection.head + delta),
+  );
+
+  view.dispatch(tr.scrollIntoView());
+  return true;
+}
+
+// THE HANDLE BESIDE THE BLOCK UNDER THE POINTER, which drags that block to another place. It lives
+// on the surface, in the gutter its padding leaves, and is placed in the surface's own coordinates,
+// so it scrolls with the text inside the surface and inside the modal around it.
+//
+// Its mousedown goes no further than itself. The engine moves the cursor to the end of the document
+// for a mousedown anywhere on the surface outside the text — a click in the padding — and scrolls
+// it into view, which is what threw the page down whenever the handle was pressed.
+//
+// A drag is ProseMirror's own: the block is selected, and `view.dragging` holds it as a move, so
+// the drop cursor shows where it will land and the drop takes it out of its old place.
+class BlockHandleView {
+  constructor(view) {
+    this.view = view;
+    this.surface = view.dom.parentElement;
+    this.block = null;
+    this.dragging = null;
+
+    const handle = document.createElement("div");
+    handle.dataset.role = "content-drag-handle";
+    handle.draggable = true;
+    handle.setAttribute("aria-hidden", "true");
+    handle.innerHTML = ICONS.grip;
+    if (this.surface && this.surface.dataset.labelMove) handle.title = this.surface.dataset.labelMove;
+
+    Object.assign(handle.style, { position: "absolute", display: "none", zIndex: "10" });
+    this.handle = handle;
+
+    this.onMove = (event) => this.track(event.clientY);
+    this.onLeave = () => this.hide();
+    this.onDown = (event) => event.stopPropagation();
+    this.onDragStart = (event) => this.start(event);
+    this.onDragEnd = () => this.end();
+
+    handle.addEventListener("mousedown", this.onDown);
+    handle.addEventListener("dragstart", this.onDragStart);
+    handle.addEventListener("dragend", this.onDragEnd);
+
+    if (this.surface) {
+      this.surface.appendChild(handle);
+      this.surface.addEventListener("mousemove", this.onMove);
+      this.surface.addEventListener("mouseleave", this.onLeave);
+    }
+  }
+
+  track(y) {
+    if (this.dragging || !this.view.editable) return;
+    if (this.block && within(this.block.dom, y)) return;
+
+    const block = blockAt(this.view, y);
+    if (block) this.show(block);
+    else this.hide();
+  }
+
+  show(block) {
+    const { surface, handle } = this;
+    const box = surface.getBoundingClientRect();
+    const rect = block.dom.getBoundingClientRect();
+    const width = handle.offsetWidth || 20;
+    const height = handle.offsetHeight || 24;
+    const line = parseFloat(getComputedStyle(block.dom).lineHeight) || height;
+    const rtl = getComputedStyle(this.view.dom).direction === "rtl";
+
+    const top =
+      rect.top - box.top - surface.clientTop + surface.scrollTop + Math.max(0, (line - height) / 2);
+
+    const left = rtl
+      ? rect.right - box.left - surface.clientLeft + surface.scrollLeft + 6
+      : rect.left - box.left - surface.clientLeft + surface.scrollLeft - width - 6;
+
+    this.block = block;
+    Object.assign(handle.style, { display: "", top: `${top}px`, left: `${left}px` });
+  }
+
+  hide() {
+    if (this.dragging) return;
+
+    this.block = null;
+    this.handle.style.display = "none";
+  }
+
+  start(event) {
+    const { view, block } = this;
+    if (!block || !event.dataTransfer) return;
+
+    const { state } = view;
+    if (!state.doc.nodeAt(block.pos)) return;
+
+    const selection = NodeSelection.create(state.doc, block.pos);
+    const slice = selection.content();
+
+    event.dataTransfer.clearData();
+    event.dataTransfer.setData("text/html", getHTMLFromFragment(slice.content, state.schema));
+    event.dataTransfer.setData(
+      "text/plain",
+      slice.content.textBetween(0, slice.content.size, "\n\n"),
+    );
+    event.dataTransfer.effectAllowed = "copyMove";
+    if (event.dataTransfer.setDragImage) event.dataTransfer.setDragImage(block.dom, 0, 0);
+
+    this.dragging = { slice, move: true, node: selection };
+    this.handle.dataset.dragging = "true";
+
+    view.dragging = this.dragging;
+    view.dispatch(state.tr.setSelection(selection));
+  }
+
+  // A drop clears `view.dragging` itself; a drag dropped nowhere leaves it to be cleared here.
+  end() {
+    const { view, dragging } = this;
+
+    this.dragging = null;
+    this.handle.dataset.dragging = "false";
+    if (view.dragging === dragging) view.dragging = null;
+
+    this.hide();
+  }
+
+  update(view, previous) {
+    this.view = view;
+
+    if (this.dragging) return;
+    if (!view.editable || (previous && !previous.doc.eq(view.state.doc))) this.hide();
+  }
+
+  destroy() {
+    const { surface, handle } = this;
+
+    handle.removeEventListener("mousedown", this.onDown);
+    handle.removeEventListener("dragstart", this.onDragStart);
+    handle.removeEventListener("dragend", this.onDragEnd);
+    handle.remove();
+
+    if (surface) {
+      surface.removeEventListener("mousemove", this.onMove);
+      surface.removeEventListener("mouseleave", this.onLeave);
+    }
+  }
+}
+
+export const BlockHandle = Extension.create({
+  name: "contentBlockHandle",
+
+  addKeyboardShortcuts() {
+    return {
+      "Alt-ArrowUp": () => moveBlock(this.editor.view, -1),
+      "Alt-ArrowDown": () => moveBlock(this.editor.view, 1),
+    };
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey("mishkaBlockHandle"),
+        view: (view) => new BlockHandleView(view),
+      }),
+    ];
   },
 });
 
@@ -576,7 +783,7 @@ export default {
     Image.configure({ inline: true }),
     MishkaComponent,
     ContentBridge,
-    ContentDragHandle,
+    BlockHandle,
   ],
   starterKit: {
     link: {
