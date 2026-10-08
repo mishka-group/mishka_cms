@@ -19,8 +19,20 @@ import config, {
 
 const MARKER = '[[component callout title="Heads up"]]Read <b>this</b>[[/component]]';
 
+// Everything the editor schedules — Tiptap's create, the engine's debounce, the frame a focus
+// scrolls on, ProseMirror's focus timer — runs on a fake clock that moves only when `settle` moves
+// it, so no run depends on how long the machine takes between two of them.
+const CLOCK = [
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+];
+
 function settle(ms = 20) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return vi.advanceTimersByTimeAsync(ms);
 }
 
 function fixture(stored) {
@@ -113,6 +125,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: CLOCK });
   window.prompt = vi.fn();
   opened = [];
 });
@@ -120,6 +133,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const handle of opened) handle.destroyed();
   document.body.innerHTML = "";
+  vi.useRealTimers();
 });
 
 async function editorFor(stored, answers) {
