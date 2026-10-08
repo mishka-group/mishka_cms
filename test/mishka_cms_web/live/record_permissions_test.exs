@@ -15,7 +15,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
   `async: false` — the install flag, `SiteState`, the routing table, the settings cache and the
   plugin registry are process-global.
   """
-  use MishkaCmsWeb.ConnCase, async: false
+  use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
 
   # A refused live mount takes its LiveView down with the 404, which is logged.
   @moduletag :capture_log
@@ -38,7 +38,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
 
   # A unique site name per test: a component's module is named from its site's name, so a reused one
   # renders the previous test's module against a site that test rolled back.
-  setup do
+  setup %{url_mode: url_mode} do
     SiteState.clear()
     name = "recordacl#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -55,8 +55,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en"], site_id: site.id)
-    # The addresses below name every language, English included.
-    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
+    {:ok, _} = Settings.put("site.language_urls", url_mode, site_id: site.id)
 
     # Each extension registers its plugin as it starts; registering it again keeps the one record,
     # and compiling the event here is what makes the chain hold both before the first request.
@@ -79,33 +78,44 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
   end
 
   describe "a post that names permissions" do
-    test "sends a visitor who is not signed in to sign in", %{site: site} do
+    test "sends a visitor who is not signed in to sign in", %{url_mode: url_mode, site: site} do
       post = post!(site, @locked)
 
-      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/blog/#{post.slug}"))
+      assert english_sign_in?(
+               redirected_to(get(on_site(site), english(url_mode, "/blog/#{post.slug}"))),
+               url_mode
+             )
 
-      assert {:error, {:redirect, %{to: "/en/auth?" <> _query}}} =
-               live(on_site(site), "/en/blog/#{post.slug}")
+      assert {:error, {:redirect, %{to: to}}} =
+               live(on_site(site), english(url_mode, "/blog/#{post.slug}"))
+
+      assert english_sign_in?(to, url_mode)
     end
 
-    test "answers the site's 404 to a user holding none of them", %{site: site} do
+    test "answers the site's 404 to a user holding none of them", %{
+      url_mode: url_mode,
+      site: site
+    } do
       post = post!(site, @locked)
 
       for held <- [[], ["members:write"], ["admin:dashboard:blog:post"]] do
         assert_error_sent(404, fn ->
-          get(signed_in(site, held), "/en/blog/#{post.slug}")
+          get(signed_in(site, held), english(url_mode, "/blog/#{post.slug}"))
         end)
       end
     end
 
-    test "opens for a user holding one of them, with a head kept out of an index", %{site: site} do
+    test "opens for a user holding one of them, with a head kept out of an index", %{
+      url_mode: url_mode,
+      site: site
+    } do
       post = post!(site, @locked)
 
       for held <- [["members:read"], ["members:*"], ["*"]] do
         doc =
           site
           |> signed_in(held)
-          |> get("/en/blog/#{post.slug}")
+          |> get(english(url_mode, "/blog/#{post.slug}"))
           |> html_response(200)
           |> LazyHTML.from_document()
 
@@ -114,20 +124,23 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
     end
   end
 
-  test "a post that names none opens for everyone, indexable", %{site: site} do
+  test "a post that names none opens for everyone, indexable", %{url_mode: url_mode, site: site} do
     post = post!(site, [])
 
     doc =
       site
       |> on_site()
-      |> get("/en/blog/#{post.slug}")
+      |> get(english(url_mode, "/blog/#{post.slug}"))
       |> html_response(200)
       |> LazyHTML.from_document()
 
     assert robots(doc) == ["index, follow, max-image-preview:large"]
   end
 
-  test "a category or a tag that names permissions sends a visitor to sign in", %{site: site} do
+  test "a category or a tag that names permissions sends a visitor to sign in", %{
+    url_mode: url_mode,
+    site: site
+  } do
     category =
       create_collection!(site_id: site.id, status: :active, language: "en", permissions: @locked)
 
@@ -136,42 +149,78 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       |> MishkaBlog.Dev.Generator.tag(site.id)
       |> generate()
 
-    for path <- ["/en/blog/category/#{category.slug}", "/en/blog/tag/#{tag.slug}"] do
-      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
+    for path <- [
+          english(url_mode, "/blog/category/#{category.slug}"),
+          english(url_mode, "/blog/tag/#{tag.slug}")
+        ] do
+      assert english_sign_in?(redirected_to(get(on_site(site), path)), url_mode), "#{path} opened"
     end
   end
 
   describe "a post filed under a locked category" do
-    test "is closed by the category when it names nothing itself", %{site: site} do
+    test "is closed by the category when it names nothing itself", %{
+      url_mode: url_mode,
+      site: site
+    } do
       post = post!(site, [])
       file!(post, category!(site, @locked))
 
-      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/blog/#{post.slug}"))
-      assert_error_sent(404, fn -> get(signed_in(site, []), "/en/blog/#{post.slug}") end)
-      assert html_response(get(signed_in(site, @locked), "/en/blog/#{post.slug}"), 200)
+      assert english_sign_in?(
+               redirected_to(get(on_site(site), english(url_mode, "/blog/#{post.slug}"))),
+               url_mode
+             )
+
+      assert_error_sent(404, fn ->
+        get(signed_in(site, []), english(url_mode, "/blog/#{post.slug}"))
+      end)
+
+      assert html_response(
+               get(signed_in(site, @locked), english(url_mode, "/blog/#{post.slug}")),
+               200
+             )
     end
 
-    test "opens with its own permissions when it names some, not the category's", %{site: site} do
+    test "opens with its own permissions when it names some, not the category's", %{
+      url_mode: url_mode,
+      site: site
+    } do
       post = post!(site, ["staff:read"])
       file!(post, category!(site, @locked))
 
-      assert_error_sent(404, fn -> get(signed_in(site, @locked), "/en/blog/#{post.slug}") end)
-      assert html_response(get(signed_in(site, ["staff:read"]), "/en/blog/#{post.slug}"), 200)
+      assert_error_sent(404, fn ->
+        get(signed_in(site, @locked), english(url_mode, "/blog/#{post.slug}"))
+      end)
+
+      assert html_response(
+               get(signed_in(site, ["staff:read"]), english(url_mode, "/blog/#{post.slug}")),
+               200
+             )
     end
 
-    test "under a category of a locked one is closed too, as that category is", %{site: site} do
+    test "under a category of a locked one is closed too, as that category is", %{
+      url_mode: url_mode,
+      site: site
+    } do
       members = category!(site, @locked)
       guides = category!(site, [], parent_collection_id: members.id)
       post = post!(site, [])
       file!(post, guides)
 
-      for path <- ["/en/blog/#{post.slug}", "/en/blog/category/#{guides.slug}"] do
-        assert "/en/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
+      for path <- [
+            english(url_mode, "/blog/#{post.slug}"),
+            english(url_mode, "/blog/category/#{guides.slug}")
+          ] do
+        assert english_sign_in?(redirected_to(get(on_site(site), path)), url_mode),
+               "#{path} opened"
+
         assert html_response(get(signed_in(site, @locked), path), 200)
       end
     end
 
-    test "is open to everyone when no category of it is locked, whatever its tags", %{site: site} do
+    test "is open to everyone when no category of it is locked, whatever its tags", %{
+      url_mode: url_mode,
+      site: site
+    } do
       post = post!(site, [])
       file!(post, category!(site, []))
 
@@ -182,32 +231,56 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
 
       Ash.create!(MishkaBlog.PostTag, %{post_id: post.id, tag_id: tag.id}, authorize?: false)
 
-      assert html_response(get(on_site(site), "/en/blog/#{post.slug}"), 200)
+      assert html_response(get(on_site(site), english(url_mode, "/blog/#{post.slug}")), 200)
     end
   end
 
   describe "a document" do
-    test "that names permissions closes its front page and every page of it", %{site: site} do
+    test "that names permissions closes its front page and every page of it", %{
+      url_mode: url_mode,
+      site: site
+    } do
       document!(site, @locked, [])
 
-      for path <- ["/en/docs/guide", "/en/docs/guide/install"] do
-        assert "/en/auth?" <> _query = redirected_to(get(on_site(site), path)), "#{path} opened"
+      for path <- [english(url_mode, "/docs/guide"), english(url_mode, "/docs/guide/install")] do
+        assert english_sign_in?(redirected_to(get(on_site(site), path)), url_mode),
+               "#{path} opened"
       end
 
-      assert_error_sent(404, fn -> get(signed_in(site, []), "/en/docs/guide/install") end)
-      assert html_response(get(signed_in(site, @locked), "/en/docs/guide/install"), 200)
+      assert_error_sent(404, fn ->
+        get(signed_in(site, []), english(url_mode, "/docs/guide/install"))
+      end)
+
+      assert html_response(
+               get(signed_in(site, @locked), english(url_mode, "/docs/guide/install")),
+               200
+             )
     end
 
-    test "that names none leaves a page of it to its own", %{site: site} do
+    test "that names none leaves a page of it to its own", %{url_mode: url_mode, site: site} do
       document!(site, [], ["staff:*"])
 
-      assert html_response(get(on_site(site), "/en/docs/guide"), 200)
-      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/docs/guide/install"))
-      assert_error_sent(404, fn -> get(signed_in(site, @locked), "/en/docs/guide/install") end)
-      assert html_response(get(signed_in(site, ["staff:*"]), "/en/docs/guide/install"), 200)
+      assert html_response(get(on_site(site), english(url_mode, "/docs/guide")), 200)
+
+      assert english_sign_in?(
+               redirected_to(get(on_site(site), english(url_mode, "/docs/guide/install"))),
+               url_mode
+             )
+
+      assert_error_sent(404, fn ->
+        get(signed_in(site, @locked), english(url_mode, "/docs/guide/install"))
+      end)
+
+      assert html_response(
+               get(signed_in(site, ["staff:*"]), english(url_mode, "/docs/guide/install")),
+               200
+             )
     end
 
-    test "closes a page under a locked page of it with that page's", %{site: site} do
+    test "closes a page under a locked page of it with that page's", %{
+      url_mode: url_mode,
+      site: site
+    } do
       install = document!(site, [], ["staff:*"])
 
       create_section!(
@@ -221,10 +294,21 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
         technical_review_status: :approved
       )
 
-      assert html_response(get(on_site(site), "/en/docs/guide"), 200)
-      assert "/en/auth?" <> _query = redirected_to(get(on_site(site), "/en/docs/guide/upgrade"))
-      assert_error_sent(404, fn -> get(signed_in(site, @locked), "/en/docs/guide/upgrade") end)
-      assert html_response(get(signed_in(site, ["staff:*"]), "/en/docs/guide/upgrade"), 200)
+      assert html_response(get(on_site(site), english(url_mode, "/docs/guide")), 200)
+
+      assert english_sign_in?(
+               redirected_to(get(on_site(site), english(url_mode, "/docs/guide/upgrade"))),
+               url_mode
+             )
+
+      assert_error_sent(404, fn ->
+        get(signed_in(site, @locked), english(url_mode, "/docs/guide/upgrade"))
+      end)
+
+      assert html_response(
+               get(signed_in(site, ["staff:*"]), english(url_mode, "/docs/guide/upgrade")),
+               200
+             )
     end
   end
 
@@ -334,6 +418,10 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
     |> Plug.Test.init_test_session(%{})
     |> AshAuthentication.Plug.Helpers.store_in_session(member!(site, permissions))
   end
+
+  # Whether `path` is the site's sign-in page in English, the site's first language, in `url_mode`.
+  defp english_sign_in?(path, url_mode),
+    do: String.starts_with?(path, english(url_mode, "/auth?"))
 
   defp on_site(site) do
     Phoenix.ConnTest.build_conn()

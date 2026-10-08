@@ -20,7 +20,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   `async: false` — the install flag, `SiteState`, the routing table and the settings cache are
   process-global.
   """
-  use MishkaCmsWeb.ConnCase, async: false
+  use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
 
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
@@ -49,7 +49,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   # component's module is named from a hash of its own name and its SITE's, and carries that site's
   # id — so a reused name renders the previous test's module against a site that test rolled back,
   # and every list comes back empty with nothing to say why.
-  setup do
+  setup %{url_mode: url_mode} do
     SiteState.clear()
     name = "blogpages#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -66,8 +66,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
-    # The addresses below name every language, English included.
-    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
+    {:ok, _} = Settings.put("site.language_urls", url_mode, site_id: site.id)
 
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
@@ -212,19 +211,23 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   end
 
   describe "every provisioned page" do
-    test "renders for a reader who is not signed in", %{site: site, conn: conn} do
+    test "renders for a reader who is not signed in", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       post = publish!(site, "Ash in production")
       collection = create_collection!(site_id: site.id, status: :active)
       tag = [] |> tag(site.id) |> generate()
       provision!(site)
 
       urls = [
-        "/en/blog",
-        "/en/blog/#{post.slug}",
-        "/en/blog/category/#{collection.slug}",
-        "/en/blog/tag/#{tag.slug}",
-        "/en/blog/categories",
-        "/en/blog/tags"
+        english(url_mode, "/blog"),
+        english(url_mode, "/blog/#{post.slug}"),
+        english(url_mode, "/blog/category/#{collection.slug}"),
+        english(url_mode, "/blog/tag/#{tag.slug}"),
+        english(url_mode, "/blog/categories"),
+        english(url_mode, "/blog/tags")
       ]
 
       for url <- urls do
@@ -245,7 +248,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     #
     # The second assertion is what keeps the first honest: a component that dropped every link
     # rather than filling it draws no capture either, and would pass a check that only refuses one.
-    test "leaves no capture in a URL it drew", %{site: site, conn: conn} do
+    test "leaves no capture in a URL it drew", %{url_mode: url_mode, site: site, conn: conn} do
       # ONE POST IN TWO LANGUAGES, not two posts that share nothing. The translations row on the
       # detail page is the only link on any of these pages built under a language that is NOT the
       # page's own, which is what the capture in a base is kept for at all — and a post with no
@@ -284,12 +287,12 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
 
       for {language, %{post: post, category: category, tag: tag}} <- published,
           url <- [
-            "/#{language}/blog",
-            "/#{language}/blog/#{post.slug}",
-            "/#{language}/blog/category/#{category.slug}",
-            "/#{language}/blog/tag/#{tag.slug}",
-            "/#{language}/blog/categories",
-            "/#{language}/blog/tags"
+            language_path(url_mode, language, "/blog"),
+            language_path(url_mode, language, "/blog/#{post.slug}"),
+            language_path(url_mode, language, "/blog/category/#{category.slug}"),
+            language_path(url_mode, language, "/blog/tag/#{tag.slug}"),
+            language_path(url_mode, language, "/blog/categories"),
+            language_path(url_mode, language, "/blog/tags")
           ] do
         assert {:ok, view, _html} = live(conn, url), "#{url} did not render"
         html = assert_drew!(render_async(view, @async), url)
@@ -297,7 +300,10 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
         assert captures_left(html) == [],
                "#{url} drew a URL the runtime never filled in"
 
-        assert Enum.any?(component_links(html), &String.starts_with?(&1, "/#{language}/blog/")),
+        assert Enum.any?(
+                 component_links(html),
+                 &String.starts_with?(&1, language_path(url_mode, language, "/blog/"))
+               ),
                "#{url} drew no link into its own language's blog, so the check above asserts nothing"
       end
 
@@ -305,8 +311,8 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       # capture either, so without this the detail page's own reason for keeping one is asserted by
       # nothing above it.
       for {url, translated} <- [
-            {"/en/blog/#{english.slug}", "/fa/blog/#{persian.slug}"},
-            {"/fa/blog/#{persian.slug}", "/en/blog/#{english.slug}"}
+            {english(url_mode, "/blog/#{english.slug}"), "/fa/blog/#{persian.slug}"},
+            {"/fa/blog/#{persian.slug}", english(url_mode, "/blog/#{english.slug}")}
           ] do
         assert {:ok, view, _html} = live(conn, url)
 
@@ -320,11 +326,15 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       end
     end
 
-    test "is answered in each of the site's languages, and in no other", %{site: site, conn: conn} do
+    test "is answered in each of the site's languages, and in no other", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       provision!(site)
 
       for language <- ~w(en fa) do
-        assert {:ok, _view, _html} = live(conn, "/#{language}/blog")
+        assert {:ok, _view, _html} = live(conn, language_path(url_mode, language, "/blog"))
       end
 
       assert_raise NotFoundError, fn -> live(conn, "/xyz/blog") end
@@ -333,6 +343,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
 
   describe "the blog home" do
     test "lists the site's published posts and links each to its own page", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
@@ -340,24 +351,28 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       _draft = create_blog_post!(site_id: site.id, title: "Not ready yet", status: :draft)
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog"))
       html = render_async(view, @async)
 
       assert "Ash in production" in texts(html, ~s([data-role="blog-list-title"]))
       refute "Not ready yet" in texts(html, ~s([data-role="blog-list-title"]))
 
-      assert has_element?(view, ~s(a[href="/en/blog/#{published.slug}"])),
+      assert has_element?(view, ~s(a[href="#{english(url_mode, "/blog/#{published.slug}")}"])),
              "a post on the list did not link to its own page under this language"
     end
 
     # THE SWITCHER IS BUILT FROM `@page_languages`, so it swaps the `lang` capture inside the page's
     # own pattern rather than the first segment of whatever URL this happens to be.
-    test "offers the same page in the site's other language", %{site: site, conn: conn} do
+    test "offers the same page in the site's other language", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       provision!(site)
 
-      {:ok, _view, html} = live(conn, "/en/blog")
+      {:ok, _view, html} = live(conn, english(url_mode, "/blog"))
 
-      assert [{"en", "/en/blog"}, {"fa", "/fa/blog"}] ==
+      assert [{"en", english(url_mode, "/blog")}, {"fa", "/fa/blog"}] ==
                html
                |> doc()
                |> LazyHTML.query("a[hreflang]")
@@ -369,11 +384,15 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     # A PAGER ON A PATTERN PAGE MUST NOT WRITE THE PATTERN. `@page.path` is `/:lang/blog`, so a page
     # that handed the list its own path would produce `/:lang/blog?page=2` — a URL that works only
     # because a query string beats a capture, and reads like a bug to everyone who sees it.
-    test "pages itself through a URL a reader could have typed", %{site: site, conn: conn} do
+    test "pages itself through a URL a reader could have typed", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       for index <- 1..12, do: publish!(site, "Post #{index}")
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog"))
 
       assert [href] =
                render_async(view, @async)
@@ -382,7 +401,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
                |> Enum.map(&hd(LazyHTML.attribute(&1, "href")))
 
       refute href =~ ":lang"
-      assert String.starts_with?(href, "/en/blog?")
+      assert String.starts_with?(href, english(url_mode, "/blog?"))
 
       assert {:ok, _second, second_html} = live(conn, href)
       assert_drew!(second_html, href)
@@ -414,31 +433,33 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     # page and answered 200, so a reader who followed a stale link, and every crawler, was told the
     # address was fine.
     test "shows the post the URL named, and is missing for a slug that is not", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
       post = publish!(site, "Ash in production")
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog/#{post.slug}")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog/#{post.slug}"))
 
       assert texts(render_async(view, @async), ~s([data-role="blog-detail-title"])) == [
                "Ash in production"
              ]
 
       assert_raise MishkaCmsCore.ErrorsExceptions.NotFoundError, fn ->
-        live(conn, "/en/blog/nothing-like-this")
+        live(conn, english(url_mode, "/blog/nothing-like-this"))
       end
     end
 
     test "asks a reader who is not signed in to sign in before commenting", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
       post = publish!(site, "Ash in production")
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog/#{post.slug}")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog/#{post.slug}"))
 
       # THE CONVERSATION IS READ IN THE BACKGROUND, so the way in appears with it rather than with
       # the first paint. `has_element?/2` renders without waiting; this waits, and answers with the
@@ -466,6 +487,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     # message saying that article is not here — with a box, for a signed-in reader, that writes onto
     # the English post from a Persian URL.
     test "and neither is it where that edition's comments are published", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
@@ -484,7 +506,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
         live(conn, "/fa/blog/#{english.slug}")
       end
 
-      {:ok, english_url, _html} = live(conn, "/en/blog/#{english.slug}")
+      {:ok, english_url, _html} = live(conn, english(url_mode, "/blog/#{english.slug}"))
 
       assert texts(render_async(english_url, @async), ~s([data-role="blog-comment-body"])) == [
                "Well put."
@@ -495,7 +517,11 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     # language written into it offers every other edition under the language the reader is leaving —
     # /en/blog/<fa slug>, an hreflang="fa" on a path under English, answered by the English page,
     # which does not have that post.
-    test "offers each translation at the URL that answers it", %{site: site, conn: conn} do
+    test "offers each translation at the URL that answers it", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       english = publish!(site, "English post")
 
       persian =
@@ -506,7 +532,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
 
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog/#{english.slug}")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog/#{english.slug}"))
 
       assert [{"fa", "/fa/blog/" <> persian.slug}] ==
                view
@@ -530,6 +556,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   # categories that appear nowhere at all, and a description that says otherwise.
   describe "the categories page" do
     test "lists a category filed under another one as well as the roots", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
@@ -550,7 +577,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
 
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog/categories")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog/categories"))
       names = texts(render_async(view, @async), ~s([data-role="blog-category-name"]))
 
       assert "Parent" in names
@@ -565,13 +592,14 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   # is the ordinary case.
   describe "the sidebar" do
     test "marks the category the reader is on, and not the tag that shares its slug", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
       both_named!(site, "elixir")
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog/category/elixir")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog/category/elixir"))
       html = render_async(view, @async)
 
       assert marked(html, "blog-category") == 1
@@ -579,13 +607,14 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     end
 
     test "and the tag the reader is on, and not the category that shares its slug", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
       both_named!(site, "elixir")
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog/tag/elixir")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog/tag/elixir"))
       html = render_async(view, @async)
 
       assert marked(html, "blog-tag") == 1
@@ -603,6 +632,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     # assertions can fail: the capture a sidebar handed `params` on this page would mark by is this
     # post's slug, and a generated one collides with nothing.
     test "keeps the post the reader has open out of what else there is to read", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
@@ -612,7 +642,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       _other = publish!(site, "Another")
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/blog/elixir")
+      {:ok, view, _html} = live(conn, english(url_mode, "/blog/elixir"))
       html = render_async(view, @async)
 
       recent =

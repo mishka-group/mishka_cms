@@ -21,7 +21,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
   `async: false` — the install flag, `SiteState`, the routing table and the settings cache are
   process-global.
   """
-  use MishkaCmsWeb.ConnCase, async: false
+  use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
 
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
@@ -50,7 +50,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
   # component's module is named from a hash of its own name and its SITE's, and carries that site's
   # id — so a reused name renders the previous test's module against a site that test rolled back,
   # and every list comes back empty with nothing to say why.
-  setup do
+  setup %{url_mode: url_mode} do
     SiteState.clear()
     name = "docpages#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -67,8 +67,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
-    # The addresses below name every language, English included.
-    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
+    {:ok, _} = Settings.put("site.language_urls", url_mode, site_id: site.id)
 
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
@@ -269,11 +268,19 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
   end
 
   describe "every provisioned page" do
-    test "renders for a reader who is not signed in", %{site: site, conn: conn} do
+    test "renders for a reader who is not signed in", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       manual!(site)
       provision!(site)
 
-      urls = ["/en/docs", "/en/docs/mishka-cms", "/en/docs/mishka-cms/installation"]
+      urls = [
+        english(url_mode, "/docs"),
+        english(url_mode, "/docs/mishka-cms"),
+        english(url_mode, "/docs/mishka-cms/installation")
+      ]
 
       for url <- urls do
         assert {:ok, view, html} = live(conn, url), "#{url} did not render"
@@ -293,7 +300,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     #
     # The second assertion is what keeps the first honest: a block that dropped every link rather
     # than filling it draws no capture either, and would pass a check that only refuses one.
-    test "leaves no capture in a URL it drew", %{site: site, conn: conn} do
+    test "leaves no capture in a URL it drew", %{url_mode: url_mode, site: site, conn: conn} do
       %{document: document, sections: sections} = manual!(site)
       installation = Enum.find(sections, &(&1.slug == "installation"))
       note!(site, installation, title: "Requirements", order_position: 0)
@@ -319,7 +326,11 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
       provision!(site)
 
       read_at = %{
-        "en" => ["/en/docs", "/en/docs/mishka-cms", "/en/docs/mishka-cms/installation"],
+        "en" => [
+          english(url_mode, "/docs"),
+          english(url_mode, "/docs/mishka-cms"),
+          english(url_mode, "/docs/mishka-cms/installation")
+        ],
         "fa" => ["/fa/docs", "/fa/docs/mishka-cms-fa", "/fa/docs/mishka-cms-fa/nasb"]
       }
 
@@ -329,16 +340,23 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
 
         assert captures_left(html) == [], "#{url} drew a URL the runtime never filled in"
 
-        assert Enum.any?(block_links(html), &String.starts_with?(&1, "/#{language}/docs/")),
+        assert Enum.any?(
+                 block_links(html),
+                 &String.starts_with?(&1, language_path(url_mode, language, "/docs/"))
+               ),
                "#{url} drew no link into its own language's documentation, so the check above asserts nothing"
       end
     end
 
-    test "is answered in each of the site's languages, and in no other", %{site: site, conn: conn} do
+    test "is answered in each of the site's languages, and in no other", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       provision!(site)
 
       for language <- ~w(en fa) do
-        assert {:ok, _view, _html} = live(conn, "/#{language}/docs")
+        assert {:ok, _view, _html} = live(conn, language_path(url_mode, language, "/docs"))
       end
 
       assert_raise NotFoundError, fn -> live(conn, "/xyz/docs") end
@@ -367,6 +385,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
 
   describe "the documentation index" do
     test "lists the site's published documents and links each to its own page", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
@@ -374,24 +393,31 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
       _unpublished = document!(site, name: "Not ready", slug: "not-ready", status: :draft)
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/docs")
+      {:ok, view, _html} = live(conn, english(url_mode, "/docs"))
       html = render_async(view, @async)
 
       assert texts(html, ~s([data-role="doc-list-title"])) == ["Mishka CMS"]
 
-      assert has_element?(view, ~s(#doc-index a[href="/en/docs/mishka-cms"])),
+      assert has_element?(
+               view,
+               ~s(#doc-index a[href="#{english(url_mode, "/docs/mishka-cms")}"])
+             ),
              "a document on the index did not link to its own page under this language"
     end
 
     # THE NAV IS BUILT FROM `@page_languages`, so it swaps the `lang` capture inside the page's own
     # pattern rather than the first segment of whatever URL this happens to be — and on THIS page
     # every other capture is absent, which is why the index is the one that carries it.
-    test "offers itself in the site's other language", %{site: site, conn: conn} do
+    test "offers itself in the site's other language", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       provision!(site)
 
-      {:ok, _view, html} = live(conn, "/en/docs")
+      {:ok, _view, html} = live(conn, english(url_mode, "/docs"))
 
-      assert [{"en", "/en/docs"}, {"fa", "/fa/docs"}] ==
+      assert [{"en", english(url_mode, "/docs")}, {"fa", "/fa/docs"}] ==
                html
                |> doc()
                |> LazyHTML.query("a[hreflang]")
@@ -403,19 +429,23 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     # A PAGER ON A PATTERN PAGE MUST NOT WRITE THE PATTERN. `@page.path` is `/:lang/docs`, so a page
     # that handed the list its own path would produce `/:lang/docs?page=2` — a URL that works only
     # because a query string beats a capture, and reads like a bug to everyone who sees it.
-    test "pages itself through a URL a reader could have typed", %{site: site, conn: conn} do
+    test "pages itself through a URL a reader could have typed", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
       for index <- 1..13,
           do: document!(site, name: "Manual #{index}", slug: "manual-#{index}")
 
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/docs")
+      {:ok, view, _html} = live(conn, english(url_mode, "/docs"))
 
       assert [href] =
                attributes(render_async(view, @async), ~s([data-role="doc-list-next"]), "href")
 
       refute href =~ ":lang"
-      assert String.starts_with?(href, "/en/docs?")
+      assert String.starts_with?(href, english(url_mode, "/docs?"))
 
       assert {:ok, _second, second_html} = live(conn, href)
       assert_drew!(second_html, href)
@@ -428,12 +458,13 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     end
 
     test "draws the document's own front page with its contents beside it", %{
+      url_mode: url_mode,
       site: site,
       conn: conn
     } do
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/docs/mishka-cms")
+      {:ok, view, _html} = live(conn, english(url_mode, "/docs/mishka-cms"))
       html = render_async(view, @async)
 
       assert texts(html, ~s([data-role="doc-landing-title"])) == ["Mishka CMS"]
@@ -443,6 +474,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     end
 
     test "draws one page, its notes under their own anchors, and the way on to the next", %{
+      url_mode: url_mode,
       site: site,
       conn: conn,
       sections: sections
@@ -454,17 +486,17 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
 
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/docs/mishka-cms/installation")
+      {:ok, view, _html} = live(conn, english(url_mode, "/docs/mishka-cms/installation"))
       html = render_async(view, @async)
 
       assert texts(html, ~s([data-role="doc-section-title"])) == ["Installation"]
       assert texts(html, ~s([data-role="doc-note-title"])) == ["Requirements", "Troubleshooting"]
 
       assert attributes(html, ~s([data-role="doc-section-next"]), "href") ==
-               ["/en/docs/mishka-cms/appendix"]
+               [english(url_mode, "/docs/mishka-cms/appendix")]
 
       assert attributes(html, ~s([data-role="doc-section-prev"]), "href") ==
-               ["/en/docs/mishka-cms/getting-started"]
+               [english(url_mode, "/docs/mishka-cms/getting-started")]
     end
 
     # THE FOUR BLOCKS AGREE ABOUT NOTHING BY SHARING CODE — a stored component has nothing to share
@@ -472,6 +504,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     # A table of contents whose anchors name ids the article beside it never drew is a column of
     # links that do nothing, and it renders perfectly.
     test "and a table of contents whose every anchor is somewhere on that page", %{
+      url_mode: url_mode,
       site: site,
       conn: conn,
       sections: sections
@@ -483,7 +516,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
 
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/docs/mishka-cms/installation")
+      {:ok, view, _html} = live(conn, english(url_mode, "/docs/mishka-cms/installation"))
       html = render_async(view, @async)
 
       anchors = attributes(html, ~s(#doc-on-this-page [data-role="doc-toc-link"]), "href")
@@ -513,6 +546,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     # URL its own page answers as not published. This is why the document pages carry `doc-switcher`
     # instead: it maps the document AND the page being read through `language_group_id`.
     test "offer the translation at the URL that answers it", %{
+      url_mode: url_mode,
       site: site,
       conn: conn,
       document: document,
@@ -540,7 +574,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
 
       provision!(site)
 
-      {:ok, view, _html} = live(conn, "/en/docs/mishka-cms/installation")
+      {:ok, view, _html} = live(conn, english(url_mode, "/docs/mishka-cms/installation"))
 
       offered =
         attributes(render_async(view, @async), ~s([data-role="doc-switcher-language"]), "href")
@@ -568,6 +602,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     end
 
     test "is in the language of the page an author dropped it on", %{
+      url_mode: url_mode,
       site: site,
       conn: conn,
       document: document
@@ -600,7 +635,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
       assert attributes(persian_html, ~s(#doc-latest [data-role="doc-list-read"]), "href") ==
                ["/fa/docs/mishka-cms-fa"]
 
-      {:ok, english, _html} = live(conn, "/en/home")
+      {:ok, english, _html} = live(conn, english(url_mode, "/home"))
 
       assert texts(render_async(english, @async), ~s(#doc-latest [data-role="doc-list-title"])) ==
                [
