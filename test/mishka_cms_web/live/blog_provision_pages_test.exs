@@ -24,7 +24,10 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
 
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
-  import MishkaBlog.Dev.Generator, only: [tag: 2, post_collection: 1, post_tag: 1, comment: 2]
+
+  import MishkaBlog.Dev.Generator,
+    only: [tag: 2, post_collection: 1, post_tag: 1, comment: 2, blogger: 2, team: 2]
+
   import Ash.Generator, only: [generate: 1]
 
   alias MishkaBlog.Provision
@@ -219,6 +222,9 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       post = publish!(site, "Ash in production")
       collection = create_collection!(site_id: site.id, status: :active)
       tag = [] |> tag(site.id) |> generate()
+      user = create_user!(site_id: site.id)
+      blogger = [site_id: site.id, user_id: user.id] |> blogger(site.id) |> generate()
+      team = [site_id: site.id, status: :active] |> team(site.id) |> generate()
       provision!(site)
 
       urls = [
@@ -227,7 +233,10 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
         english(url_mode, "/blog/category/#{collection.slug}"),
         english(url_mode, "/blog/tag/#{tag.slug}"),
         english(url_mode, "/blog/categories"),
-        english(url_mode, "/blog/tags")
+        english(url_mode, "/blog/tags"),
+        english(url_mode, "/blog/author/#{blogger.slug}"),
+        english(url_mode, "/blog/team/#{team.slug}"),
+        english(url_mode, "/blog/people")
       ]
 
       for url <- urls do
