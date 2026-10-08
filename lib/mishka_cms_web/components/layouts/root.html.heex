@@ -161,6 +161,12 @@
       name="pb-code-editor-src"
       content={~p"/assets/js/code_editor.js"}
     />
+    <%!-- The rich-text editor's bundle, published the same way; `pb_content_editor.js` reads it. --%>
+    <meta
+      :if={assigns[:content_editor]}
+      name="pb-content-editor-src"
+      content={~p"/assets/js/content_editor.js"}
+    />
 
     <% js =
       MishkaInstaller.Event.Hook.call("RootHtml.InlineScript", %{js: nil, assigns: assigns}).js %>

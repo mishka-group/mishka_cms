@@ -11,15 +11,15 @@
 // pushes it in, but only when the text really differs, or every keystroke elsewhere on the page
 // would drop the cursor to the end mid-word.
 
-let loading = null;
-
-let attempts = 0;
-
-export function bundleUrl() {
-  const meta = document.querySelector('meta[name="pb-code-editor-src"]');
-  return meta ? meta.content : null;
+export function bundleUrl(meta = "pb-code-editor-src") {
+  const tag = document.querySelector(`meta[name="${meta}"]`);
+  return tag ? tag.content : null;
 }
 
+// A bundle the layout publishes the address of in a `<meta name=…>`, loaded as a plain script the
+// first time something asks for it, and the object it hangs on `window[global]`. `loadEditor` below
+// is CodeMirror's; `pb_content_editor.js` makes the rich-text editor's.
+//
 // One request however many boxes mount at once: the second and third await the same promise.
 //
 // A FAILURE IS NOT CACHED. `loading` used to be set to the promise whatever became of it, so the
@@ -29,47 +29,53 @@ export function bundleUrl() {
 // under an open tab was enough to do it — a request landing mid-write reads a truncated script,
 // which loads without defining anything. Clearing it here costs one more `<script>` on the next box
 // and buys back the retry.
-export function loadEditor() {
-  if (window.PbCodeMirror) return Promise.resolve(window.PbCodeMirror);
-  if (loading) return loading;
+export function bundleLoader(meta, global) {
+  let loading = null;
+  let attempts = 0;
 
-  const src = bundleUrl();
-  if (!src) return Promise.reject(new Error("no pb-code-editor-src meta tag"));
+  // THE RETRY CARRIES A DIFFERENT URL, because the likeliest thing to have gone wrong is a
+  // half-written file — and a half-written file is a 200 with an ETag, which the browser is
+  // entitled to hand back unchanged however many times it is asked for. Re-requesting the address
+  // that just failed would re-read the same bytes out of the cache and fail identically for as long
+  // as they live there.
+  function fetchBundle(src) {
+    const url = attempts ? `${src}?retry=${attempts}` : src;
 
-  loading = fetchEditor(src).catch((error) => {
-    loading = null;
-    throw error;
-  });
+    attempts += 1;
 
-  return loading;
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+
+      const fail = (message) => {
+        script.remove();
+        reject(new Error(message));
+      };
+
+      script.src = url;
+      script.onload = () =>
+        window[global] ? resolve(window[global]) : fail(`bundle loaded without ${global}`);
+      script.onerror = () => fail("could not load " + url);
+      document.head.appendChild(script);
+    });
+  }
+
+  return function load() {
+    if (window[global]) return Promise.resolve(window[global]);
+    if (loading) return loading;
+
+    const src = bundleUrl(meta);
+    if (!src) return Promise.reject(new Error(`no ${meta} meta tag`));
+
+    loading = fetchBundle(src).catch((error) => {
+      loading = null;
+      throw error;
+    });
+
+    return loading;
+  };
 }
 
-// THE RETRY CARRIES A DIFFERENT URL, because the likeliest thing to have gone wrong is a half-written
-// file — and a half-written file is a 200 with an ETag, which the browser is entitled to hand back
-// unchanged however many times it is asked for. Re-requesting the address that just failed would
-// re-read the same bytes out of the cache and fail identically for as long as they live there.
-function fetchEditor(src) {
-  const url = attempts ? `${src}?retry=${attempts}` : src;
-
-  attempts += 1;
-
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-
-    const fail = (message) => {
-      script.remove();
-      reject(new Error(message));
-    };
-
-    script.src = url;
-    script.onload = () =>
-      window.PbCodeMirror
-        ? resolve(window.PbCodeMirror)
-        : fail("code_editor.js loaded without PbCodeMirror");
-    script.onerror = () => fail("could not load " + url);
-    document.head.appendChild(script);
-  });
-}
+export const loadEditor = bundleLoader("pb-code-editor-src", "PbCodeMirror");
 
 export const PbCodeEditor = {
   mounted() {
