@@ -189,7 +189,7 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
     on_exit(fn -> MishkaInstaller.Event.Event.unregister(:name, module, false) end)
   end
 
-  # With `/en` published, `LanguagePlug` sends `/` there; an offline site answers before it does.
+  # With `/en` published, `/` is that page; an offline site answers before it is resolved.
   test "the front page is the maintenance page, not a redirect to a language first", %{
     conn: conn,
     site: site
@@ -205,16 +205,15 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
     end
   end
 
-  # THE WAY BACK IN: `/auth` goes to the site's sign-in page, which answers while the site is
-  # offline, and the site's admin signs in there and reaches the dashboard.
+  # THE WAY BACK IN: `/auth` is the site's sign-in page, which answers while the site is offline,
+  # and the site's admin signs in there and reaches the dashboard.
   test "the sign-in page stays open, and an admin signs in there", %{conn: conn, site: site} do
     seed_auth_pages!(site)
     admin = admin!(site)
 
-    assert conn |> get("/auth") |> redirected_to() == "/en/auth"
-    assert conn |> get("/en/auth") |> html_response(200) =~ ~s(id="auth-sign-in-form")
+    assert conn |> get("/auth") |> html_response(200) =~ ~s(id="auth-sign-in-form")
 
-    {:ok, view, _html} = live(conn, "/en/auth")
+    {:ok, view, _html} = live(conn, "/auth")
 
     {:error, {:redirect, %{to: handoff}}} =
       view

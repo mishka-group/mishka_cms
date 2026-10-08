@@ -53,6 +53,8 @@ defmodule MishkaCmsWeb.TranslationRenderTest do
     SiteState.save(site_entry(site))
 
     put_setting!("site.languages", ["en", "fa"], site.id)
+    # The addresses below name every language, English included.
+    put_setting!("site.language_urls", "prefix_all", site.id)
     put_setting!("cms.offline", false, nil)
     :persistent_term.put(:mishka_installed, true)
 

@@ -149,7 +149,7 @@ defmodule MishkaCmsWeb.TwoStepSignInTest do
   end
 
   defp page(site) do
-    {:ok, view, _html} = site |> on_site() |> live("/en/auth")
+    {:ok, view, _html} = site |> on_site() |> live("/auth")
     view
   end
 

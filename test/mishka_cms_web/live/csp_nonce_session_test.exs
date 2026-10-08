@@ -73,7 +73,7 @@ defmodule MishkaCmsWeb.CspNonceSessionTest do
 
   describe "a database page" do
     test "renders with the nonce its own response named, on the dead render and the socket" do
-      conn = visit("/en/auth")
+      conn = visit("/auth")
       nonce = header_nonce(conn)
 
       assert html_response(conn, 200) =~ ~s(nonce="#{nonce}")
@@ -81,8 +81,8 @@ defmodule MishkaCmsWeb.CspNonceSessionTest do
     end
 
     test "two loads of one visit get two nonces, and each socket keeps its own" do
-      first = visit("/en/auth")
-      second = first |> recycle() |> on_localhost() |> visit("/en/auth")
+      first = visit("/auth")
+      second = first |> recycle() |> on_localhost() |> visit("/auth")
 
       refute header_nonce(first) == header_nonce(second)
       assert socket_nonce(first) == header_nonce(first)

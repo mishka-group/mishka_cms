@@ -333,12 +333,10 @@ defmodule MishkaCmsWeb.SiteBundleTest do
     seed_auth_pages!(site)
     offline!(site)
 
-    assert site.host |> on_host() |> get("/auth") |> redirected_to() == "/en/auth"
-
     head =
       site.host
       |> on_host()
-      |> get("/en/auth")
+      |> get("/auth")
       |> html_response(200)
       |> String.split("</head>", parts: 2)
       |> hd()

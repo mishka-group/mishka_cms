@@ -10,7 +10,7 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
   `async: false` — the install flag, `SiteState`, the routing table, the settings cache and the
   plugin registry are process-global.
   """
-  use MishkaCmsWeb.ConnCase, async: false
+  use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
 
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
@@ -31,7 +31,7 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
 
   # A unique site name per test: a component's module is named from its site's name, so a reused one
   # renders the previous test's module against a site that test rolled back.
-  setup do
+  setup %{url_mode: url_mode} do
     SiteState.clear()
     name = "blogseo#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -48,6 +48,7 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
+    {:ok, _} = Settings.put("site.language_urls", url_mode, site_id: site.id)
     {:ok, _} = Settings.put("site.title", "The Studio", site_id: site.id)
 
     # The extension registers the plugin as it starts; registering it again keeps the one record, and
@@ -58,6 +59,7 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
       SettingsState.delete(site.id, "site.languages")
+      SettingsState.delete(site.id, "site.language_urls")
       SettingsState.delete(site.id, "site.title")
       SiteState.clear()
     end)
@@ -126,12 +128,20 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     post
   end
 
-  test "a post's address is answered with the post's own head", %{site: site, conn: conn} do
+  test "a post's address is answered with the post's own head", %{
+    url_mode: url_mode,
+    site: site,
+    conn: conn
+  } do
     post = post!(site)
     base = Seo.base(site.host)
-    url = base <> "/en/blog/#{post.slug}"
+    url = base <> english(url_mode, "/blog/#{post.slug}")
 
-    doc = conn |> get("/en/blog/#{post.slug}") |> html_response(200) |> LazyHTML.from_document()
+    doc =
+      conn
+      |> get(english(url_mode, "/blog/#{post.slug}"))
+      |> html_response(200)
+      |> LazyHTML.from_document()
 
     assert doc |> LazyHTML.query("title") |> LazyHTML.text() |> String.trim() ==
              "Ash in production"
@@ -166,6 +176,7 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
   end
 
   test "what the post page sets wins over the post's own, and names the post's variables", %{
+    url_mode: url_mode,
     site: site,
     conn: conn
   } do
@@ -204,7 +215,11 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     )
     |> Ash.update!()
 
-    doc = conn |> get("/en/blog/#{post.slug}") |> html_response(200) |> LazyHTML.from_document()
+    doc =
+      conn
+      |> get(english(url_mode, "/blog/#{post.slug}"))
+      |> html_response(200)
+      |> LazyHTML.from_document()
 
     assert doc |> LazyHTML.query("title") |> LazyHTML.text() |> String.trim() ==
              "Ash in production | The Studio"
@@ -221,19 +236,20 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     assert attr(doc, ~s(meta[property="og:image"]), "content") == [base <> "/media/cover.png"]
     assert [%{"@type" => "Article", "headline" => "Ash in production"}] = json_ld(doc)
 
-    {:ok, view, _html} = live(conn, "/en/blog/#{post.slug}")
+    {:ok, view, _html} = live(conn, english(url_mode, "/blog/#{post.slug}"))
     assert page_title(view) == "Ash in production | The Studio"
   end
 
-  test "a live visit is titled by the post", %{site: site, conn: conn} do
+  test "a live visit is titled by the post", %{url_mode: url_mode, site: site, conn: conn} do
     post = post!(site)
 
-    {:ok, view, _html} = live(conn, "/en/blog/#{post.slug}")
+    {:ok, view, _html} = live(conn, english(url_mode, "/blog/#{post.slug}"))
     assert page_title(view) == "Ash in production"
   end
 
-  test "another blog page keeps its own head", %{conn: conn} do
-    doc = conn |> get("/en/blog") |> html_response(200) |> LazyHTML.from_document()
+  test "another blog page keeps its own head", %{url_mode: url_mode, conn: conn} do
+    doc =
+      conn |> get(english(url_mode, "/blog")) |> html_response(200) |> LazyHTML.from_document()
 
     assert attr(doc, ~s(meta[property="og:type"]), "content") == ["website"]
     assert [%{"@type" => "WebPage"}] = json_ld(doc)

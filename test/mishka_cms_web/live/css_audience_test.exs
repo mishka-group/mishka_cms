@@ -147,7 +147,7 @@ defmodule MishkaCmsWeb.CssAudienceTest do
     end
 
     test "takes the site's own bundle" do
-      head = head(page("/en/auth"))
+      head = head(page("/auth"))
 
       assert head =~ ~s|href="/assets/css/localhost/signincss.css"|
       assert head =~ ~s|id="mishka-runtime-css"|
@@ -155,7 +155,7 @@ defmodule MishkaCmsWeb.CssAudienceTest do
     end
 
     test "its fonts are served by this app, not a font CDN" do
-      head = head(page("/en/auth"))
+      head = head(page("/auth"))
 
       assert head =~ ~s|href="/fonts/fonts.css"|
 
@@ -164,7 +164,7 @@ defmodule MishkaCmsWeb.CssAudienceTest do
     end
 
     test "takes neither the admin sheet nor the marketing one, nor the browser Tailwind build" do
-      head = head(page("/en/auth"))
+      head = head(page("/auth"))
 
       refute head =~ @admin_sheet
       refute head =~ @public_sheet

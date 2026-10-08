@@ -5,9 +5,11 @@ defmodule MishkaCms.AsyncLocaleTest do
   A process started by `Phoenix.LiveView.start_async/3` or `assign_async/3` has no locale of its
   own, so a refusal, an account's name or a language's name it builds reads in the default locale
   whatever language the admin reads the page in. `MishkaGervaz.Messages.start_async/4` and
-  `assign_async/4` carry the page's locales into it. This fails on a call to Phoenix's own, in the
-  core, the blog, the document extension or this project. It lives here because only this project
-  has every extension at hand.
+  `assign_async/4` carry the page's locales into it, and the site and CSP nonce a runtime template
+  renders with (`MishkaCmsCore.Runtime.LiveViewHelpers.carry_into_tasks/0`), so `t/1` and
+  `site_path/2` answer in the task what they answer in the template. This fails on a call to
+  Phoenix's own, in the core, the blog, the document extension or this project. It lives here
+  because only this project has every extension at hand.
   """
   use ExUnit.Case, async: true
 

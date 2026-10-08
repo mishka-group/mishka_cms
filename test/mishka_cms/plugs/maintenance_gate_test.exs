@@ -25,7 +25,7 @@ defmodule MishkaCms.Plugs.MaintenanceGateTest do
   # `:browser` pipeline fetches one long before this plug runs.
   defp call(path, opts \\ []) do
     Plug.Test.conn(:get, path)
-    |> Plug.Test.init_test_session(%{})
+    |> Plug.Test.init_test_session(Keyword.get(opts, :session, %{}))
     |> Plug.Conn.assign(:current_user, Keyword.get(opts, :current_user))
     |> Plug.Conn.assign(:current_site, Keyword.get(opts, :current_site))
     |> MaintenanceGate.call(MaintenanceGate.init([]))
@@ -171,6 +171,22 @@ defmodule MishkaCms.Plugs.MaintenanceGateTest do
 
       assert master_page =~ ~s(href="/auth?master_user=false")
       assert master_page =~ ~s(href="/auth?master_user=true")
+    end
+
+    # THE SIGN-IN IN THE LANGUAGE THE VISITOR READS THE SITE IN, the session's — this gate answers
+    # before `LanguagePlug` would — at the address the site's URL mode gives it.
+    test "the built-in page links the sign-in in the visitor's language" do
+      site = a_site(%{master: true})
+      :ok = SettingsState.put(site.id, "site.languages", %{"value" => ["en", "fa"]})
+      reading_fa = call("/", current_site: site, session: %{"site_language" => "fa"}).resp_body
+
+      assert reading_fa =~ ~s(href="/fa/auth?master_user=false")
+      assert reading_fa =~ ~s(href="/fa/auth?master_user=true")
+      assert call("/", current_site: site).resp_body =~ ~s(href="/auth?master_user=false")
+
+      :ok = SettingsState.put(site.id, "site.language_urls", %{"value" => "prefix_all"})
+
+      assert call("/", current_site: site).resp_body =~ ~s(href="/en/auth?master_user=false")
     end
 
     # The sign-in pages are `/<language>/auth…`, reached from `/auth…`; the request that mints the

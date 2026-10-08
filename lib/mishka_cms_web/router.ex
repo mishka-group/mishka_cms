@@ -245,8 +245,9 @@ defmodule MishkaCmsWeb.Router do
     # `alias: false` — the /auth surface lives in `mishka_cms_core`, so these must NOT pick up this
     # scope's `MishkaCmsWeb` alias.
     #
-    # The sign-in pages themselves are each site's runtime pages at `/<language>/auth…`, answered
-    # by `RuntimeLive` below; `/auth…` reaches them through `LanguagePlug`'s redirect. The sign-out
+    # The sign-in pages themselves are each site's runtime pages at `/:lang/auth…`, answered by
+    # `RuntimeLive` below at the addresses the site's URL mode gives them — `/auth…` in its first
+    # language when that one is unprefixed, else through `LanguagePlug`'s redirect. The sign-out
     # page's form posts its DELETE here.
     scope "/", alias: false do
       auth_routes MishkaCmsCoreWeb.AuthController, MishkaCmsCore.Accounts.User, path: "/api/auth"

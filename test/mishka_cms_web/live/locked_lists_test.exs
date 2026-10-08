@@ -12,7 +12,7 @@ defmodule MishkaCmsWeb.LockedListsTest do
   `async: false` — the install flag, `SiteState`, the routing table, the settings cache and the
   plugin registry are process-global.
   """
-  use MishkaCmsWeb.ConnCase, async: false
+  use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
 
   @moduletag :capture_log
   @moduletag :integration
@@ -30,7 +30,7 @@ defmodule MishkaCmsWeb.LockedListsTest do
 
   @locked ["members:read"]
 
-  setup do
+  setup %{url_mode: url_mode} do
     SiteState.clear()
     name = "lockedlists#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -47,10 +47,12 @@ defmodule MishkaCmsWeb.LockedListsTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en"], site_id: site.id)
+    {:ok, _} = Settings.put("site.language_urls", url_mode, site_id: site.id)
 
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
       SettingsState.delete(site.id, "site.languages")
+      SettingsState.delete(site.id, "site.language_urls")
       SiteState.clear()
     end)
 
@@ -81,65 +83,125 @@ defmodule MishkaCmsWeb.LockedListsTest do
     %{site: site}
   end
 
-  test "the blog's posts and categories leave out what the visitor may not open", %{site: site} do
-    assert seen(site, nil, "/en/blog", "#blog-posts [data-role=\"blog-list-title\"]") == [
+  test "the blog's posts and categories leave out what the visitor may not open", %{
+    url_mode: url_mode,
+    site: site
+  } do
+    assert seen(
+             site,
+             nil,
+             english(url_mode, "/blog"),
+             "#blog-posts [data-role=\"blog-list-title\"]"
+           ) == [
              "For everyone"
            ]
 
-    assert seen(site, [], "/en/blog", "#blog-posts [data-role=\"blog-list-title\"]") == [
+    assert seen(
+             site,
+             [],
+             english(url_mode, "/blog"),
+             "#blog-posts [data-role=\"blog-list-title\"]"
+           ) == [
              "For everyone"
            ]
 
     assert Enum.sort(
-             seen(site, @locked, "/en/blog", "#blog-posts [data-role=\"blog-list-title\"]")
+             seen(
+               site,
+               @locked,
+               english(url_mode, "/blog"),
+               "#blog-posts [data-role=\"blog-list-title\"]"
+             )
            ) ==
              ["Behind the lock", "For everyone"]
 
-    assert seen(site, nil, "/en/blog/categories", "[data-role=\"blog-category-name\"]") == [
+    assert seen(
+             site,
+             nil,
+             english(url_mode, "/blog/categories"),
+             "[data-role=\"blog-category-name\"]"
+           ) == [
              "Open"
            ]
 
     assert Enum.sort(
-             seen(site, @locked, "/en/blog/categories", "[data-role=\"blog-category-name\"]")
+             seen(
+               site,
+               @locked,
+               english(url_mode, "/blog/categories"),
+               "[data-role=\"blog-category-name\"]"
+             )
            ) ==
              ["Members", "Open"]
   end
 
   test "the count beside a category or a tag is of the posts the visitor may open, and a tag " <>
          "leading only to a locked one is left out",
-       %{site: site} do
+       %{url_mode: url_mode, site: site} do
     tags = ~s([data-role="blog-tag"])
 
-    assert categories(site, nil) == ["Open 1"]
-    assert Enum.sort(categories(site, @locked)) == ["Members 1", "Open 2"]
+    assert categories(site, nil, url_mode) == ["Open 1"]
+    assert Enum.sort(categories(site, @locked, url_mode)) == ["Members 1", "Open 2"]
 
-    assert seen(site, nil, "/en/blog/tags", tags) == ["shared 1"]
-    assert seen(site, [], "/en/blog/tags", tags) == ["shared 1"]
-    assert seen(site, @locked, "/en/blog/tags", tags) == ["shared 2", "only-behind 1"]
+    assert seen(site, nil, english(url_mode, "/blog/tags"), tags) == ["shared 1"]
+    assert seen(site, [], english(url_mode, "/blog/tags"), tags) == ["shared 1"]
+
+    assert seen(site, @locked, english(url_mode, "/blog/tags"), tags) == [
+             "shared 2",
+             "only-behind 1"
+           ]
   end
 
   test "the documents and a document's contents leave out what the visitor may not open",
-       %{site: site} do
-    assert seen(site, nil, "/en/docs", "[data-role=\"doc-list-title\"]") == ["Guide"]
+       %{url_mode: url_mode, site: site} do
+    assert seen(site, nil, english(url_mode, "/docs"), "[data-role=\"doc-list-title\"]") == [
+             "Guide"
+           ]
 
-    assert Enum.sort(seen(site, @locked, "/en/docs", "[data-role=\"doc-list-title\"]")) == [
+    assert Enum.sort(
+             seen(site, @locked, english(url_mode, "/docs"), "[data-role=\"doc-list-title\"]")
+           ) == [
              "Guide",
              "Handbook"
            ]
 
-    assert seen(site, nil, "/en/docs/guide/install", "[data-role=\"doc-sidebar-link\"]") == [
+    assert seen(
+             site,
+             nil,
+             english(url_mode, "/docs/guide/install"),
+             "[data-role=\"doc-sidebar-link\"]"
+           ) == [
              "Install"
            ]
 
-    assert seen(site, @locked, "/en/docs/guide/install", "[data-role=\"doc-sidebar-link\"]") ==
+    assert seen(
+             site,
+             @locked,
+             english(url_mode, "/docs/guide/install"),
+             "[data-role=\"doc-sidebar-link\"]"
+           ) ==
              ["Install", "Salaries"]
   end
 
-  # Each category on the categories page with the count beside it, for a visitor holding
+  # Each category on the English categories page with the count beside it, for a visitor holding
   # `permissions`.
-  defp categories(site, permissions) do
-    names = seen(site, permissions, "/en/blog/categories", ~s([data-role="blog-category-name"]))
-    counts = seen(site, permissions, "/en/blog/categories", ~s([data-role="blog-category-count"]))
+  defp categories(site, permissions, url_mode) do
+    names =
+      seen(
+        site,
+        permissions,
+        english(url_mode, "/blog/categories"),
+        ~s([data-role="blog-category-name"])
+      )
+
+    counts =
+      seen(
+        site,
+        permissions,
+        english(url_mode, "/blog/categories"),
+        ~s([data-role="blog-category-count"])
+      )
+
     Enum.zip_with(names, counts, &"#{&1} #{&2}")
   end
 

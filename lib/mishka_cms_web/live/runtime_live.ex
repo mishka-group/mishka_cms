@@ -116,11 +116,21 @@ defmodule MishkaCmsWeb.RuntimeLive do
       |> speaking(session[Languages.session()], site.id)
       |> assign(:client_request, client_request(socket))
 
-    case language_target(socket, path, site) do
+    query = params |> Map.delete("path") |> URI.encode_query()
+
+    case moved_or_language_target(socket, path, "/" <> Enum.join(path, "/"), query, site) do
+      {:moved, "/" <> _ = to} ->
+        {:ok, redirect(socket, to: to)}
+
+      {:moved, to} ->
+        {:ok, redirect(socket, external: to)}
+
       {:redirect, to} ->
         {:ok, push_navigate(socket, to: to <> query_of_params(params))}
 
-      {:serve, _language} ->
+      {:serve, language} ->
+        socket = speaking(socket, language, site.id)
+
         :telemetry.span(
           [:mishka_cms, :runtime, :mount],
           %{path: Enum.join(path, "/"), site: site.name},
@@ -199,7 +209,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                         Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
 
                       {:sign_in, socket} ->
-                        sign_in(socket, params)
+                        sign_in(socket, params, site.id)
 
                       {:visitors_only, socket} ->
                         send_home(socket, page_module)
@@ -283,11 +293,22 @@ defmodule MishkaCmsWeb.RuntimeLive do
   end
 
   def handle_params(%{"path" => path} = params, url, socket) do
-    case language_target(socket, path, socket.assigns.current_site) do
+    uri = URI.parse(url)
+    site = socket.assigns.current_site
+
+    case moved_or_language_target(socket, path, uri.path || "/", uri.query || "", site) do
+      {:moved, "/" <> _ = to} ->
+        {:noreply, redirect(socket, to: to)}
+
+      {:moved, to} ->
+        {:noreply, redirect(socket, external: to)}
+
       {:redirect, to} ->
         {:noreply, push_navigate(socket, to: to <> query_of(url))}
 
-      {:serve, _language} ->
+      {:serve, language} ->
+        socket = speaking(socket, language, socket.assigns.current_site.id)
+
         :telemetry.span(
           [:mishka_cms, :runtime, :handle_params],
           %{path: Enum.join(path, "/"), site: socket.assigns.current_site.name},
@@ -368,11 +389,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
                       {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
 
                     {:sign_in, socket} ->
-                      {:noreply, sign_in(socket, params)}
+                      {:noreply, sign_in(socket, params, site_id)}
                   end
 
                 {:sign_in, socket} ->
-                  {:noreply, sign_in(socket, params)}
+                  {:noreply, sign_in(socket, params, site_id)}
 
                 {:visitors_only, socket} ->
                   {:noreply, send_home(socket, page_module)}
@@ -407,6 +428,17 @@ defmodule MishkaCmsWeb.RuntimeLive do
     # Catch-all for non-path params
     # TODO: We can send logger here to dev and production report
     {:noreply, socket}
+  end
+
+  # A REDIRECT RULE ANSWERS A LIVE NAVIGATION TOO. `SiteLookupPlug` serves a site's rules on every
+  # request, but a click from one page to another never makes one — a patch reaches
+  # `handle_params/3`, a navigate remounts through `mount/3` — so both ask the rule here, before the
+  # address picks a page.
+  defp moved_or_language_target(socket, path, address, query, site) do
+    case MishkaCmsCore.Runtime.Redirects.lookup(site.id, address, query) do
+      {to, _status} -> {:moved, to}
+      nil -> language_target(socket, path, site)
+    end
   end
 
   def handle_event(event_name, event_params, socket) do
@@ -734,7 +766,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
           |> PageEditions.editions(site_id)
       end
 
-    language = PageEditions.language(page, captured)
+    language = PageEditions.language(page, captured, site_id)
 
     socket
     |> speaking(language, site_id)
@@ -749,9 +781,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # whose strings come from `dgettext` would answer in the default locale for the whole of a
   # connected session if this were left to `MishkaCmsCore.Runtime.Plugs.LanguagePlug` alone.
   #
-  # `mount/3` seeds it from the session, for the window before a page has resolved and for a page
-  # whose address names no language. `assign_page_language/2` then overwrites it with the language
-  # the page is actually answering in, which is the one the address asked for.
+  # `mount/3` seeds it from the session, then from the address once `language_target/3` has read
+  # it — which a page that sends its visitor to sign in reads before the page has resolved — and
+  # `assign_page_language/2` then overwrites it with the language the page is actually answering in,
+  # which is the one the address asked for.
   defp speaking(socket, language, site_id) do
     language = Languages.remembered(language, site_id) || Languages.primary(site_id)
     Gettext.put_locale(language)
@@ -762,14 +795,15 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # THE SAME QUESTION THE PLUG ANSWERS, asked again because a live navigation never reaches one.
   # It is asked in BOTH callbacks: a `<.link navigate>` remounts, and `mount/3` resolves the address
   # before `handle_params/3` is ever called, so a guard in `handle_params/3` alone was reached only
-  # on a patch — a navigation to an address with no language 404ed inside an open socket.
-  # Without it a link written without a language would 404 inside an open socket, where a fresh
-  # load of that same href redirects — see `MishkaCmsCore.Runtime.Plugs.LanguagePlug`.
+  # on a patch. Without it a link to `/en/blog` on a site that leaves English unprefixed, or to
+  # `/blog` on one that prefixes every language, would 404 inside an open socket, where a fresh load
+  # of that same href redirects — see `MishkaCmsCore.Runtime.Plugs.LanguagePlug`. A live navigation
+  # has no status: the browser's address is replaced either way.
   defp language_target(socket, path, site) do
     remembered = Languages.remembered(socket.assigns[:site_language], site.id)
 
     case LanguagePlug.target(path, {site.name, site.id}, remembered) do
-      {:redirect, to, _language} -> {:redirect, to}
+      {:redirect, to, _status} -> {:redirect, to}
       {:serve, language} -> {:serve, language}
     end
   end
@@ -1093,17 +1127,24 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # to come back to — unless a plugin on `runtime:page:signed_in_only_redirected` redirected the
   # socket elsewhere first.
   defp send_to_sign_in(socket, page_module) do
+    site_id = page_module.__page_information__([:private, :site_id])
+
     socket =
       Hook.call("runtime:page:signed_in_only_redirected", socket,
-        meta: %{
-          site_id: page_module.__page_information__([:private, :site_id]),
-          path: page_module.__page_information__([:page, :path])
-        }
+        meta: %{site_id: site_id, path: page_module.__page_information__([:page, :path])}
       )
 
     if socket.redirected,
       do: socket,
-      else: redirect(socket, to: MishkaCmsCore.Helpers.path(socket, "/auth"))
+      else: redirect(socket, to: sign_in_address(socket, site_id))
+  end
+
+  # THE SIGN-IN PAGE IN THE LANGUAGE THE VISITOR IS READING — the one `speaking/3` read off the
+  # address — so a reader on `/fa/...` signs in on `/fa/auth`, and one in the site's first language
+  # on `/auth` when the site leaves it unprefixed.
+  defp sign_in_address(socket, site_id, query \\ "") do
+    address = SiteLookupPlug.auth_address(socket.assigns[:site_language], site_id)
+    MishkaCmsCore.Helpers.path(socket, address <> query)
   end
 
   # The address the visitor's socket came from: `:x_headers` read the way the endpoint's
@@ -1158,8 +1199,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
     _unreadable -> true
   end
 
-  # BACK TO THE PAGE THAT ASKED, once signed in: `/auth` redirects to the site's sign-in page with
-  # the query kept, that page hands `return_to` on to the sign-in it starts, and
+  # BACK TO THE PAGE THAT ASKED, once signed in: the sign-in page in the visitor's language, the
+  # query kept, hands `return_to` on to the sign-in it starts, and
   # `MishkaCmsCoreWeb.AuthController` redirects there.
   #
   # WHAT TRAVELS IS A SIGNATURE, NOT AN ADDRESS. The address is the route this request already
@@ -1167,12 +1208,13 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # apart from the one a stranger would rather send people to. `~p` refuses to build an address a
   # browser would read as another origin — it raises instead — so what reaches `ReturnTo.sign/2`
   # here is always something it mints a token for.
-  defp sign_in(socket, %{"path" => path} = params) do
+  defp sign_in(socket, %{"path" => path} = params, site_id) do
     return_to = ReturnTo.sign(socket, ~p"/#{path}?#{query_params(params, %{})}")
+    query = "?" <> URI.encode_query(%{"return_to" => return_to})
 
     socket
     |> put_flash(:error, gettext("You must log in to access this page."))
-    |> redirect(to: ~p"/auth?#{[return_to: return_to]}")
+    |> redirect(to: sign_in_address(socket, site_id, query))
   end
 
   defp compile_layout({site, layout_path}, page_site_id) do

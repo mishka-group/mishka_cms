@@ -10,7 +10,7 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
   `async: false` — the install flag, `SiteState`, the routing table, the settings cache and the
   plugin registry are process-global.
   """
-  use MishkaCmsWeb.ConnCase, async: false
+  use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
 
   import MishkaCms.Test.Factory
 
@@ -28,7 +28,7 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
 
   # A unique site name per test: a component's module is named from its site's name, so a reused one
   # renders the previous test's module against a site that test rolled back.
-  setup do
+  setup %{url_mode: url_mode} do
     SiteState.clear()
     name = "docseo#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -45,6 +45,7 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
     {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
+    {:ok, _} = Settings.put("site.language_urls", url_mode, site_id: site.id)
 
     # The extension registers the plugin as it starts; registering it again keeps the one record, and
     # compiling the event here is what makes the chain hold it before the first request.
@@ -54,6 +55,7 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
     on_exit(fn ->
       :persistent_term.erase(:mishka_installed)
       SettingsState.delete(site.id, "site.languages")
+      SettingsState.delete(site.id, "site.language_urls")
       SiteState.clear()
     end)
 
@@ -91,7 +93,11 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
 
   defp attr(doc, selector, name), do: LazyHTML.attribute(LazyHTML.query(doc, selector), name)
 
-  test "a page of a document is answered with its own head", %{site: site, conn: conn} do
+  test "a page of a document is answered with its own head", %{
+    url_mode: url_mode,
+    site: site,
+    conn: conn
+  } do
     document =
       create_workspace!(
         site_id: site.id,
@@ -122,8 +128,13 @@ defmodule MishkaCmsWeb.DocumentPageSeoTest do
       technical_review_status: :approved
     )
 
-    url = Seo.base(site.host) <> "/en/docs/guide/install"
-    doc = conn |> get("/en/docs/guide/install") |> html_response(200) |> LazyHTML.from_document()
+    url = Seo.base(site.host) <> english(url_mode, "/docs/guide/install")
+
+    doc =
+      conn
+      |> get(english(url_mode, "/docs/guide/install"))
+      |> html_response(200)
+      |> LazyHTML.from_document()
 
     assert doc |> LazyHTML.query("title") |> LazyHTML.text() |> String.trim() == "Install"
     assert attr(doc, ~s(link[rel="canonical"]), "href") == [url]

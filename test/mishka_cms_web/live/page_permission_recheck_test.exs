@@ -344,7 +344,7 @@ defmodule MishkaCmsWeb.PagePermissionRecheckTest do
     page =
       create_page!(
         site_id: site.id,
-        path: "/en/members-#{System.unique_integer([:positive])}",
+        path: "/members-#{System.unique_integer([:positive])}",
         template: ~S(<div id="page-body" data-page={@page.path}>page</div>),
         permissions: permissions
       )

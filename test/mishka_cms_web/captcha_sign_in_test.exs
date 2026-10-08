@@ -46,6 +46,8 @@ defmodule MishkaCmsWeb.CaptchaSignInTest do
       })
 
     on_exit(fn -> SiteState.delete(site.id) end)
+    # The addresses below name every language, English included.
+    {:ok, _} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
     seed_auth_pages!(site)
 
     {:ok, site: site}

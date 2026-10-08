@@ -407,7 +407,7 @@ defmodule MishkaCmsWeb.LiveSocketDisconnectTest do
   # A real sign-in through the site's sign-in page and the controller, because putting
   # `live_socket_id` in the session is the controller's job and storing a token by hand would skip it.
   defp sign_in(%User{} = user) do
-    {:ok, view, _html} = live(on_site(), "/en/auth")
+    {:ok, view, _html} = live(on_site(), "/auth")
 
     {:error, {:redirect, %{to: handoff}}} =
       view

@@ -19,7 +19,13 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 
-  alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
+  alias MishkaCmsCore.Runtime.States.{
+    AssetsState,
+    SettingsState,
+    SiteState,
+    WebRunTimeMetaDataState
+  }
+
   alias MishkaCmsCore.Settings
 
   defmodule SentElsewhere do
@@ -60,6 +66,8 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
     snapshot = SettingsState.snapshot()
     :persistent_term.put(:mishka_installed, true)
     Settings.put("cms.offline", false)
+    # The addresses below name every language, English included.
+    Settings.put("site.language_urls", "prefix_all", site_id: site.id)
     WebRunTimeMetaDataState.delete_by_site(site.name)
 
     on_exit(fn ->
@@ -189,13 +197,13 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
     end
 
     test "sends a visitor who is not signed in to the sign-in page" do
-      assert {:error, {:redirect, %{to: "/auth"}}} = live(on_site(), "/en/auth/sign-out")
+      assert {:error, {:redirect, %{to: "/en/auth"}}} = live(on_site(), "/en/auth/sign-out")
     end
 
     test "a live patch onto it sends them away too", %{plain: plain} do
       {:ok, view, _html} = live(on_site(), en(plain))
 
-      assert {:error, {:redirect, %{to: "/auth"}}} = render_patch(view, "/en/auth/sign-out")
+      assert {:error, {:redirect, %{to: "/en/auth"}}} = render_patch(view, "/en/auth/sign-out")
     end
 
     test "a plugin on runtime:page:signed_in_only_redirected hears it and may send them elsewhere",
@@ -239,7 +247,20 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
     end
   end
 
+  # THE BUNDLE IS THE SITE'S COMPILED ONE, which no request builds: the site is given one here, as
+  # its compile would.
   test "an open site's sign-in page loads the site's bundle, as every page does", %{site: site} do
+    :ok =
+      AssetsState.save(%{
+        id: site.name,
+        type: "js",
+        value: "",
+        hash: "signin#{System.unique_integer([:positive])}",
+        updated_at: DateTime.utc_now()
+      })
+
+    on_exit(fn -> AssetsState.delete(site.name, "js") end)
+
     html = on_site() |> get("/en/auth") |> html_response(200)
 
     assert html =~ "/assets/js/#{site.name}/"
