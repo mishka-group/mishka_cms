@@ -4,12 +4,17 @@ import StarterKit from "@tiptap/starter-kit";
 
 import { mount } from "./content_editor.js";
 import config, {
+  BLOCK_MIME,
   COMPONENT_MIME,
   EVENT,
+  TYPED_WAIT,
   contentFrom,
   controllerOf,
   dropComponent,
+  markerDOM,
   markerParagraph,
+  single,
+  whole,
 } from "../vendor/editor_extensions.js";
 
 // THE CONTENT EDITOR AS THE ADMIN RUNS IT: Chelekom's engine, mounted on the markup the Admin
@@ -46,18 +51,18 @@ function fixture(stored) {
       <div id="ed-surface" data-part="surface" data-root-id="ed" data-value-id="ed-value"
            data-format="html" data-debounce="5" data-components="#ed-components"
            data-placeholder="Write here" data-label-id="ed-label"
-           data-label-edit="Settings" data-label-remove="Remove"></div>
+           data-label-edit="Settings" data-label-remove="Remove" data-label-code="Code"
+           data-label-code-error="Not one component"></div>
+      <button type="button" id="ed-components-toggle">Components</button>
       <div id="ed-components">
-        <button type="button" id="card-callout" data-component-card="callout" data-configurable="true">callout</button>
-        <button type="button" id="card-badge" data-component-card="badge" data-configurable="false">badge</button>
-        <div data-content-editor-settings="callout">
-          <input data-content-editor-attr="title" value="Read me" />
-          <select data-content-editor-attr="tone"><option value="warn" selected>warn</option></select>
-          <textarea data-content-editor-inner>Inner <i>text</i></textarea>
-          <button type="button" id="apply" data-content-editor-apply="callout">Apply</button>
+        <div data-role="content-editor-panel" id="ed-panel">
+          <button type="button" id="card-callout" data-component-card="callout" data-configurable="true">callout</button>
+          <button type="button" id="card-badge" data-component-card="badge" data-configurable="false">badge</button>
+          <button type="button" id="block-card" data-block-card="card">Card</button>
         </div>
       </div>
-    </div>`;
+    </div>
+    <p id="elsewhere">Elsewhere</p>`;
 
   const mirror = document.getElementById("ed-value");
   const surface = document.getElementById("ed-surface");
@@ -294,6 +299,7 @@ describe("placing a component", () => {
 
     expect(hook.pushes.find((push) => push.event === "edit").payload).toEqual({
       marker: "[[component callout /]]",
+      serial: 1,
     });
   });
 
@@ -349,27 +355,66 @@ describe("placing a component", () => {
 });
 
 describe("a component's settings", () => {
-  test("Apply sends what they hold, and the block being edited takes the server's marker", async () => {
-    const placed = "[[component callout /]]";
-    const built = '[[component callout title="Read me" tone="warn"]]Inner <i>text</i>[[/component]]';
+  const PLACED = "[[component callout /]]";
 
-    const { root, hook, editor, surface } = await editorFor(`<p>${placed}</p>`, {
-      segments: { segments: [{ type: "component", name: "callout", marker: placed }] },
+  async function editing() {
+    const context = await editorFor(`<p>${PLACED}</p>`, {
+      segments: { segments: [{ type: "component", name: "callout", marker: PLACED }] },
       edit: { ok: true },
-      build: { name: "callout", marker: built },
     });
 
-    surface.querySelector("[data-action='edit']").click();
-    root.querySelector("#apply").click();
-    await settle(30);
+    context.surface.querySelector("[data-action='edit']").click();
+    await settle();
 
-    expect(hook.pushes.find((push) => push.event === "edit").payload).toEqual({ marker: placed });
-    expect(hook.pushes.find((push) => push.event === "build").payload).toEqual({
-      name: "callout",
-      attrs: { title: "Read me", tone: "warn" },
-      inner: "Inner <i>text</i>",
+    return context;
+  }
+
+  test("Settings asks the server to open them, numbering the edit", async () => {
+    const { hook } = await editing();
+
+    expect(hook.pushes.find((push) => push.event === "edit").payload).toEqual({
+      marker: PLACED,
+      serial: 1,
     });
-    expect(components(editor).map((block) => block.marker)).toEqual([built]);
+  });
+
+  test("the block being edited takes each marker the settings write, the focus left alone", async () => {
+    const { hook, editor, root } = await editing();
+    const typing = document.createElement("input");
+    root.after(typing);
+    typing.focus();
+
+    const first = '[[component callout title="A" /]]';
+    const second = '[[component callout title="AB" /]]';
+
+    hook.emit(EVENT, { id: "ed", serial: 1, applied: { name: "callout", marker: first } });
+    hook.emit(EVENT, { id: "ed", serial: 1, applied: { name: "callout", marker: second } });
+
+    expect(components(editor).map((block) => block.marker)).toEqual([second]);
+    expect(document.activeElement).toBe(typing);
+  });
+
+  test("what an earlier edit's settings write, or another editor's, changes nothing", async () => {
+    const { hook, editor } = await editing();
+    const late = '[[component callout title="late" /]]';
+
+    hook.emit(EVENT, { id: "ed", serial: 0, applied: { name: "callout", marker: late } });
+    hook.emit(EVENT, { id: "other", serial: 1, applied: { name: "callout", marker: late } });
+
+    expect(components(editor).map((block) => block.marker)).toEqual([PLACED]);
+  });
+
+  test("closed, they write into the block no more", async () => {
+    const { hook, editor } = await editing();
+
+    hook.emit(EVENT, { id: "ed", serial: 1, done: true });
+    hook.emit(EVENT, {
+      id: "ed",
+      serial: 1,
+      applied: { name: "callout", marker: '[[component callout title="x" /]]' },
+    });
+
+    expect(components(editor).map((block) => block.marker)).toEqual([PLACED]);
   });
 
   test("Remove takes the block out", async () => {
@@ -380,6 +425,322 @@ describe("a component's settings", () => {
     surface.querySelector("[data-action='remove']").click();
 
     expect(components(editor)).toEqual([]);
+  });
+});
+
+describe("a component as code", () => {
+  const PLACED = "[[component callout /]]";
+  const WRITTEN = '[[component callout title="By hand" /]]';
+
+  async function coded(answer) {
+    const context = await editorFor(`<p>${PLACED}</p>`, {
+      segments: (payload) =>
+        payload.html === `<p>${PLACED}</p>`
+          ? { segments: [{ type: "component", name: "callout", marker: PLACED }] }
+          : answer,
+    });
+
+    context.surface.querySelector("[data-action='code']").click();
+    await settle();
+
+    return { ...context, code: context.surface.querySelector("[data-role='content-component-code']") };
+  }
+
+  test("Code shows the block's marker, to change by hand", async () => {
+    const { code, surface } = await coded({});
+
+    expect(code.hidden).toBe(false);
+    expect(code.value).toBe(PLACED);
+    expect(surface.querySelector("[data-action='code']").getAttribute("aria-pressed")).toBe("true");
+    expect(surface.querySelector("[data-role='content-component']").hasAttribute("data-code")).toBe(
+      true,
+    );
+  });
+
+  test("pressed again, the server reads what was written and the block takes it", async () => {
+    const { code, surface, editor, hook } = await coded({
+      segments: [{ type: "component", name: "callout", marker: WRITTEN }],
+    });
+
+    code.value = WRITTEN;
+    surface.querySelector("[data-action='code']").click();
+    await settle();
+
+    expect(hook.pushes.at(-1)).toEqual({
+      target: "#ed-components",
+      event: "segments",
+      payload: { html: WRITTEN },
+    });
+    expect(components(editor).map((block) => block.marker)).toEqual([WRITTEN]);
+    expect(code.hidden).toBe(true);
+  });
+
+  test("what is not one component is said so, and the code stays", async () => {
+    const { code, surface, editor } = await coded({
+      segments: [{ type: "html", html: "[[component callout" }],
+    });
+
+    code.value = "[[component callout";
+    surface.querySelector("[data-action='code']").click();
+    await settle();
+
+    const fault = surface.querySelector("[data-role='content-component-code-error']");
+    expect(fault.hidden).toBe(false);
+    expect(fault.textContent).toBe("Not one component");
+    expect(code.hidden).toBe(false);
+    expect(components(editor).map((block) => block.marker)).toEqual([PLACED]);
+  });
+
+  test("unchanged, it closes without asking", async () => {
+    const { code, surface, hook } = await coded({});
+    const asked = hook.pushes.length;
+
+    surface.querySelector("[data-action='code']").click();
+    await settle();
+
+    expect(code.hidden).toBe(true);
+    expect(hook.pushes.length).toBe(asked);
+  });
+});
+
+const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
+describe("a marker typed into the text", () => {
+  const TYPED = '[[component badge size="small" /]]';
+
+  test("whole and standing alone, becomes a block once the text rests", async () => {
+    const { editor, hook } = await editorFor("<p>Intro</p>", {
+      segments: (payload) =>
+        payload.html.includes(TYPED)
+          ? { segments: [{ type: "component", name: "badge", marker: TYPED }] }
+          : { segments: [] },
+    });
+
+    editor.commands.insertContentAt(editor.state.doc.content.size, `<p>${TYPED}</p>`);
+    await settle(TYPED_WAIT - 50);
+    expect(hook.pushes.filter((push) => push.event === "segments").length).toBe(1);
+
+    await settle(100);
+
+    expect(hook.pushes.at(-1).payload).toEqual({ html: `<p dir="auto">${TYPED}</p>` });
+    expect(components(editor).map((block) => block.marker)).toEqual([TYPED]);
+    expect(editor.getHTML()).toMatch(new RegExp(`^<p dir="auto">Intro</p><p>${escaped(TYPED)}</p>`));
+  });
+
+  test("half written, or sharing its line with text, stays text", async () => {
+    const { editor, hook } = await editorFor("<p>Intro</p>", { segments: { segments: [] } });
+
+    editor.commands.insertContentAt(editor.state.doc.content.size, "<p>[[component badge</p>");
+    editor.commands.insertContentAt(editor.state.doc.content.size, `<p>See ${TYPED}</p>`);
+    await settle(TYPED_WAIT + 50);
+
+    expect(hook.pushes.filter((push) => push.event === "segments").length).toBe(1);
+    expect(components(editor)).toEqual([]);
+  });
+
+  test("one the server does not read as a component stays text", async () => {
+    const { editor } = await editorFor("<p>Intro</p>", {
+      segments: { segments: [{ type: "html", html: `<p>${TYPED}</p>` }] },
+    });
+
+    editor.commands.insertContentAt(editor.state.doc.content.size, `<p>${TYPED}</p>`);
+    await settle(TYPED_WAIT + 50);
+
+    expect(components(editor)).toEqual([]);
+  });
+
+  test("whole/1 and single/1 are what decide", () => {
+    expect(whole(` ${TYPED} `)).toBe(true);
+    expect(whole("[[component a]]x[[/component]]")).toBe(true);
+    expect(whole("[[component a]]x")).toBe(false);
+    expect(whole(`x ${TYPED}`)).toBe(false);
+
+    expect(single([{ type: "component", name: "a", marker: "m" }])).toEqual({ name: "a", marker: "m" });
+    expect(
+      single([
+        { type: "html", html: "<p> " },
+        { type: "component", name: "a", marker: "m" },
+        { type: "html", html: "</p>" },
+      ]),
+    ).toEqual({ name: "a", marker: "m" });
+    expect(single([{ type: "html", html: "x" }, { type: "component", name: "a", marker: "m" }])).toBe(
+      null,
+    );
+    expect(single([])).toBe(null);
+  });
+});
+
+describe("closing what is open", () => {
+  test("a press outside the palette closes it; one inside it, or on its button, does not", async () => {
+    const { hook } = await editorFor("<p>Hi</p>", { segments: { segments: [] } });
+    const closes = () => hook.pushes.filter((push) => push.event === "close").length;
+
+    document.getElementById("card-badge").dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    document
+      .getElementById("ed-components-toggle")
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(closes()).toBe(0);
+
+    document.getElementById("elsewhere").dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(closes()).toBe(1);
+  });
+
+  test("a press outside the settings drawer closes it; one inside it does not", async () => {
+    const { hook } = await editorFor("<p>Hi</p>", { segments: { segments: [] } });
+    document.getElementById("ed-panel").remove();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<aside data-role="content-editor-drawer" data-editor="ed"><input id="field" /></aside>',
+    );
+    const done = () => hook.pushes.filter((push) => push.event === "settings_done").length;
+
+    document.getElementById("field").dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(done()).toBe(0);
+
+    document.getElementById("elsewhere").dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(done()).toBe(1);
+  });
+
+  test("Escape closes the drawer first, then the palette", async () => {
+    const { hook } = await editorFor("<p>Hi</p>", { segments: { segments: [] } });
+    const escape = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    escape();
+    expect(hook.pushes.at(-1).event).toBe("close");
+
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<aside data-role="content-editor-drawer" data-editor="ed"></aside>',
+    );
+    escape();
+    expect(hook.pushes.at(-1).event).toBe("settings_done");
+  });
+});
+
+describe("ready blocks", () => {
+  const BLOCK = "[[component card]][[component card-title /]][[/component]]";
+
+  test("a block is built by the server, placed, and opened to be filled in", async () => {
+    const { root, hook, editor } = await editorFor("<p>Hi</p>", {
+      segments: { segments: [] },
+      block: { name: "card", marker: BLOCK },
+      edit: { ok: true },
+    });
+
+    root.querySelector("#block-card").click();
+    await settle(30);
+
+    expect(hook.pushes.find((push) => push.event === "block").payload).toEqual({ id: "card" });
+    expect(components(editor).map((block) => block.marker)).toEqual([BLOCK]);
+    expect(hook.pushes.find((push) => push.event === "edit").payload.marker).toBe(BLOCK);
+  });
+
+  test("two placed one after the other both stay, the second below the first", async () => {
+    let n = 0;
+    const { root, editor } = await editorFor("<p>Hi</p>", {
+      segments: { segments: [] },
+      block: () => ({ name: "card", marker: `[[component card n="${(n += 1)}" /]]` }),
+      edit: { ok: true },
+    });
+
+    root.querySelector("#block-card").click();
+    await settle(30);
+    root.querySelector("#block-card").click();
+    await settle(30);
+
+    expect(components(editor).map((block) => block.marker)).toEqual([
+      '[[component card n="1" /]]',
+      '[[component card n="2" /]]',
+    ]);
+    expect(editor.state.selection.empty).toBe(true);
+  });
+
+  test("dragging a block carries its id, and dropping it places it where it fell", async () => {
+    const { root, editor } = await editorFor("<p>One</p><p>Two</p>", {
+      segments: { segments: [] },
+      block: { name: "card", marker: BLOCK },
+      edit: { ok: true },
+    });
+
+    const data = {};
+    const start = new Event("dragstart", { bubbles: true });
+    start.dataTransfer = { setData: (type, value) => (data[type] = value) };
+    root.querySelector("#block-card").dispatchEvent(start);
+    expect(data[BLOCK_MIME]).toBe("card");
+
+    const event = {
+      dataTransfer: { types: [BLOCK_MIME], getData: (type) => data[type] || "" },
+      clientX: 0,
+      clientY: 0,
+      preventDefault: vi.fn(),
+    };
+
+    expect(dropComponent(editor, { posAtCoords: () => ({ pos: 5 }) }, event)).toBe(true);
+    await settle(30);
+
+    expect(components(editor)[0]).toEqual({ pos: 5, name: "card", marker: BLOCK });
+  });
+
+  test("a marker holding block markup is written outside any paragraph", () => {
+    const marker = "[[component card]]<p>Inside</p>[[/component]]";
+    const holder = document.createElement("div");
+    holder.append(markerDOM(marker));
+
+    expect(holder.innerHTML).toBe(marker);
+    expect(markerDOM("[[component a /]]").outerHTML).toBe("<p>[[component a /]]</p>");
+  });
+});
+
+describe("a component dropped on a placed one", () => {
+  const ROW = "[[component row]][[/component]]";
+  const NESTED = "[[component row]][[component badge /]][[/component]]";
+
+  async function dropped(answers) {
+    const context = await editorFor(`<p>${ROW}</p>`, {
+      segments: { segments: [{ type: "component", name: "row", marker: ROW }] },
+      ...answers,
+    });
+
+    const block = context.surface.querySelector("[data-role='content-component-preview']");
+    const event = {
+      dataTransfer: { types: [COMPONENT_MIME], getData: () => "badge" },
+      target: block,
+      clientX: 0,
+      clientY: 0,
+      preventDefault: vi.fn(),
+    };
+
+    // jsdom lays nothing out, so the drop lands nowhere in particular; the block it is over is the
+    // one whose element the event came from.
+    const view = {
+      posAtCoords: () => null,
+      nodeDOM: (pos) => context.editor.view.nodeDOM(pos),
+    };
+
+    dropComponent(context.editor, view, event);
+    await settle(30);
+
+    return context;
+  }
+
+  test("goes inside it, as the server writes it", async () => {
+    const { hook, editor } = await dropped({ nest: { name: "row", marker: NESTED } });
+
+    expect(hook.pushes.find((push) => push.event === "nest").payload).toEqual({
+      marker: ROW,
+      name: "badge",
+    });
+    expect(components(editor).map((block) => block.marker)).toEqual([NESTED]);
+  });
+
+  test("is placed beside it when it holds nothing", async () => {
+    const { hook, editor } = await dropped({
+      nest: { error: "holds nothing" },
+      build: { name: "badge", marker: "[[component badge /]]" },
+    });
+
+    expect(hook.pushes.some((push) => push.event === "build")).toBe(true);
+    expect(components(editor).map((block) => block.marker)).toContain("[[component badge /]]");
   });
 });
 

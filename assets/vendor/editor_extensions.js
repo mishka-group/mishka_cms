@@ -1,7 +1,8 @@
 // Editor configuration — the CMS's own, in the file Mishka Chelekom's headless `editor` engine
 // (`editor.js` beside it, copied unchanged) imports as its extensions. Everything the CMS adds to
-// the engine is here: the component block, the palette's click and drop, the block handle, the
-// toolbar commands the engine has no entry for, and the questions an editor asks the server.
+// the engine is here: the component block and its code view, the palette's click and drop, a marker
+// typed into the text becoming a block, the block handle, the toolbar commands the engine has no
+// entry for, and the questions an editor asks the server.
 //
 // The engine builds every editor from this one module, so what belongs to one editor is read off
 // its surface's data-* and kept on that editor's `ContentController`:
@@ -11,15 +12,23 @@
 //   data-components  the server half — `ContentComponentPicker` — every question is pushed to
 //   data-label-*     the words this file shows, already in the reader's language
 //
+// A component's settings are a drawer the server draws at the side of the page, outside the editor;
+// it writes each change back as `applied`, which the block being edited takes.
+//
 // THE SERVER IS THE ONLY READER AND WRITER OF THE MARKER. A component block holds its marker as an
 // opaque string the server wrote; this file never reads one apart or puts one together.
 
 import { Extension, Node, getHTMLFromFragment } from "@tiptap/core";
+import { Fragment } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import Image from "@tiptap/extension-image";
 
 export const COMPONENT_MIME = "application/x-mishka-component";
+export const BLOCK_MIME = "application/x-mishka-block";
 export const EVENT = "mishka:content_editor";
+
+// How long the text rests before a marker typed into it is read.
+export const TYPED_WAIT = 600;
 
 const hooks = new WeakMap();
 const controllers = new WeakMap();
@@ -60,6 +69,25 @@ export function markerParagraph(marker) {
   return paragraph;
 }
 
+// A marker holding block markup — a paragraph or a list inside a component — cannot sit in a
+// paragraph, which would be taken apart around it, so it is written outside any element, as the
+// server also reads a block.
+const BLOCK_MARKUP = /<(p|div|h[1-6]|ul|ol|li|dl|blockquote|pre|table|section|article|figure|hr|header|footer|aside|nav)[\s>/]/i;
+
+export function markerDOM(marker) {
+  if (!BLOCK_MARKUP.test(marker || "")) return markerParagraph(marker);
+
+  inert = inert || document.implementation.createHTMLDocument("");
+
+  const holder = inert.createElement("div");
+  holder.innerHTML = marker;
+
+  const fragment = inert.createDocumentFragment();
+  fragment.append(...holder.childNodes);
+
+  return fragment;
+}
+
 export function escapeAttribute(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -97,6 +125,7 @@ const SVG = 'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="curren
 const ICONS = {
   edit: `<svg ${SVG}><path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z"/><path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z"/></svg>`,
   remove: `<svg ${SVG}><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd"/></svg>`,
+  code: `<svg ${SVG}><path fill-rule="evenodd" d="M6.28 5.22a.75.75 0 0 1 0 1.06L2.56 10l3.72 3.72a.75.75 0 0 1-1.06 1.06L.97 10.53a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Zm7.44 0a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 0 1 0-1.06ZM11.377 2.011a.75.75 0 0 1 .612.867l-2.5 14.5a.75.75 0 0 1-1.478-.255l2.5-14.5a.75.75 0 0 1 .866-.612Z" clip-rule="evenodd"/></svg>`,
   grip: `<svg ${SVG}><circle cx="7" cy="5" r="1.4"/><circle cx="13" cy="5" r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="7" cy="15" r="1.4"/><circle cx="13" cy="15" r="1.4"/></svg>`,
 };
 
@@ -114,9 +143,12 @@ function iconButton(action, label, icon) {
   return button;
 }
 
-// The block in the editor: its name, Settings and Remove, and the component drawn as the server
-// previews it. The preview is shown and never edited, and `inert` keeps every click and binding in
-// it from reaching the page.
+// The block in the editor: its name, Code, Settings and Remove, and the component drawn as the
+// server previews it. The preview is shown and never edited, and `inert` keeps every click and
+// binding in it from reaching the page.
+//
+// CODE SHOWS THE MARKER ITSELF, to change by hand; pressed again, the server reads what was written
+// and the block takes it — or, when it is not one component, says so and stays on the code.
 function componentView({ node, getPos, editor }) {
   const surface = editor.options.element;
   const labels = surface ? surface.dataset : {};
@@ -132,20 +164,73 @@ function componentView({ node, getPos, editor }) {
   name.dataset.role = "content-component-name";
   name.dir = "ltr";
 
+  const code = iconButton("code", labels.labelCode, ICONS.code);
   const edit = iconButton("edit", labels.labelEdit, ICONS.edit);
   const remove = iconButton("remove", labels.labelRemove, ICONS.remove);
+  code.setAttribute("aria-pressed", "false");
 
   const preview = document.createElement("div");
   preview.dataset.role = "content-component-preview";
   preview.setAttribute("inert", "");
 
-  head.append(name, edit, remove);
-  dom.append(head, preview);
+  const source = document.createElement("textarea");
+  source.dataset.role = "content-component-code";
+  source.dir = "ltr";
+  source.spellcheck = false;
+  source.rows = 4;
+  source.hidden = true;
+  if (labels.labelCode) source.setAttribute("aria-label", labels.labelCode);
+
+  const fault = document.createElement("p");
+  fault.dataset.role = "content-component-code-error";
+  fault.hidden = true;
+
+  head.append(name, code, edit, remove);
+  dom.append(head, preview, source, fault);
 
   let painted = null;
 
+  const coding = (on) => {
+    source.hidden = !on;
+    fault.hidden = true;
+    code.setAttribute("aria-pressed", String(on));
+    toggle(dom, "data-code", on);
+  };
+
   const view = {
     dom,
+
+    coding() {
+      return dom.hasAttribute("data-code");
+    },
+
+    code() {
+      if (!view.coding()) {
+        source.value = node.attrs.marker;
+        coding(true);
+        source.focus();
+        return Promise.resolve(true);
+      }
+
+      const written = source.value.trim();
+      if (written === node.attrs.marker) {
+        coding(false);
+        return Promise.resolve(true);
+      }
+
+      const controller = controllerOf(surface);
+      if (!controller) return Promise.resolve(false);
+
+      return controller.rewrite(getPos(), node.attrs.marker, written).then((done) => {
+        if (done) coding(false);
+        else {
+          fault.textContent = labels.labelCodeError || "";
+          fault.hidden = false;
+        }
+
+        return done;
+      });
+    },
 
     paint() {
       name.textContent = node.attrs.name;
@@ -166,7 +251,7 @@ function componentView({ node, getPos, editor }) {
     },
 
     stopEvent(event) {
-      return !!(event.target && event.target.closest && event.target.closest("button"));
+      return !!(event.target && event.target.closest && event.target.closest("button, textarea"));
     },
 
     ignoreMutation() {
@@ -178,6 +263,11 @@ function componentView({ node, getPos, editor }) {
       if (controller) controller.views.delete(view);
     },
   };
+
+  code.addEventListener("click", (event) => {
+    event.preventDefault();
+    view.code();
+  });
 
   edit.addEventListener("click", (event) => {
     event.preventDefault();
@@ -227,7 +317,7 @@ export const MishkaComponent = Node.create({
   },
 
   renderHTML({ node }) {
-    return markerParagraph(node.attrs.marker);
+    return markerDOM(node.attrs.marker);
   },
 
   addNodeView() {
@@ -289,14 +379,20 @@ export class ContentController {
     this.previews = new Map();
     this.views = new Set();
     this.editing = null;
+    this.serial = 0;
+    this.scanning = null;
   }
 
   start() {
     this.onClick = (event) => this.click(event);
     this.onDragStart = (event) => this.dragStart(event);
+    this.onOutside = (event) => this.outside(event);
+    this.onKey = (event) => this.key(event);
 
     this.root.addEventListener("click", this.onClick);
     this.root.addEventListener("dragstart", this.onDragStart);
+    document.addEventListener("pointerdown", this.onOutside, true);
+    document.addEventListener("keydown", this.onKey);
     this.ref = this.hook.handleEvent(EVENT, (payload) => this.receive(payload));
 
     controllers.set(this.surface, this);
@@ -308,7 +404,10 @@ export class ContentController {
   stop() {
     this.root.removeEventListener("click", this.onClick);
     this.root.removeEventListener("dragstart", this.onDragStart);
+    document.removeEventListener("pointerdown", this.onOutside, true);
+    document.removeEventListener("keydown", this.onKey);
     if (this.ref) this.hook.removeHandleEvent(this.ref);
+    clearTimeout(this.scanning);
 
     controllers.delete(this.surface);
     this.views.clear();
@@ -346,10 +445,51 @@ export class ContentController {
 
     for (const { marker, preview } of payload.previews || []) this.previews.set(marker, preview || "");
     for (const view of this.views) view.paint();
+
+    const current = this.editing && payload.serial === this.editing.serial;
+
+    if (payload.applied && current) this.follow(payload.applied);
+    if (payload.done && current) this.editing = null;
   }
 
   previewOf(marker) {
     return this.previews.get(marker);
+  }
+
+  panel() {
+    return this.root.querySelector("[data-role='content-editor-panel']");
+  }
+
+  drawer() {
+    const id = this.surface.dataset.rootId;
+
+    for (const drawer of document.querySelectorAll("[data-role='content-editor-drawer']"))
+      if (drawer.dataset.editor === id) return drawer;
+
+    return null;
+  }
+
+  // A PRESS ANYWHERE ELSE CLOSES what is open: the palette, unless it was its own button that was
+  // pressed, which toggles it; and the settings drawer, whose changes are already in the content.
+  outside(event) {
+    const target = event.target;
+    if (!target || !target.closest) return;
+
+    const panel = this.panel();
+    const toggle = this.target && document.getElementById(`${this.target.slice(1)}-toggle`);
+
+    if (panel && !panel.contains(target) && !(toggle && toggle.contains(target)))
+      this.request("close", {});
+
+    const drawer = this.drawer();
+    if (drawer && !drawer.contains(target)) this.request("settings_done", {});
+  }
+
+  key(event) {
+    if (event.key !== "Escape") return;
+
+    if (this.drawer()) this.request("settings_done", {});
+    else if (this.panel()) this.request("close", {});
   }
 
   click(event) {
@@ -359,10 +499,10 @@ export class ContentController {
       return this.place(card.dataset.componentCard, null);
     }
 
-    const apply = event.target.closest("[data-content-editor-apply]");
-    if (apply) {
+    const block = event.target.closest("[data-block-card]");
+    if (block) {
       event.preventDefault();
-      return this.apply(apply);
+      return this.placeBlock(block.dataset.blockCard, null);
     }
 
     const tool = event.target.closest("[data-editor-command]");
@@ -374,10 +514,12 @@ export class ContentController {
   }
 
   dragStart(event) {
-    const card = event.target.closest && event.target.closest("[data-component-card]");
+    const card = event.target.closest && event.target.closest("[data-component-card], [data-block-card]");
     if (!card || !event.dataTransfer) return;
 
-    event.dataTransfer.setData(COMPONENT_MIME, card.dataset.componentCard);
+    if (card.dataset.blockCard) event.dataTransfer.setData(BLOCK_MIME, card.dataset.blockCard);
+    else event.dataTransfer.setData(COMPONENT_MIME, card.dataset.componentCard);
+
     event.dataTransfer.effectAllowed = "copy";
   }
 
@@ -404,6 +546,32 @@ export class ContentController {
     });
   }
 
+  // A ready-made block, placed and opened: it is there to have its words changed.
+  placeBlock(id, at) {
+    return this.request("block", { id }).then((reply) => {
+      if (!reply.marker) return null;
+
+      const pos = this.insert(reply, at);
+      if (pos !== null) this.edit(pos, reply.marker);
+
+      return pos;
+    });
+  }
+
+  // A component dropped on a placed one goes inside it, when that one holds content; otherwise it
+  // is placed where it fell.
+  nest(pos, marker, name, at) {
+    return this.request("nest", { marker, name }).then((reply) => {
+      if (!reply.marker) return this.place(name, at);
+
+      const found = this.locate(marker, pos);
+      if (found === null) return null;
+
+      this.markup(found, reply);
+      return found;
+    });
+  }
+
   insert({ name, marker }, at) {
     const node = { type: "mishkaComponent", attrs: { name, marker } };
     const near = typeof at === "number" ? at : this.editor.state.selection.from;
@@ -411,7 +579,27 @@ export class ContentController {
 
     (typeof at === "number" ? chain.insertContentAt(at, node) : chain.insertContent(node)).run();
 
-    return this.locate(marker, near);
+    const pos = this.locate(marker, near);
+    if (pos !== null) this.after(pos);
+
+    return pos;
+  }
+
+  // THE CURSOR GOES ON THE LINE AFTER A BLOCK JUST PLACED — one is added when none follows — so the
+  // next thing written or placed lands below it. Left on the block, it would be selected, and the
+  // next block placed would take its place.
+  after(pos) {
+    const { state, view } = this.editor;
+    const node = state.doc.nodeAt(pos);
+    if (!node) return;
+
+    const end = pos + node.nodeSize;
+    const next = state.doc.nodeAt(end);
+    let tr = state.tr;
+
+    if (!next || !next.isTextblock) tr = tr.insert(end, state.schema.nodes.paragraph.create());
+
+    view.dispatch(tr.setSelection(TextSelection.create(tr.doc, end + 1)));
   }
 
   // The block holding `marker` nearest to `near`.
@@ -426,47 +614,82 @@ export class ContentController {
     return found;
   }
 
-  edit(pos, marker) {
-    this.editing = { pos, marker };
-
-    return this.request("edit", { marker });
+  // The block at `pos` takes another marker, without moving the focus — the author may be typing
+  // in the settings.
+  markup(pos, { name, marker }) {
+    const { state, view } = this.editor;
+    view.dispatch(state.tr.setNodeMarkup(pos, undefined, { name, marker }));
   }
 
-  // Apply in the settings: what they hold, sent as the component to build. The block being edited
-  // takes the answer; with none, it is placed at the cursor.
-  apply(button) {
-    const settings = button.closest("[data-content-editor-settings]") || this.root;
-    const attrs = {};
+  edit(pos, marker) {
+    this.serial += 1;
+    this.editing = { serial: this.serial, pos, marker };
 
-    for (const input of settings.querySelectorAll("[data-content-editor-attr]"))
-      attrs[input.dataset.contentEditorAttr] = input.value;
+    return this.request("edit", { marker, serial: this.serial });
+  }
 
-    const inner = settings.querySelector("[data-content-editor-inner]");
-    const name = button.dataset.contentEditorApply;
+  // The block being edited, as the settings now write it.
+  follow({ name, marker }) {
+    const editing = this.editing;
+    const pos = this.locate(editing.marker, editing.pos);
 
-    return this.request("build", { name, attrs, inner: inner ? inner.value : "" }).then((reply) => {
-      if (reply.marker) this.replace(reply);
-      return reply;
+    if (pos === null) {
+      this.editing = null;
+      return;
+    }
+
+    this.markup(pos, { name, marker });
+    this.editing = { ...editing, pos, marker };
+  }
+
+  // What the code view holds, read by the server: one component takes the block's place.
+  rewrite(pos, marker, written) {
+    return this.request("segments", { html: written }).then(({ segments }) => {
+      const one = single(segments);
+      if (!one) return false;
+
+      const found = this.locate(marker, typeof pos === "number" ? pos : 0);
+      if (found === null) return false;
+
+      this.markup(found, one);
+      return true;
     });
   }
 
-  replace({ name, marker }) {
-    const editing = this.editing;
-    this.editing = null;
+  // A MARKER TYPED OR PASTED INTO THE TEXT becomes a block once it is whole and the text has rested:
+  // a paragraph holding a marker and nothing else is sent to the server, and when it reads it as one
+  // component that paragraph is the block. A marker sharing its line with other text stays text.
+  scan() {
+    clearTimeout(this.scanning);
+    this.scanning = setTimeout(() => this.convert(), TYPED_WAIT);
+  }
 
-    const pos = editing ? this.locate(editing.marker, editing.pos) : null;
-    if (pos === null) return this.insert({ name, marker }, null);
+  convert() {
+    if (this.editor.isDestroyed) return Promise.resolve();
 
-    this.editor
-      .chain()
-      .focus()
-      .command(({ tr }) => {
-        tr.setNodeMarkup(pos, undefined, { name, marker });
-        return true;
-      })
-      .run();
+    const { doc, schema } = this.editor.state;
+    const found = [];
 
-    return pos;
+    doc.forEach((node, pos) => {
+      if (node.type.name !== "paragraph" || !whole(node.textContent)) return;
+      found.push({ pos, node, html: getHTMLFromFragment(Fragment.from(node), schema) });
+    });
+
+    return found.reduceRight(
+      (done, { pos, node, html }) =>
+        done.then(() =>
+          this.request("segments", { html }).then(({ segments }) => {
+            const one = single(segments);
+            if (!one || this.editor.isDestroyed || this.editor.state.doc.nodeAt(pos) !== node) return;
+
+            const block = this.editor.schema.nodes.mishkaComponent.create(one);
+            const tr = this.editor.state.tr.replaceWith(pos, pos + node.nodeSize, block);
+
+            this.editor.view.dispatch(tr);
+          }),
+        ),
+      Promise.resolve(),
+    );
   }
 
   link() {
@@ -490,6 +713,31 @@ export class ContentController {
   }
 }
 
+// Text that is one marker from end to end: an opening one, then the closing of a self-closing
+// marker or of a component. Whether it reads as one is the server's to say.
+export function whole(text) {
+  const trimmed = (text || "").trim();
+
+  return (
+    trimmed.startsWith("[[component ") &&
+    (trimmed.endsWith("/]]") || trimmed.endsWith("[[/component]]"))
+  );
+}
+
+// The one component segments hold, with nothing but spacing around it — or `null`.
+export function single(segments) {
+  const parts = segments || [];
+  const components = parts.filter((segment) => segment.type === "component");
+  const text = parts
+    .filter((segment) => segment.type !== "component")
+    .map((segment) => (segment.html || "").replace(/<\/?p[^>]*>/gi, "").trim())
+    .join("");
+
+  if (components.length !== 1 || text !== "") return null;
+
+  return { name: components[0].name, marker: components[0].marker };
+}
+
 // The editable element is the textbox a reader reaches, so it carries the field's label — the id
 // the surface names in `data-label-id` — and says it takes more than one line.
 export function accessibleName(surface) {
@@ -500,10 +748,14 @@ export function accessibleName(surface) {
     : { "aria-multiline": "true" };
 }
 
-// A palette card dropped into the text is placed where it fell.
+// A palette card dropped into the text is placed where it fell — or, a component dropped on a
+// placed one, inside it.
 export function dropComponent(editor, view, event) {
   const transfer = event.dataTransfer;
-  if (!transfer || !Array.from(transfer.types || []).includes(COMPONENT_MIME)) return false;
+  const types = Array.from((transfer && transfer.types) || []);
+  const block = types.includes(BLOCK_MIME);
+
+  if (!block && !types.includes(COMPONENT_MIME)) return false;
 
   const controller = controllers.get(editor.options.element);
   if (!controller) return false;
@@ -511,9 +763,35 @@ export function dropComponent(editor, view, event) {
   event.preventDefault();
 
   const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
-  controller.place(transfer.getData(COMPONENT_MIME), at ? at.pos : null);
+  const pos = at ? at.pos : null;
+
+  if (block) {
+    controller.placeBlock(transfer.getData(BLOCK_MIME), pos);
+    return true;
+  }
+
+  const name = transfer.getData(COMPONENT_MIME);
+  const onto = placedUnder(editor, view, event.target);
+
+  if (onto) controller.nest(onto.pos, onto.marker, name, pos);
+  else controller.place(name, pos);
 
   return true;
+}
+
+// The placed component whose block `element` is in.
+function placedUnder(editor, view, element) {
+  const dom = element && element.closest && element.closest("[data-role='content-component']");
+  if (!dom) return null;
+
+  let found = null;
+
+  editor.state.doc.descendants((node, pos) => {
+    if (found || node.type.name !== "mishkaComponent") return;
+    if (view.nodeDOM(pos) === dom) found = { pos, marker: node.attrs.marker };
+  });
+
+  return found;
 }
 
 export const ContentBridge = Extension.create({
@@ -535,6 +813,11 @@ export const ContentBridge = Extension.create({
 
   onTransaction() {
     repaint(this.editor.options.element);
+  },
+
+  onUpdate() {
+    const controller = controllers.get(this.editor.options.element);
+    if (controller) controller.scan();
   },
 
   onDestroy() {
