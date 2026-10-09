@@ -479,6 +479,39 @@ describe("a component's settings", () => {
     expect(components(editor).map((block) => block.marker)).toEqual([PLACED]);
   });
 
+  test("a double click on the block opens them, as Settings does", async () => {
+    const { hook, surface } = await editorFor(`<p>${PLACED}</p>`, {
+      segments: { segments: [{ type: "component", name: "callout", marker: PLACED }] },
+      edit: { ok: true },
+    });
+
+    const block = surface.querySelector("[data-role='content-component']");
+    block.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(hook.pushes.filter((push) => push.event === "edit").map((push) => push.payload)).toEqual(
+      [{ marker: PLACED, serial: 1 }],
+    );
+  });
+
+  test("a double click on its buttons, or on its open code, opens nothing", async () => {
+    const { hook, surface } = await editorFor(`<p>${PLACED}</p>`, {
+      segments: { segments: [{ type: "component", name: "callout", marker: PLACED }] },
+      edit: { ok: true },
+    });
+
+    const twice = (el) =>
+      el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+
+    twice(surface.querySelector("[data-action='remove']"));
+    surface.querySelector("[data-action='code']").click();
+    await settle();
+    twice(surface.querySelector("[data-role='content-component']"));
+    await settle();
+
+    expect(hook.pushes.filter((push) => push.event === "edit")).toEqual([]);
+  });
+
   test("Remove takes the block out", async () => {
     const { surface, editor } = await editorFor(`<p>${MARKER}</p>`, {
       segments: { segments: [{ type: "component", name: "callout", marker: MARKER }] },

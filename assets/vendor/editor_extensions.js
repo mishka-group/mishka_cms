@@ -179,7 +179,8 @@ function iconButton(action, label, icon) {
 
 // The block in the editor: its name, Code, Settings and Remove, and the component drawn as the
 // server previews it. The preview is shown and never edited, and `inert` keeps every click and
-// binding in it from reaching the page.
+// binding in it from reaching the page. A double click on the block opens its settings, as
+// Settings does — not on its own buttons, nor while its code is open.
 //
 // THE PREVIEW IS DRAWN IN A SHADOW ROOT, with the site's stylesheet the server names (`styles`):
 // the admin's own holds none of a kit's colours or variants, and the site's must not restyle the
@@ -315,10 +316,17 @@ function componentView({ node, getPos, editor }) {
     view.code();
   });
 
-  edit.addEventListener("click", (event) => {
+  const settings = (event) => {
     event.preventDefault();
     const controller = controllerOf(surface);
     if (controller) controller.edit(getPos(), node.attrs.marker);
+  };
+
+  edit.addEventListener("click", settings);
+
+  dom.addEventListener("dblclick", (event) => {
+    if (view.coding() || event.target.closest("button, textarea")) return;
+    settings(event);
   });
 
   remove.addEventListener("click", (event) => {
