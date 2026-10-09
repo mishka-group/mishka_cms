@@ -278,6 +278,38 @@ describe("opening stored content", () => {
   });
 });
 
+describe("a closed modal", () => {
+  test("lets the previews go of the site's stylesheet, and gives it back when shown", async () => {
+    const { root, surface } = await editorFor(`<p>${MARKER}</p>`, {
+      segments: {
+        segments: [{ type: "component", name: "callout", marker: MARKER }],
+        styles: "/assets/css/content-editor-1/aaa",
+      },
+    });
+
+    // The editor inside a modal, as the admin draws it.
+    const modal = document.createElement("div");
+    root.before(modal);
+    modal.append(root);
+    controllerOf(surface).watch();
+
+    const link = () =>
+      surface
+        .querySelector("[data-role='content-component-preview']")
+        .shadowRoot.querySelector("link[rel=stylesheet]");
+
+    root.getClientRects = () => [];
+    modal.style.display = "none";
+    await settle();
+    expect(link().hasAttribute("href")).toBe(false);
+
+    root.getClientRects = () => [{ width: 1, height: 1 }];
+    modal.style.display = "";
+    await settle();
+    expect(link().getAttribute("href")).toBe("/assets/css/content-editor-1/aaa");
+  });
+});
+
 function drawnIn(preview) {
   return preview.shadowRoot.querySelector("[data-role='content-component-drawn']").innerHTML;
 }

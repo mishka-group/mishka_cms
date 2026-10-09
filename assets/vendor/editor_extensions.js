@@ -278,9 +278,10 @@ function componentView({ node, getPos, editor }) {
 
       const controller = controllerOf(surface);
       const html = (controller && controller.previewOf(node.attrs.marker)) || "";
-      const styles = controller && controller.styles;
+      const styles = controller && controller.shown ? controller.styles : null;
 
-      if (styles && sheet.getAttribute("href") !== styles) sheet.setAttribute("href", styles);
+      if (!styles) sheet.removeAttribute("href");
+      else if (sheet.getAttribute("href") !== styles) sheet.setAttribute("href", styles);
 
       if (html === painted) return;
       painted = html;
@@ -427,6 +428,8 @@ export class ContentController {
     this.serial = 0;
     this.scanning = null;
     this.styles = null;
+    this.shown = true;
+    this.watching = null;
   }
 
   start() {
@@ -443,8 +446,30 @@ export class ContentController {
 
     controllers.set(this.surface, this);
     this.repaint();
+    this.watch();
 
     return this.load();
+  }
+
+  // A CLOSED MODAL HIDES THE EDITOR AND KEEPS IT, so the previews let go of the site's stylesheet
+  // while the editor is out of sight, and take it again — from the browser's cache — when it is
+  // shown. A modal opens and closes by the `style`, `class` or `hidden` of an element around the
+  // editor, so those are watched, and the editor's own box answers whether it is seen.
+  watch() {
+    if (typeof MutationObserver !== "function") return;
+
+    this.watching = new MutationObserver(() => this.visibility());
+
+    for (let el = this.root.parentElement; el && el !== document.body; el = el.parentElement)
+      this.watching.observe(el, { attributes: true, attributeFilter: ["style", "class", "hidden"] });
+  }
+
+  visibility() {
+    const shown = this.root.getClientRects().length > 0;
+    if (shown === this.shown) return;
+
+    this.shown = shown;
+    for (const view of this.views) view.paint();
   }
 
   stop() {
@@ -453,6 +478,7 @@ export class ContentController {
     document.removeEventListener("pointerdown", this.onOutside, true);
     document.removeEventListener("keydown", this.onKey);
     if (this.ref) this.hook.removeHandleEvent(this.ref);
+    if (this.watching) this.watching.disconnect();
     clearTimeout(this.scanning);
 
     controllers.delete(this.surface);
