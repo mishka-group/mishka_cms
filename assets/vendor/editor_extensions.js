@@ -13,7 +13,9 @@
 //   data-label-*     the words this file shows, already in the reader's language
 //
 // A component's settings are a drawer the server draws at the side of the page, outside the editor;
-// it writes each change back as `applied`, which the block being edited takes.
+// it writes each change back as `applied`, which the block being edited takes. What a component
+// holds is also moved on its block, by the grip each part shows under the pointer, and a card
+// dropped on a component that takes others goes in among them.
 //
 // THE SERVER IS THE ONLY READER AND WRITER OF THE MARKER. A component block holds its marker as an
 // opaque string the server wrote; this file never reads one apart or puts one together.
@@ -72,20 +74,27 @@ export function markerParagraph(marker) {
 // A marker holding block markup — a paragraph or a list inside a component — cannot sit in a
 // paragraph, which would be taken apart around it, so it is written outside any element, as the
 // server also reads a block.
+//
+// THE EDITOR WRITES EACH NODE AS ONE ELEMENT, and threw on the loose nodes such a marker parses to:
+// a banner or a timeline holding a heading stopped every write of the content, and the post was
+// saved without them. So the marker is held in a `mishka-marker` element, which the HTML the editor
+// writes loses (`unwrapped/1`).
 const BLOCK_MARKUP = /<(p|div|h[1-6]|ul|ol|li|dl|blockquote|pre|table|section|article|figure|hr|header|footer|aside|nav)[\s>/]/i;
+const HOLDER = /<\/?mishka-marker>/g;
 
 export function markerDOM(marker) {
   if (!BLOCK_MARKUP.test(marker || "")) return markerParagraph(marker);
 
   inert = inert || document.implementation.createHTMLDocument("");
 
-  const holder = inert.createElement("div");
+  const holder = inert.createElement("mishka-marker");
   holder.innerHTML = marker;
 
-  const fragment = inert.createDocumentFragment();
-  fragment.append(...holder.childNodes);
+  return holder;
+}
 
-  return fragment;
+export function unwrapped(html) {
+  return html.replace(HOLDER, "");
 }
 
 export function escapeAttribute(value) {
@@ -163,6 +172,175 @@ const ICONS = {
   grip: `<svg ${SVG}><circle cx="7" cy="5" r="1.4"/><circle cx="13" cy="5" r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="7" cy="15" r="1.4"/><circle cx="13" cy="15" r="1.4"/></svg>`,
 };
 
+// ---- the parts a preview draws ----------------------------------------------------------------
+
+const indexOf = (path) => Number(path.slice(path.lastIndexOf("-") + 1));
+
+// The DOM's `Node.DOCUMENT_POSITION_FOLLOWING`; `Node` in this file is Tiptap's.
+const FOLLOWING = 4;
+
+// THE PARTS OF A PLACED COMPONENT, AS ITS PREVIEW DRAWS THEM. The server marks them in the preview
+// (`ContentComponentPicker`'s `marked/1`): an empty `mishka-part` before each part drawn where the
+// component draws what it holds, one ending each run, and one at the start of each slot entry with
+// content of its own. This reads each part off the marks and takes the marks out, so the preview is
+// drawn as the page draws it. A part is `{path, parent, group, nodes}` — `group` the siblings it
+// moves among, a slot's entries apart from the rest — and its box is read off `nodes` when needed.
+// Marks the browser moved out of place, as it does around a table, give no parts.
+export function partsOf(drawn) {
+  const marks = Array.from(drawn.querySelectorAll("mishka-part"));
+  const ends = new Map();
+  const groups = new Map();
+
+  for (const mark of marks) {
+    const { part, end, slot } = mark.dataset;
+
+    if (end !== undefined) {
+      if (!ends.has(end)) ends.set(end, mark);
+      continue;
+    }
+
+    if (!part) continue;
+
+    const parent = part.replace(/-\d+$/, "");
+    const group = `${parent}:${slot || ""}`;
+    const members = groups.get(group) || [];
+
+    if (!members.some((member) => member.path === part))
+      members.push({ path: part, parent, group, slot, mark });
+
+    groups.set(group, members);
+  }
+
+  const parts = [];
+
+  for (const members of groups.values()) {
+    members.sort((a, b) => indexOf(a.path) - indexOf(b.path));
+
+    const found = members[0].slot ? entries(members) : runs(members, ends.get(members[0].parent));
+    if (found) parts.push(...found);
+  }
+
+  for (const mark of marks) mark.remove();
+
+  return parts.map(({ path, parent, group, nodes }) => ({ path, parent, group, nodes }));
+}
+
+// Parts drawn one after another where the component draws what it holds: each is what lies between
+// its mark and the next.
+function runs(members, end) {
+  const stops = [...members.map((member) => member.mark), end];
+  const parent = members[0].mark.parentNode;
+
+  if (!end || stops.some((stop) => stop.parentNode !== parent)) return null;
+
+  const found = [];
+
+  for (let i = 0; i < members.length; i++) {
+    const nodes = [];
+    let node = members[i].mark.nextSibling;
+
+    for (; node && node !== stops[i + 1]; node = node.nextSibling) nodes.push(node);
+    if (!node) return null;
+
+    found.push({ ...members[i], nodes });
+  }
+
+  return found;
+}
+
+// A slot's entries, drawn wherever the component puts them: each is the element, under the one
+// holding all of them, that holds its mark.
+function entries(members) {
+  if (members.length < 2) return null;
+
+  let common = members[0].mark.parentNode;
+  while (common && !members.every(({ mark }) => common.contains(mark))) common = common.parentNode;
+  if (!common) return null;
+
+  const boxes = members.map(({ mark }) => {
+    let el = mark;
+    while (el.parentNode !== common) el = el.parentNode;
+    return el;
+  });
+
+  const apart = boxes.every(
+    (box, i) =>
+      box !== members[i].mark &&
+      (i === 0 || boxes[i - 1].compareDocumentPosition(box) & FOLLOWING),
+  );
+
+  return apart ? members.map((member, i) => ({ ...member, nodes: [boxes[i]] })) : null;
+}
+
+// The box a part is drawn in, on the screen; `null` when it draws nothing there.
+export function boxOf(part) {
+  let box = null;
+
+  for (const node of part.nodes) {
+    if (!node.isConnected) continue;
+
+    let rect = null;
+
+    if (node.nodeType === 1) rect = node.getBoundingClientRect();
+    else if (node.nodeType === 3 && node.textContent.trim()) {
+      const range = node.ownerDocument.createRange();
+      range.selectNodeContents(node);
+      rect = range.getBoundingClientRect();
+    }
+
+    if (!rect || (rect.width === 0 && rect.height === 0)) continue;
+
+    box = box
+      ? {
+          left: Math.min(box.left, rect.left),
+          top: Math.min(box.top, rect.top),
+          right: Math.max(box.right, rect.right),
+          bottom: Math.max(box.bottom, rect.bottom),
+        }
+      : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+  }
+
+  return box;
+}
+
+// WHERE A POINT FALLS AMONG PARTS drawn one under another, or side by side: beside the nearest, and
+// after it when past its middle — `{part, after, box, across}`, `null` when none is drawn.
+export function besideOf(parts, x, y) {
+  const drawn = parts.map((part) => ({ part, box: boxOf(part) })).filter(({ box }) => box);
+  if (!drawn.length) return null;
+
+  const [a, b] = drawn;
+  const across =
+    !!b &&
+    Math.abs(a.box.top - b.box.top) < Math.min(a.box.bottom - a.box.top, b.box.bottom - b.box.top) / 2 &&
+    a.box.left !== b.box.left;
+  const backwards = across && b.box.left < a.box.left;
+
+  let nearest = null;
+
+  for (const entry of drawn) {
+    const { left, top, right, bottom } = entry.box;
+    const dx = Math.max(left - x, 0, x - right);
+    const dy = Math.max(top - y, 0, y - bottom);
+    const distance = dx * dx + dy * dy;
+
+    if (!nearest || distance < nearest.distance) nearest = { ...entry, distance };
+  }
+
+  const { box } = nearest;
+  const after = across ? x > (box.left + box.right) / 2 !== backwards : y > (box.top + box.bottom) / 2;
+
+  return { part: nearest.part, after, box, across, backwards };
+}
+
+// A COMPONENT PINNED TO THE SCREEN IS DRAWN IN ITS PLACE in the preview: a banner `fixed` to the top
+// of the page drew outside its block, which showed nothing, and what was dropped into it was seen
+// nowhere.
+export function unpin(drawn) {
+  for (const el of drawn.querySelectorAll("*"))
+    if (getComputedStyle(el).position === "fixed") el.style.position = "relative";
+}
+
 // ---- the component block -------------------------------------------------------------------
 
 function iconButton(action, label, icon) {
@@ -181,6 +359,11 @@ function iconButton(action, label, icon) {
 // server previews it. The preview is shown and never edited, and `inert` keeps every click and
 // binding in it from reaching the page. A double click on the block opens its settings, as
 // Settings does — not on its own buttons, nor while its code is open.
+//
+// WHAT IT HOLDS MOVES ON THE BLOCK: the part under the pointer is outlined and shows a grip, and
+// the grip drags it among its siblings — a line shows where it goes — and the server writes the
+// new order (`reorder`). A card dragged over a component that takes others shows the same line
+// among what it holds.
 //
 // THE PREVIEW IS DRAWN IN A SHADOW ROOT, with the site's stylesheet the server names (`styles`):
 // the admin's own holds none of a kit's colours or variants, and the site's must not restyle the
@@ -227,10 +410,89 @@ function componentView({ node, getPos, editor }) {
   fault.dataset.role = "content-component-code-error";
   fault.hidden = true;
 
+  const outline = document.createElement("div");
+  outline.dataset.role = "content-part-outline";
+  outline.hidden = true;
+
+  const line = document.createElement("div");
+  line.dataset.role = "content-part-line";
+  line.hidden = true;
+
+  const grip = iconButton("move-part", labels.labelMovePart, ICONS.grip);
+  grip.dataset.role = "content-part-grip";
+  grip.hidden = true;
+
   head.append(name, code, edit, remove);
-  dom.append(head, preview, source, fault);
+  dom.append(head, preview, source, fault, outline, line, grip);
+
+  sheet.addEventListener("load", () => unpin(drawn));
 
   let painted = null;
+  let parts = [];
+  let hovered = null;
+  let moving = null;
+
+  // A screen box as a place inside the block.
+  const place = (el, box, sized = true) => {
+    const frame = dom.getBoundingClientRect();
+
+    el.style.left = `${box.left - frame.left - dom.clientLeft}px`;
+    el.style.top = `${box.top - frame.top - dom.clientTop}px`;
+    if (!sized) return;
+
+    el.style.width = `${box.right - box.left}px`;
+    el.style.height = `${box.bottom - box.top}px`;
+  };
+
+  const showLine = ({ box, after, across, backwards }) => {
+    const edge = after !== backwards;
+    const at = across
+      ? { left: edge ? box.right : box.left, right: (edge ? box.right : box.left) + 2, top: box.top, bottom: box.bottom }
+      : { left: box.left, right: box.right, top: after ? box.bottom : box.top, bottom: (after ? box.bottom : box.top) + 2 };
+
+    place(line, { ...at, left: at.left - (across ? 1 : 0), top: at.top - (across ? 0 : 1) });
+    line.hidden = false;
+  };
+
+  const siblings = (part) => parts.filter((other) => other.group === part.group && boxOf(other));
+  const depth = (part) => part.path.split("-").length;
+
+  // The part under a point that can move: the innermost, among siblings it can move past.
+  const partAt = (x, y) => {
+    let found = null;
+
+    for (const part of parts) {
+      const box = boxOf(part);
+      if (!box || x < box.left || x > box.right || y < box.top || y > box.bottom) continue;
+      if (siblings(part).length < 2) continue;
+      if (!found || depth(part) > depth(found)) found = part;
+    }
+
+    return found;
+  };
+
+  const rest = () => {
+    hovered = null;
+    moving = null;
+    outline.hidden = true;
+    line.hidden = true;
+    grip.hidden = true;
+  };
+
+  const hover = (event) => {
+    if (moving) return;
+
+    const part = view.coding() ? null : partAt(event.clientX, event.clientY);
+    if (part === hovered) return;
+
+    hovered = part;
+    outline.hidden = grip.hidden = !part;
+    if (!part) return;
+
+    const box = boxOf(part);
+    place(outline, box);
+    place(grip, { left: box.left + 2, top: box.top + 2 }, false);
+  };
 
   const coding = (on) => {
     source.hidden = !on;
@@ -287,7 +549,36 @@ function componentView({ node, getPos, editor }) {
       if (html === painted) return;
       painted = html;
       drawn.innerHTML = html;
+      parts = partsOf(drawn);
+      unpin(drawn);
+      rest();
       toggle(preview, "data-empty", html === "");
+    },
+
+    pos() {
+      return getPos();
+    },
+
+    // Where a card dropped at a point goes among what this component draws where it draws what it
+    // holds — `{beside, after}`, shown as a line — or `{}`, at the end, when it draws none.
+    dropAt(x, y) {
+      const target = besideOf(
+        parts.filter((part) => part.group === "r:"),
+        x,
+        y,
+      );
+
+      if (!target) {
+        line.hidden = true;
+        return {};
+      }
+
+      showLine(target);
+      return { beside: target.part.path, after: target.after };
+    },
+
+    dropDone() {
+      line.hidden = true;
     },
 
     update(updated) {
@@ -328,6 +619,56 @@ function componentView({ node, getPos, editor }) {
     if (view.coding() || event.target.closest("button, textarea")) return;
     settings(event);
   });
+
+  dom.addEventListener("pointermove", hover);
+  dom.addEventListener("pointerleave", () => {
+    if (!moving) rest();
+  });
+
+  // The block itself is dragged by the editor; a part's grip is not.
+  dom.addEventListener("dragstart", (event) => {
+    if (!moving) return;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
+  grip.addEventListener("mousedown", (event) => event.preventDefault());
+
+  grip.addEventListener("pointerdown", (event) => {
+    if (!hovered || event.button !== 0) return;
+
+    if (grip.setPointerCapture) grip.setPointerCapture(event.pointerId);
+    moving = { part: hovered, siblings: siblings(hovered), target: null };
+  });
+
+  grip.addEventListener("pointermove", (event) => {
+    if (!moving) return;
+
+    // Near an edge of the editor the editor scrolls, so a part goes past what it shows.
+    const frame = surface.getBoundingClientRect();
+    if (event.clientY < frame.top + 32) surface.scrollTop -= 16;
+    else if (event.clientY > frame.bottom - 32) surface.scrollTop += 16;
+
+    moving.target = besideOf(moving.siblings, event.clientX, event.clientY);
+    if (moving.target) showLine(moving.target);
+  });
+
+  grip.addEventListener("pointerup", () => {
+    const done = moving;
+    rest();
+    if (!done || !done.target) return;
+
+    const { part, siblings: all, target } = done;
+    const from = all.indexOf(part);
+    const to = all.indexOf(target.part);
+    const stays = to === from || to === from + (target.after ? -1 : 1);
+
+    const controller = controllerOf(surface);
+    if (!stays && controller)
+      controller.reorder(getPos(), node.attrs.marker, part.path, target.part.path, target.after);
+  });
+
+  grip.addEventListener("pointercancel", rest);
 
   remove.addEventListener("click", (event) => {
     event.preventDefault();
@@ -438,6 +779,8 @@ export class ContentController {
     this.styles = null;
     this.shown = true;
     this.watching = null;
+    this.holders = new Set();
+    this.dropping = null;
   }
 
   start() {
@@ -445,9 +788,18 @@ export class ContentController {
     this.onDragStart = (event) => this.dragStart(event);
     this.onOutside = (event) => this.outside(event);
     this.onKey = (event) => this.key(event);
+    this.onDragOver = (event) => this.dragOver(event);
+    this.onDragLeave = (event) => {
+      if (!this.surface.contains(event.relatedTarget)) this.dropEnd();
+    };
+    this.onDropEnd = () => this.dropEnd();
 
     this.root.addEventListener("click", this.onClick);
     this.root.addEventListener("dragstart", this.onDragStart);
+    this.root.addEventListener("dragend", this.onDropEnd);
+    this.surface.addEventListener("dragover", this.onDragOver);
+    this.surface.addEventListener("dragleave", this.onDragLeave);
+    this.surface.addEventListener("drop", this.onDropEnd);
     document.addEventListener("pointerdown", this.onOutside, true);
     document.addEventListener("keydown", this.onKey);
     this.ref = this.hook.handleEvent(EVENT, (payload) => this.receive(payload));
@@ -483,6 +835,10 @@ export class ContentController {
   stop() {
     this.root.removeEventListener("click", this.onClick);
     this.root.removeEventListener("dragstart", this.onDragStart);
+    this.root.removeEventListener("dragend", this.onDropEnd);
+    this.surface.removeEventListener("dragover", this.onDragOver);
+    this.surface.removeEventListener("dragleave", this.onDragLeave);
+    this.surface.removeEventListener("drop", this.onDropEnd);
     document.removeEventListener("pointerdown", this.onOutside, true);
     document.removeEventListener("keydown", this.onKey);
     if (this.ref) this.hook.removeHandleEvent(this.ref);
@@ -524,6 +880,7 @@ export class ContentController {
   receive(payload) {
     if (!payload || payload.id !== this.surface.dataset.rootId) return;
     if (payload.styles) this.restyle(payload.styles);
+    if (payload.holders) this.holders = new Set(payload.holders);
 
     for (const { marker, preview } of payload.previews || []) this.previews.set(marker, preview || "");
     for (const view of this.views) view.paint();
@@ -571,7 +928,61 @@ export class ContentController {
       this.request("close", {});
 
     const drawer = this.drawer();
-    if (drawer && !drawer.contains(target)) this.request("settings_done", {});
+    if (drawer && !drawer.contains(target) && !this.reshaping(target))
+      this.request("settings_done", {});
+  }
+
+  // A part's grip pressed on the block whose settings are open: they follow what it moves.
+  reshaping(target) {
+    const grip = target.closest("[data-role='content-part-grip']");
+    const view = grip && this.viewOf(grip.closest("[data-role='content-component']"));
+
+    return !!view && !!this.editingAt(view.pos());
+  }
+
+  viewOf(dom) {
+    for (const view of this.views) if (view.dom === dom) return view;
+
+    return null;
+  }
+
+  // The settings open on the block at `pos`, if they are.
+  editingAt(pos) {
+    const editing = this.editing;
+    return editing && this.locate(editing.marker, editing.pos) === pos ? editing : null;
+  }
+
+  // A CARD DRAGGED OVER A COMPONENT THAT TAKES OTHERS lights it up, and a line among what it holds
+  // shows where the card goes; the editor's own line between blocks is hidden while it does.
+  dragOver(event) {
+    const types = Array.from((event.dataTransfer && event.dataTransfer.types) || []);
+    const card = types.includes(COMPONENT_MIME) || types.includes(BLOCK_MIME);
+    const onto = card ? placedUnder(this.editor, this.editor.view, event.target) : null;
+    const view = onto && this.holders.has(onto.name) ? this.viewOf(onto.dom) : null;
+
+    if (this.dropping && this.dropping !== view) this.dropEnd();
+    if (!view) return;
+
+    this.dropping = view;
+    view.dom.setAttribute("data-drop-inside", "");
+    this.surface.setAttribute("data-drop-inside", "");
+    view.dropAt(event.clientX, event.clientY);
+  }
+
+  dropEnd() {
+    if (this.dropping) {
+      this.dropping.dom.removeAttribute("data-drop-inside");
+      this.dropping.dropDone();
+    }
+
+    this.dropping = null;
+    this.surface.removeAttribute("data-drop-inside");
+  }
+
+  // Where a card dropped on the block `onto` goes among what it holds.
+  insideAt(onto, event) {
+    const view = this.holders.has(onto.name) ? this.viewOf(onto.dom) : null;
+    return view ? view.dropAt(event.clientX, event.clientY) : {};
   }
 
   key(event) {
@@ -647,16 +1058,39 @@ export class ContentController {
     });
   }
 
-  // A component dropped on a placed one goes inside it, when that one holds content; otherwise it
-  // is placed where it fell.
-  nest(pos, marker, name, at) {
-    return this.request("nest", { marker, name }).then((reply) => {
-      if (!reply.marker) return this.place(name, at);
+  // A component, or a ready-made block (`child` is `{name}` or `{block}`), dropped on a placed one
+  // goes inside it — beside the part `inside` names, or at the end — when that one holds content;
+  // otherwise it is placed where it fell. With the settings open on that one, they take it.
+  nest(pos, marker, child, at, inside = {}) {
+    const editing = this.editingAt(pos);
+    const payload = { marker, ...child, ...inside };
+    if (editing) payload.serial = editing.serial;
+
+    return this.request("nest", payload).then((reply) => {
+      if (reply.ok) return pos;
+      if (!reply.marker) return child.block ? this.placeBlock(child.block, at) : this.place(child.name, at);
 
       const found = this.locate(marker, pos);
       if (found === null) return null;
 
       this.markup(found, reply);
+      return found;
+    });
+  }
+
+  // The part `path` of the block at `pos` moved before — or `after` — its sibling `beside`, as the
+  // server writes it. With the settings open on that block, they take it.
+  reorder(pos, marker, path, beside, after) {
+    const editing = this.editingAt(pos);
+    const payload = { marker, path, beside, after };
+    if (editing) payload.serial = editing.serial;
+
+    return this.request("reorder", payload).then((reply) => {
+      if (!reply.marker) return null;
+
+      const found = this.locate(marker, pos);
+      if (found !== null) this.markup(found, reply);
+
       return found;
     });
   }
@@ -837,8 +1271,8 @@ export function accessibleName(surface) {
     : { "aria-multiline": "true" };
 }
 
-// A palette card dropped into the text is placed where it fell — or, a component dropped on a
-// placed one, inside it.
+// A palette card dropped into the text is placed where it fell — or, dropped on a placed component,
+// inside it.
 export function dropComponent(editor, view, event) {
   const transfer = event.dataTransfer;
   const types = Array.from((transfer && transfer.types) || []);
@@ -853,17 +1287,15 @@ export function dropComponent(editor, view, event) {
 
   const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
   const pos = at ? at.pos : null;
-
-  if (block) {
-    controller.placeBlock(transfer.getData(BLOCK_MIME), pos);
-    return true;
-  }
-
-  const name = transfer.getData(COMPONENT_MIME);
   const onto = placedUnder(editor, view, event.target);
+  const inside = onto ? controller.insideAt(onto, event) : {};
+  const child = block ? { block: transfer.getData(BLOCK_MIME) } : { name: transfer.getData(COMPONENT_MIME) };
 
-  if (onto) controller.nest(onto.pos, onto.marker, name, pos);
-  else controller.place(name, pos);
+  controller.dropEnd();
+
+  if (onto) controller.nest(onto.pos, onto.marker, child, pos, inside);
+  else if (block) controller.placeBlock(child.block, pos);
+  else controller.place(child.name, pos);
 
   return true;
 }
@@ -877,7 +1309,7 @@ function placedUnder(editor, view, element) {
 
   editor.state.doc.descendants((node, pos) => {
     if (found || node.type.name !== "mishkaComponent") return;
-    if (view.nodeDOM(pos) === dom) found = { pos, marker: node.attrs.marker };
+    if (view.nodeDOM(pos) === dom) found = { pos, marker: node.attrs.marker, name: node.attrs.name, dom };
   });
 
   return found;
@@ -894,8 +1326,13 @@ export const ContentBridge = Extension.create({
   },
 
   onCreate() {
-    const surface = this.editor.options.element;
+    const editor = this.editor;
+    const surface = editor.options.element;
     const hook = surface && hooks.get(surface);
+    const written = editor.getHTML.bind(editor);
+
+    // What the engine stores and submits is what this writes.
+    editor.getHTML = () => unwrapped(written());
 
     if (hook) new ContentController(this.editor, hook).start();
   },
@@ -1081,7 +1518,7 @@ class BlockHandleView {
     const slice = selection.content();
 
     event.dataTransfer.clearData();
-    event.dataTransfer.setData("text/html", getHTMLFromFragment(slice.content, state.schema));
+    event.dataTransfer.setData("text/html", unwrapped(getHTMLFromFragment(slice.content, state.schema)));
     event.dataTransfer.setData(
       "text/plain",
       slice.content.textBetween(0, slice.content.size, "\n\n"),

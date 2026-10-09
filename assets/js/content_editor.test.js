@@ -8,12 +8,16 @@ import config, {
   COMPONENT_MIME,
   EVENT,
   TYPED_WAIT,
+  besideOf,
   contentFrom,
   controllerOf,
   dropComponent,
   markerDOM,
   markerParagraph,
+  partsOf,
   single,
+  unpin,
+  unwrapped,
   whole,
 } from "../vendor/editor_extensions.js";
 
@@ -121,12 +125,14 @@ function components(editor) {
 
 let opened = [];
 
-// jsdom lays nothing out, and ProseMirror measures a range to scroll the cursor into view.
+// jsdom lays nothing out, and ProseMirror measures a range to scroll the cursor into view — and
+// asks what is under a card dragged over the text, for its drop line.
 beforeAll(() => {
   const none = { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
 
   Range.prototype.getClientRects = () => [];
   Range.prototype.getBoundingClientRect = () => none;
+  document.elementFromPoint = () => null;
 });
 
 beforeEach(() => {
@@ -781,8 +787,22 @@ describe("ready blocks", () => {
     const holder = document.createElement("div");
     holder.append(markerDOM(marker));
 
-    expect(holder.innerHTML).toBe(marker);
+    expect(unwrapped(holder.innerHTML)).toBe(marker);
     expect(markerDOM("[[component a /]]").outerHTML).toBe("<p>[[component a /]]</p>");
+  });
+
+  test("content holding such a marker is still written, and reaches the form", async () => {
+    const marker = '[[component banner]]<div class="row"><h3>Hi</h3></div>[[/component]]';
+    const { editor, mirror } = await editorFor(`${marker}<p>After</p>`, {
+      segments: { segments: [{ type: "component", name: "banner", marker }, { type: "html", html: "<p>After</p>" }] },
+    });
+
+    expect(editor.getHTML()).toBe(`${marker}<p dir="auto">After</p>`);
+
+    editor.commands.insertContentAt(editor.state.doc.content.size, "<p>More</p>");
+    await settle(30);
+
+    expect(mirror.value).toBe(`${marker}<p dir="auto">After</p><p dir="auto">More</p>`);
   });
 });
 
@@ -836,6 +856,214 @@ describe("a component dropped on a placed one", () => {
 
     expect(hook.pushes.some((push) => push.event === "build")).toBe(true);
     expect(components(editor).map((block) => block.marker)).toContain("[[component badge /]]");
+  });
+});
+
+// WHAT A COMPONENT HOLDS, ON ITS BLOCK: the server marks each part in the preview, and the block
+// finds the parts by the marks, takes the marks out, and moves a part by its grip — or shows where a
+// card dropped on it goes.
+describe("what a component holds, on its block", () => {
+  const LIST = "[[component list]][[component item /]][[component item /]][[component item /]][[/component]]";
+  const MOVED = "[[component list]][[component item /]][[component item /]][[component item /]][[/component]] ";
+  const MARKED =
+    '<ul class="probe-list"><mishka-part data-part="r-0"></mishka-part><li id="i0">A</li>' +
+    '<mishka-part data-part="r-1"></mishka-part><li id="i1">B</li>' +
+    '<mishka-part data-part="r-2"></mishka-part><li id="i2">C</li><mishka-part data-end="r"></mishka-part></ul>';
+
+  // jsdom lays nothing out: each item gets a row of its own, 20px high, 30px apart.
+  function rows(drawn) {
+    ["i0", "i1", "i2"].forEach((id, i) => {
+      const top = i * 30;
+      drawn.querySelector(`#${id}`).getBoundingClientRect = () => ({
+        left: 0, right: 100, top, bottom: top + 20, width: 100, height: 20,
+      });
+    });
+  }
+
+  async function placed(answers = {}) {
+    const context = await editorFor(`<p>${LIST}</p>`, {
+      segments: { segments: [{ type: "component", name: "list", marker: LIST }] },
+      reorder: { name: "list", marker: MOVED },
+      ...answers,
+    });
+
+    context.hook.emit(EVENT, { id: "ed", previews: [{ marker: LIST, preview: MARKED }] });
+
+    const block = context.surface.querySelector("[data-role='content-component']");
+    const drawn = block
+      .querySelector("[data-role='content-component-preview']")
+      .shadowRoot.querySelector("[data-role='content-component-drawn']");
+
+    rows(drawn);
+
+    return { ...context, block, drawn };
+  }
+
+  const point = (el, type, x, y) =>
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }));
+
+  const pushed = (hook, event) => hook.pushes.filter((push) => push.event === event).map((push) => push.payload);
+
+  test("the marks are taken out, and the preview is drawn as the page draws it", async () => {
+    const { drawn } = await placed();
+
+    expect(drawn.querySelector("mishka-part")).toBe(null);
+    expect(drawn.querySelector("ul").innerHTML).toBe('<li id="i0">A</li><li id="i1">B</li><li id="i2">C</li>');
+  });
+
+  test("the part under the pointer shows a grip that drags it among its siblings", async () => {
+    const { block, hook, editor } = await placed();
+    const grip = block.querySelector("[data-role='content-part-grip']");
+    const line = block.querySelector("[data-role='content-part-line']");
+
+    point(block, "pointermove", 50, 70);
+    expect(grip.hidden).toBe(false);
+    expect(block.querySelector("[data-role='content-part-outline']").hidden).toBe(false);
+
+    point(grip, "pointerdown", 50, 70);
+    point(grip, "pointermove", 50, 2);
+    expect(line.hidden).toBe(false);
+
+    point(grip, "pointerup", 50, 2);
+    await settle();
+
+    expect(pushed(hook, "reorder")).toEqual([{ marker: LIST, path: "r-2", beside: "r-0", after: false }]);
+    expect(components(editor).map((found) => found.marker)).toEqual([MOVED]);
+    expect(grip.hidden).toBe(true);
+    expect(line.hidden).toBe(true);
+  });
+
+  test("a part dropped where it already is sends nothing", async () => {
+    const { block, hook } = await placed();
+    const grip = block.querySelector("[data-role='content-part-grip']");
+
+    point(block, "pointermove", 50, 40);
+    point(grip, "pointerdown", 50, 40);
+    point(grip, "pointermove", 50, 18);
+    point(grip, "pointerup", 50, 18);
+    await settle();
+
+    expect(pushed(hook, "reorder")).toEqual([]);
+  });
+
+  test("a grip pressed on the block whose settings are open leaves them open", async () => {
+    const { block, hook, surface } = await placed({ edit: { ok: true } });
+    const drawer = document.createElement("aside");
+    drawer.dataset.role = "content-editor-drawer";
+    drawer.dataset.editor = "ed";
+    document.body.append(drawer);
+
+    surface.querySelector("[data-action='edit']").click();
+    await settle();
+
+    point(block, "pointermove", 50, 40);
+    point(block.querySelector("[data-role='content-part-grip']"), "pointerdown", 50, 40);
+    expect(pushed(hook, "settings_done")).toEqual([]);
+
+    point(document.getElementById("elsewhere"), "pointerdown", 0, 0);
+    expect(pushed(hook, "settings_done")).toEqual([{}]);
+  });
+
+  test("a card dragged over a component that takes others lights it up, and goes in where shown", async () => {
+    const { block, hook, editor, surface } = await placed({ nest: { name: "list", marker: MOVED } });
+    hook.emit(EVENT, { id: "ed", holders: ["list"] });
+
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.assign(over, { dataTransfer: { types: [COMPONENT_MIME] }, clientX: 50, clientY: 38 });
+    block.dispatchEvent(over);
+
+    expect(block.hasAttribute("data-drop-inside")).toBe(true);
+    expect(surface.hasAttribute("data-drop-inside")).toBe(true);
+    expect(block.querySelector("[data-role='content-part-line']").hidden).toBe(false);
+
+    const view = { posAtCoords: () => null, nodeDOM: (pos) => editor.view.nodeDOM(pos) };
+    const drop = {
+      dataTransfer: { types: [COMPONENT_MIME], getData: () => "item" },
+      target: block,
+      clientX: 50,
+      clientY: 38,
+      preventDefault: vi.fn(),
+    };
+
+    dropComponent(editor, view, drop);
+    await settle(30);
+
+    expect(pushed(hook, "nest")).toEqual([{ marker: LIST, name: "item", beside: "r-1", after: false }]);
+    expect(block.hasAttribute("data-drop-inside")).toBe(false);
+    expect(surface.hasAttribute("data-drop-inside")).toBe(false);
+    expect(components(editor).map((found) => found.marker)).toEqual([MOVED]);
+  });
+
+  test("a component that takes nothing is not lit up", async () => {
+    const { block, hook } = await placed();
+    hook.emit(EVENT, { id: "ed", holders: ["other"] });
+
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.assign(over, { dataTransfer: { types: [COMPONENT_MIME] }, clientX: 50, clientY: 38 });
+    block.dispatchEvent(over);
+
+    expect(block.hasAttribute("data-drop-inside")).toBe(false);
+  });
+
+  test("a ready block dropped on a placed component goes inside it too", async () => {
+    const { block, hook, editor } = await placed({ nest: { name: "list", marker: MOVED } });
+    const view = { posAtCoords: () => null, nodeDOM: (pos) => editor.view.nodeDOM(pos) };
+
+    dropComponent(editor, view, {
+      dataTransfer: { types: [BLOCK_MIME], getData: (type) => (type === BLOCK_MIME ? "card" : "") },
+      target: block,
+      clientX: 0,
+      clientY: 0,
+      preventDefault: vi.fn(),
+    });
+    await settle(30);
+
+    expect(pushed(hook, "nest")).toEqual([{ marker: LIST, block: "card" }]);
+    expect(components(editor).map((found) => found.marker)).toEqual([MOVED]);
+  });
+
+  test("a slot's entries are the elements holding their marks; marks out of place give nothing", () => {
+    const drawn = document.createElement("div");
+    drawn.innerHTML =
+      '<div class="tabs"><button><mishka-part data-part="r-0" data-slot="tab"></mishka-part>One</button>' +
+      '<button><mishka-part data-part="r-1" data-slot="tab"></mishka-part>Two</button></div>' +
+      '<div><mishka-part data-part="r-2"></mishka-part>Moved</div><div><mishka-part data-end="r"></mishka-part></div>';
+
+    const parts = partsOf(drawn);
+
+    expect(parts.map((part) => [part.path, part.group, part.nodes.map((node) => node.textContent)])).toEqual([
+      ["r-0", "r:tab", ["One"]],
+      ["r-1", "r:tab", ["Two"]],
+    ]);
+    expect(drawn.querySelector("mishka-part")).toBe(null);
+  });
+
+  test("where a point falls among parts side by side, or one under another", () => {
+    const box = (left, top) => {
+      const el = document.createElement("div");
+      document.body.append(el);
+      el.getBoundingClientRect = () => ({ left, top, right: left + 20, bottom: top + 20, width: 20, height: 20 });
+      return { path: `r-${left}-${top}`, nodes: [el] };
+    };
+
+    const side = [box(0, 0), box(30, 0), box(60, 0)];
+    expect(besideOf(side, 38, 10)).toMatchObject({ part: side[1], after: false, across: true });
+    expect(besideOf(side, 48, 10)).toMatchObject({ part: side[1], after: true });
+
+    const under = [box(0, 0), box(0, 30)];
+    expect(besideOf(under, 10, 44)).toMatchObject({ part: under[1], after: true, across: false });
+    expect(besideOf([], 0, 0)).toBe(null);
+  });
+
+  test("a component pinned to the screen is drawn in its place", () => {
+    const drawn = document.createElement("div");
+    drawn.innerHTML = '<div id="pinned" style="position: fixed; top: 0"></div><p id="still">x</p>';
+    document.body.append(drawn);
+
+    unpin(drawn);
+
+    expect(drawn.querySelector("#pinned").style.position).toBe("relative");
+    expect(drawn.querySelector("#still").style.position).toBe("");
   });
 });
 
