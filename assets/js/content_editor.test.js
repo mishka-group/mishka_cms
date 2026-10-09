@@ -226,15 +226,19 @@ describe("opening stored content", () => {
     expect(mirror.value).toBe(stored);
   });
 
-  test("shows the preview the server pushes for a block", async () => {
+  test("shows the preview the server pushes for a block, in a shadow root", async () => {
     const { hook, surface } = await editorFor(`<p>${MARKER}</p>`, {
       segments: { segments: [{ type: "component", name: "callout", marker: MARKER }] },
     });
 
+    const preview = surface.querySelector("[data-role='content-component-preview']");
+    expect(preview.hasAttribute("data-empty")).toBe(true);
+
     hook.emit(EVENT, { id: "ed", previews: [{ marker: MARKER, preview: "<aside>drawn</aside>" }] });
 
-    const preview = surface.querySelector("[data-role='content-component-preview']");
-    expect(preview.innerHTML).toBe("<aside>drawn</aside>");
+    expect(drawnIn(preview)).toBe("<aside>drawn</aside>");
+    expect(preview.innerHTML).toBe("");
+    expect(preview.hasAttribute("data-empty")).toBe(false);
     expect(preview.hasAttribute("inert")).toBe(true);
     expect(surface.querySelector("[data-role='content-component-name']").textContent).toBe(
       "callout",
@@ -248,9 +252,35 @@ describe("opening stored content", () => {
 
     hook.emit(EVENT, { id: "other", previews: [{ marker: MARKER, preview: "<aside>no</aside>" }] });
 
-    expect(surface.querySelector("[data-role='content-component-preview']").innerHTML).toBe("");
+    expect(drawnIn(surface.querySelector("[data-role='content-component-preview']"))).toBe("");
+  });
+
+  test("draws every preview with the stylesheet the server names, as soon as it names it", async () => {
+    const { hook, surface } = await editorFor(`<p>${MARKER}</p>`, {
+      segments: {
+        segments: [{ type: "component", name: "callout", marker: MARKER }],
+        styles: "/assets/css/content-editor-1/aaa",
+      },
+    });
+
+    const link = () =>
+      surface
+        .querySelector("[data-role='content-component-preview']")
+        .shadowRoot.querySelector("link[rel=stylesheet]");
+
+    expect(link().getAttribute("href")).toBe("/assets/css/content-editor-1/aaa");
+
+    hook.emit(EVENT, { id: "ed", styles: "/assets/css/content-editor-1/bbb" });
+    expect(link().getAttribute("href")).toBe("/assets/css/content-editor-1/bbb");
+
+    hook.emit(EVENT, { id: "other", styles: "/assets/css/content-editor-2/ccc" });
+    expect(link().getAttribute("href")).toBe("/assets/css/content-editor-1/bbb");
   });
 });
+
+function drawnIn(preview) {
+  return preview.shadowRoot.querySelector("[data-role='content-component-drawn']").innerHTML;
+}
 
 describe("the field", () => {
   test("an edit is written into the hidden textarea, with an input event the form hears", async () => {

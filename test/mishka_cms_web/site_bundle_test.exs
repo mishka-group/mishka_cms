@@ -17,7 +17,7 @@ defmodule MishkaCmsWeb.SiteBundleTest do
 
   alias MishkaCmsCore.Accounts.Permission
   alias MishkaCmsCore.Install
-  alias MishkaCmsCore.Runtime.DraftPreviewAssets
+  alias MishkaCmsCore.Runtime.{ContentEditorStyles, DraftPreviewAssets}
   alias MishkaCmsCore.Runtime.States.{AssetsState, SettingsState, SiteState}
   alias MishkaCmsCore.Settings
 
@@ -175,6 +175,50 @@ defmodule MishkaCmsWeb.SiteBundleTest do
       assert get_resp_header(conn, "cache-control") == ["private, max-age=31536000, immutable"]
 
       assert fetch(site, "css", on: other, as: master) |> refused?()
+    end
+  end
+
+  # The content editor's previews are drawn with it (`ContentEditorStyles`): the site's stylesheet
+  # and every component its palette offers.
+  describe "the content editor's stylesheet for a site" do
+    setup %{site: site} do
+      key = ContentEditorStyles.key(site.id)
+
+      :ok =
+        AssetsState.save(%{
+          id: key,
+          type: "css",
+          value: "/* editor */",
+          hash: "editor#{System.unique_integer([:positive])}",
+          updated_at: DateTime.utc_now()
+        })
+
+      on_exit(fn -> AssetsState.delete(key, "css") end)
+
+      {:ok, path: ContentEditorStyles.href(key, AssetsState.hash(key, "css"))}
+    end
+
+    test "is handed to an admin of that site, and to a master", %{site: site, path: path} do
+      conn = fetch(site, "css", path: path, as: user!(site.id, ["admin:dashboard:*"]))
+
+      assert conn.status == 200
+      assert conn.resp_body == "/* editor */"
+      assert get_resp_header(conn, "cache-control") == ["private, max-age=31536000, immutable"]
+
+      master = user!(nil, ["*"])
+      assert fetch(site, "css", path: path, on: site!(master: true), as: master).status == 200
+    end
+
+    test "is kept from a visitor, a plain user, and another site's admin", %{
+      site: site,
+      other: other,
+      path: path
+    } do
+      assert fetch(site, "css", path: path) |> refused?()
+      assert fetch(site, "css", path: path, as: user!(site.id, [])) |> refused?()
+
+      assert fetch(other, "css", path: path, as: user!(other.id, ["admin:dashboard:*"]))
+             |> refused?()
     end
   end
 

@@ -122,6 +122,40 @@ function cspNonce() {
 
 const SVG = 'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true"';
 
+// What every preview's shadow root starts with, before the site's stylesheet: a picture not chosen
+// yet is an empty tinted square.
+const PREVIEW_BASE =
+  ":host{display:block}img:not([src]){min-width:4rem;min-height:4rem;border-radius:8px;background:#ecebf7}";
+
+let base = null;
+
+function previewBase() {
+  if (base === null && typeof CSSStyleSheet === "function" && "replaceSync" in CSSStyleSheet.prototype) {
+    base = new CSSStyleSheet();
+    base.replaceSync(PREVIEW_BASE);
+  }
+
+  return base;
+}
+
+// The shadow root a preview is drawn in: the site's stylesheet, linked once it is known, then the
+// drawn component.
+export function previewRoot(host) {
+  const root = host.attachShadow({ mode: "open" });
+  const sheet = document.createElement("link");
+  const drawn = document.createElement("div");
+
+  sheet.rel = "stylesheet";
+  drawn.dataset.role = "content-component-drawn";
+
+  const shared = previewBase();
+  if (shared && "adoptedStyleSheets" in root) root.adoptedStyleSheets = [shared];
+
+  root.append(sheet, drawn);
+
+  return { sheet, drawn };
+}
+
 const ICONS = {
   edit: `<svg ${SVG}><path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z"/><path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z"/></svg>`,
   remove: `<svg ${SVG}><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd"/></svg>`,
@@ -146,6 +180,10 @@ function iconButton(action, label, icon) {
 // The block in the editor: its name, Code, Settings and Remove, and the component drawn as the
 // server previews it. The preview is shown and never edited, and `inert` keeps every click and
 // binding in it from reaching the page.
+//
+// THE PREVIEW IS DRAWN IN A SHADOW ROOT, with the site's stylesheet the server names (`styles`):
+// the admin's own holds none of a kit's colours or variants, and the site's must not restyle the
+// admin around it.
 //
 // CODE SHOWS THE MARKER ITSELF, to change by hand; pressed again, the server reads what was written
 // and the block takes it — or, when it is not one component, says so and stays on the code.
@@ -172,6 +210,9 @@ function componentView({ node, getPos, editor }) {
   const preview = document.createElement("div");
   preview.dataset.role = "content-component-preview";
   preview.setAttribute("inert", "");
+  preview.setAttribute("data-empty", "");
+
+  const { sheet, drawn } = previewRoot(preview);
 
   const source = document.createElement("textarea");
   source.dataset.role = "content-component-code";
@@ -237,10 +278,14 @@ function componentView({ node, getPos, editor }) {
 
       const controller = controllerOf(surface);
       const html = (controller && controller.previewOf(node.attrs.marker)) || "";
+      const styles = controller && controller.styles;
+
+      if (styles && sheet.getAttribute("href") !== styles) sheet.setAttribute("href", styles);
 
       if (html === painted) return;
       painted = html;
-      preview.innerHTML = html;
+      drawn.innerHTML = html;
+      toggle(preview, "data-empty", html === "");
     },
 
     update(updated) {
@@ -381,6 +426,7 @@ export class ContentController {
     this.editing = null;
     this.serial = 0;
     this.scanning = null;
+    this.styles = null;
   }
 
   start() {
@@ -428,7 +474,8 @@ export class ContentController {
     const html = this.hidden ? this.hidden.value : this.surface.getAttribute("data-value") || "";
     const before = this.editor.state.doc;
 
-    return this.request("segments", { html }).then(({ segments }) => {
+    return this.request("segments", { html }).then(({ segments, styles }) => {
+      if (styles) this.restyle(styles);
       if (this.editor.isDestroyed || this.editor.state.doc !== before) return;
       if (!(segments || []).some((segment) => segment.type === "component")) return;
 
@@ -442,6 +489,7 @@ export class ContentController {
 
   receive(payload) {
     if (!payload || payload.id !== this.surface.dataset.rootId) return;
+    if (payload.styles) this.restyle(payload.styles);
 
     for (const { marker, preview } of payload.previews || []) this.previews.set(marker, preview || "");
     for (const view of this.views) view.paint();
@@ -454,6 +502,13 @@ export class ContentController {
 
   previewOf(marker) {
     return this.previews.get(marker);
+  }
+
+  restyle(href) {
+    if (this.styles === href) return;
+
+    this.styles = href;
+    for (const view of this.views) view.paint();
   }
 
   panel() {
