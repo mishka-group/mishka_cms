@@ -431,6 +431,48 @@ const DashboardTray = {
 };
 
 // ---------------------------------------------------------------------------------------------
+// THE PARTS ONE COMPONENT HOLDS in the content editor's settings drawer, dragged by their grips to
+// another place among themselves. Sortable moves the part in the page; it is put back where it was
+// and the server is told which part it was dropped beside (`part_move`, `to`), whose answer draws
+// the new order — the parts' ids name their places, and the page must not hold an order the
+// server did not draw.
+const ContentParts = {
+  mounted() {
+    this.sorter = new Sortable(this.el, {
+      animation: 150,
+      handle: "[data-part='grip']",
+      draggable: "[data-content-part]",
+      forceFallback: true,
+      fallbackTolerance: 5,
+      ghostClass: "opacity-40",
+      onStart: (evt) => {
+        this.home = evt.item.nextSibling;
+      },
+      onEnd: (evt) => {
+        const { item, oldDraggableIndex: from, newDraggableIndex: to } = evt;
+        if (from === to) return;
+
+        const parts = this.parts();
+        const beside = parts[to < from ? to + 1 : to - 1];
+
+        this.el.insertBefore(item, this.home);
+        if (!beside) return;
+
+        this.pushEventTo(this.el.dataset.target, "part_move", {
+          path: item.dataset.contentPart,
+          to: beside.dataset.contentPart,
+        });
+      },
+    });
+  },
+  parts() {
+    return Array.from(this.el.children).filter((el) => el.matches("[data-content-part]"));
+  },
+  destroyed() {
+    this.sorter?.destroy();
+  },
+};
+
 // Page builder. Three hooks, and deliberately only three: everything else in the editor is an
 // ordinary LiveView binding, because the document lives on the server. These cover the parts a
 // server genuinely cannot do — pointer geometry, key handling, and bridging the canvas iframe.
@@ -3598,4 +3640,5 @@ export default {
   PbLayers,
   PbCodeEditor,
   ContentEditor,
+  ContentParts,
 };

@@ -370,3 +370,73 @@ describe("PbSeoFields", () => {
     expect(title.value).toBe("About us");
   });
 });
+
+// A part dragged in the content editor's settings: the page is put back as it was, and the server
+// is told the part it was dropped beside, which draws the new order.
+describe("ContentParts", () => {
+  function mounted() {
+    document.body.innerHTML = `
+      <div id="parts" data-target="#picker">
+        <section data-content-part="r-0">A</section>
+        <div data-content-part="r-2">B</div>
+        <section data-content-part="r-4">C</section>
+      </div>`;
+
+    const hook = Object.create(AdminHooks.ContentParts);
+    hook.el = document.getElementById("parts");
+    hook.pushes = [];
+    hook.pushEventTo = (target, event, payload) => hook.pushes.push({ target, event, payload });
+    hook.mounted();
+
+    return hook;
+  }
+
+  const order = (hook) => hook.parts().map((el) => el.dataset.contentPart);
+
+  // What Sortable leaves in the page at the end of a drag from `from` to `to`.
+  function drag(hook, from, to) {
+    const parts = hook.parts();
+    const item = parts[from];
+    const options = hook.sorter.options;
+
+    options.onStart({ item });
+    item.remove();
+    hook.el.insertBefore(item, hook.parts()[to] || null);
+    options.onEnd({ item, oldDraggableIndex: from, newDraggableIndex: to });
+  }
+
+  test("a part dragged down names the one it now follows", () => {
+    const hook = mounted();
+    drag(hook, 0, 2);
+
+    expect(hook.pushes).toEqual([
+      { target: "#picker", event: "part_move", payload: { path: "r-0", to: "r-4" } },
+    ]);
+    expect(order(hook)).toEqual(["r-0", "r-2", "r-4"]);
+  });
+
+  test("a part dragged up names the one it now goes before", () => {
+    const hook = mounted();
+    drag(hook, 2, 1);
+
+    expect(hook.pushes).toEqual([
+      { target: "#picker", event: "part_move", payload: { path: "r-4", to: "r-2" } },
+    ]);
+    expect(order(hook)).toEqual(["r-0", "r-2", "r-4"]);
+  });
+
+  test("a part dropped where it was sends nothing", () => {
+    const hook = mounted();
+    drag(hook, 1, 1);
+
+    expect(hook.pushes).toEqual([]);
+  });
+
+  test("drags by its grip alone", () => {
+    const hook = mounted();
+
+    expect(hook.sorter.options.handle).toBe("[data-part='grip']");
+    expect(hook.sorter.options.draggable).toBe("[data-content-part]");
+    hook.destroyed();
+  });
+});
