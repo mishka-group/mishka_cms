@@ -222,6 +222,40 @@ defmodule MishkaCmsWeb.SiteBundleTest do
     end
   end
 
+  # A record with no site — only a master edits one — is previewed with the base and the global
+  # components.
+  describe "the content editor's stylesheet for no site" do
+    setup do
+      key = ContentEditorStyles.key(nil)
+
+      :ok =
+        AssetsState.save(%{
+          id: key,
+          type: "css",
+          value: "/* editor, no site */",
+          hash: "editor#{System.unique_integer([:positive])}",
+          updated_at: DateTime.utc_now()
+        })
+
+      on_exit(fn -> AssetsState.delete(key, "css") end)
+
+      {:ok, path: ContentEditorStyles.href(key, AssetsState.hash(key, "css"))}
+    end
+
+    test "is a master's alone", %{site: site, path: path} do
+      master = user!(nil, ["*"])
+      conn = fetch(site, "css", path: path, on: site!(master: true), as: master)
+
+      assert conn.status == 200
+      assert conn.resp_body == "/* editor, no site */"
+
+      assert fetch(site, "css", path: path, as: user!(site.id, ["admin:dashboard:*"]))
+             |> refused?()
+
+      assert fetch(site, "css", path: path) |> refused?()
+    end
+  end
+
   describe "an offline site" do
     test "keeps its script from a visitor and its plain users", %{site: site} do
       offline!(site)
