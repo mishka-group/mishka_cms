@@ -116,7 +116,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
       |> speaking(session[Languages.session()], site.id)
       |> assign(:client_request, client_request(socket))
 
-    query = params |> Map.delete("path") |> URI.encode_query()
+    query = visitor_query(params)
 
     case moved_or_language_target(socket, path, "/" <> Enum.join(path, "/"), query, site) do
       {:moved, "/" <> _ = to} ->
@@ -351,8 +351,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
             # A PATTERN'S CAPTURES ARE THINGS THE VISITOR ASKED FOR, so they arrive beside the query
             # string rather than in a place of their own: a page stored at `/post/:category/:slug` reads
             # `@query_params["category"]` and `@query_params["slug"]`, and a component reads the same
-            # name whether the value came from the path or from `?slug=`. The query string wins a
-            # collision, because the visitor typed that one — except over `lang`; see `query_params/2`.
+            # name whether the value came from the path or from `?slug=`. The path wins a collision,
+            # as in Phoenix's router; see `query_params/2`.
             {found, captured} = WebRunTimeMetaDataState.resolve!(joined_path, site_name, "Page")
             page_module = Helpers.module_name(found.id, found.site, "Page")
 
@@ -812,11 +812,15 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # path is what the query string held, and a redirect that dropped it would lose the page number a
   # reader was on.
   defp query_of_params(params) do
-    case params |> Map.delete("path") |> URI.encode_query() do
+    case visitor_query(params) do
       "" -> ""
       query -> "?" <> query
     end
   end
+
+  # WRITTEN BACK BY THE ENCODER THAT READ IT. Plug decodes `q[a]=b` into a map and `tags[]=x` into a
+  # list; `URI.encode_query/1` takes neither and raised, so such an address answered 500.
+  defp visitor_query(params), do: params |> Map.delete("path") |> Plug.Conn.Query.encode()
 
   defp query_of(url) do
     case URI.parse(url).query do
@@ -1261,13 +1265,14 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # because `handle_params/3` runs again and the value arrives from the address bar rather than from
   # anything the component remembered.
   #
-  # A CAPTURED `lang` IS THE ONE THE QUERY STRING DOES NOT OVERRIDE. The resolver let the page answer
-  # only because that value is one of the site's languages; `/fa/about?lang=xyz` handing `xyz` to the
-  # template would undo the check that made `/xyz/about` a 404.
+  # A CAPTURED SEGMENT WINS OVER A QUERY KEY OF THE SAME NAME, as a path param does in Phoenix's
+  # router. The resolver let the page answer for that value — `/fa/about?lang=xyz` must not hand `xyz`
+  # to the template after `/xyz/about` was a 404 — and a capture is always a string, while
+  # `?slug[a]=b` arrives as a map that a record read could not take.
   defp query_params(params, captured) when is_map(params) and is_map(captured) do
-    captured
-    |> Map.merge(Map.drop(params, ["path"]))
-    |> Map.merge(Map.take(captured, [Languages.capture()]))
+    params
+    |> Map.drop(["path"])
+    |> Map.merge(captured)
   end
 
   defp query_params(_not_a_map, _captured), do: %{}
