@@ -28,12 +28,17 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
   """
   use MishkaCmsWeb.ConnCase, async: false
 
+  @repo Application.compile_env!(:mishka_cms_core, :repo)
+  use Oban.Testing, repo: @repo
+
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 
   require Ash.Query
 
   alias MishkaCmsCore.Accounts.Permission
+  alias MishkaCmsCore.Runtime.ShareCard
+  alias MishkaCmsCore.Runtime.Workers.ShareCardRefreshWorker
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
 
@@ -407,6 +412,69 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
       doc = LazyHTML.from_document(html)
 
       assert attr(doc, ~s(meta[name="robots"]), "content") == ["noindex, nofollow"]
+    end
+  end
+
+  # `RuntimeLive` asks for it (`Seo.resolve(card: true)`); `MishkaCmsCore.Runtime.ShareCard` draws it
+  # in its job, never in the request.
+  describe "a database page's share card" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "head_cards_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      Application.put_env(:mishka_cms_core, :media_static_dir, dir)
+
+      on_exit(fn ->
+        Application.delete_env(:mishka_cms_core, :media_static_dir)
+        File.rm_rf(dir)
+      end)
+    end
+
+    test "is queued by the first visit and shown once drawn", %{site: site} do
+      page = published!(site, title: "Shared page", description: "Worth a link.")
+
+      doc = LazyHTML.from_document(get_page(page.path))
+      assert Enum.empty?(LazyHTML.query(doc, ~s(meta[property="og:image"])))
+      assert [job] = all_enqueued(worker: ShareCard)
+      assert job.args["card"]["title"] == "Shared page"
+      assert job.args["card"]["site"] == "The Studio"
+
+      :ok = perform_job(ShareCard, job.args)
+      doc = LazyHTML.from_document(get_page(page.path))
+      card = base() <> ShareCard.url(site.id, job.args["key"])
+
+      assert attr(doc, ~s(meta[property="og:image"]), "content") == [card]
+      assert attr(doc, ~s(meta[property="og:image:width"]), "content") == ["1200"]
+      assert attr(doc, ~s(meta[property="og:image:height"]), "content") == ["630"]
+      assert attr(doc, ~s(meta[name="twitter:card"]), "content") == ["summary_large_image"]
+      assert attr(doc, ~s(meta[name="twitter:image"]), "content") == [card]
+    end
+
+    test "drawn after the page's save, is in its head on the first visit", %{site: site} do
+      page = published!(site, title: "Saved page", description: "Ready before anyone looks.")
+
+      :ok = ShareCard.refresh(site.id, {:page, page.id})
+
+      [look] =
+        all_enqueued(worker: ShareCardRefreshWorker, args: %{target: %{"page" => page.id}})
+
+      :ok = perform_job(ShareCardRefreshWorker, look.args)
+      assert [draw] = all_enqueued(worker: ShareCard)
+      :ok = perform_job(ShareCard, draw.args)
+
+      doc = LazyHTML.from_document(get_page(page.path))
+
+      assert attr(doc, ~s(meta[property="og:image"]), "content") ==
+               [base() <> ShareCard.url(site.id, draw.args["key"])]
+
+      assert all_enqueued(worker: ShareCard) == [draw]
+    end
+
+    test "is not asked for a page that needs a permission", %{site: site} do
+      page = published!(site, permissions: ["members:read"])
+
+      site |> signed_in(["members:read"]) |> get(page.path) |> html_response(200)
+
+      assert all_enqueued(worker: ShareCard) == []
     end
   end
 

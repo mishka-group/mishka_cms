@@ -2,7 +2,8 @@ defmodule MishkaCms.PluginEventsTest do
   @moduledoc """
   Every plugin the installed extensions ship is heard. Its application starts it; if it listens on an
   event `PluginHook` fires — `<app>:<resource>:after_<action>` — that event names an action that
-  exists; and if that action has a master twin, some plugin hears the twin as well.
+  exists, or is the resource's `after_save`, which any of its create and update actions fires; and if
+  that action has a master twin, some plugin hears the twin as well.
 
   Each failure is silent. A plugin no application starts never registers, and a plugin on a name
   nothing fires registers and never runs. Both sides are read off the loaded code — each module of an
@@ -50,9 +51,16 @@ defmodule MishkaCms.PluginEventsTest do
         PluginHook in Ash.Resource.Info.notifiers(resource),
         %{type: type, name: name} <- Ash.Resource.Info.actions(resource),
         type in [:create, :update, :destroy],
+        event <- events(resource, type, name),
         into: MapSet.new(),
-        do: PluginHook.event_name(resource, name)
+        do: event
   end
+
+  # An action's own event, and its resource's `after_save` for a create or an update.
+  defp events(resource, type, name) when type in [:create, :update],
+    do: [PluginHook.event_name(resource, name), PluginHook.save_event_name(resource)]
+
+  defp events(resource, _destroy, name), do: [PluginHook.event_name(resource, name)]
 
   # Whether `event` was meant for `PluginHook`: its app segment is one `PluginHook` fires for, or its
   # `<resource>:after_<action>` is one `PluginHook` fires under some app — so a plugin that spelled

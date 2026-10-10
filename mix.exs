@@ -69,7 +69,6 @@ defmodule MishkaCms.MixProject do
       {:ash_phoenix, "~> 2.3"},
       {:ash, "~> 3.33"},
       {:ash_paper_trail, "~> 0.7"},
-      {:ash_cloak, "~> 0.4"},
       {:ash_slug, "~> 0.2"},
       {:ash_oban, "~> 0.8"},
 
@@ -81,7 +80,6 @@ defmodule MishkaCms.MixProject do
       {:absinthe_phoenix, "~> 2.0"},
       {:sourceror, "~> 1.12", only: [:dev, :test]},
       {:open_api_spex, "~> 3.22"},
-      {:cloak, "~> 1.1"},
       {:mishka_installer, "~> 0.1"},
 
       # DataBase Stuff

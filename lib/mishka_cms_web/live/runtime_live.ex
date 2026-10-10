@@ -847,7 +847,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
         base: base,
         languages: languages,
         restricted?: Seo.noindex?(acl_permissions(socket.assigns[:acl]), socket.assigns[:extra]),
-        layers: [layout_seo_tags(private), stored_seo(page, :meta_tags)]
+        layers: [layout_seo_tags(private), stored_seo(page, :meta_tags)],
+        card: true
       )
 
     assign(socket, page_seo: seo, page_title: seo.title)
