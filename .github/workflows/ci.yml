@@ -13,18 +13,13 @@ env:
   MIX_ENV: test
 
 jobs:
-  test:
+  # Compiled once; the jobs below start from this build.
+  #
+  # A cache entry can never be changed once saved, so the key carries the commit: each run saves the
+  # build it made, and the next one starts from the nearest one before it (`restore-keys`) and
+  # compiles only what changed.
+  build:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
       - uses: actions/checkout@v7
@@ -70,15 +65,141 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-
 
       - run: mix deps.get
 
       - run: mix compile --warnings-as-errors
 
+  # Beside the tests rather than in front of them.
+  format:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
+      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
+      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_gervaz
+          ref: ${{ vars.GERVAZ_REF || 'master' }}
+          path: __extensions/mishka_gervaz
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_cms_core
+          ref: ${{ vars.CORE_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_cms_core
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_blog
+          ref: ${{ vars.BLOG_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_blog
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_document
+          ref: ${{ vars.DOCUMENT_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_document
+
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
       # The formatter takes the DSL's paren-free calls (`table "pages"`, `reference :site, ...`)
       # from the dependencies in .formatter.exs's import_deps, so it runs once they are fetched.
       - run: mix format --check-formatted
+
+  # FOUR MACHINES, A QUARTER OF THE TEST FILES EACH. Most of the suite is `async: false` — it shares
+  # the runtime's global state — and runs one module at a time, so more cores do not make it faster
+  # and more machines do. Mix deals the test files out by `--partitions`, and each partition has its
+  # own Postgres and its own database (`config/test.exs` names it after MIX_TEST_PARTITION).
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4]
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    env:
+      MIX_TEST_PARTITION: ${{ matrix.partition }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
+      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
+      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_gervaz
+          ref: ${{ vars.GERVAZ_REF || 'master' }}
+          path: __extensions/mishka_gervaz
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_cms_core
+          ref: ${{ vars.CORE_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_cms_core
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_blog
+          ref: ${{ vars.BLOG_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_blog
+
+      - uses: actions/checkout@v7
+        with:
+          repository: mishka-group/mishka_document
+          ref: ${{ vars.DOCUMENT_REF || 'master' }}
+          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
+          path: __extensions/mishka_document
+
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
+          fail-on-cache-miss: true
 
       # The Oban tables: the migration `mix dev_reset` writes with `oban.install`, an igniter task
       # that the test environment does not have.
@@ -99,8 +220,8 @@ jobs:
       - run: mix ash.codegen ci
 
       # --warnings-as-errors also fails on warnings in the test files, which a plain run can print
-      # while a test captures stderr, where nobody sees them.
-      - run: mix test --warnings-as-errors
+      # while a test captures stderr, where nobody sees them — each in the partition that compiles it.
+      - run: mix test --warnings-as-errors --partitions 4
         env:
           POSTGRES_HOST: localhost
           DB_HOST: localhost
