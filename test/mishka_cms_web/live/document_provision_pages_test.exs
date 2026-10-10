@@ -427,8 +427,8 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
     end
 
     # A PAGER ON A PATTERN PAGE MUST NOT WRITE THE PATTERN. `@page.path` is `/:lang/docs`, so a page
-    # that handed the list its own path would produce `/:lang/docs?page=2` — a URL that works only
-    # because a query string beats a capture, and reads like a bug to everyone who sees it.
+    # that handed the list its own path would produce `/:lang/docs?page=2` — a URL no reader could
+    # have typed, which reads like a bug to everyone who sees it.
     test "pages itself through a URL a reader could have typed", %{
       url_mode: url_mode,
       site: site,

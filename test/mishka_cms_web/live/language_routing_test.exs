@@ -356,6 +356,23 @@ defmodule MishkaCmsWeb.LanguageRoutingTest do
       assert {:error, {:live_redirect, %{to: "/fa/blog"}}} = live_redirect(view, to: "/blog")
     end
 
+    # `q[a]=b` and `tags[]=x` arrive as a map and a list, which `URI.encode_query/1` cannot write
+    # back — the redirect raised and the visitor got a 500.
+    test "and keeps a nested query string the way the visitor sent it", %{site: site} do
+      published!(site, "/:lang/pricing")
+      published!(site, "/:lang/blog")
+
+      {:ok, view, _html} = live(on_site(), "/fa/pricing")
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               live_redirect(view, to: "/blog?page=2&q[a]=b&tags[]=x&tags[]=y")
+
+      assert ["/fa/blog", query] = String.split(to, "?")
+
+      assert Plug.Conn.Query.decode(query) ==
+               %{"page" => "2", "q" => %{"a" => "b"}, "tags" => ["x", "y"]}
+    end
+
     test "a live navigation to one that already names a language is left alone", %{site: site} do
       published!(site, "/:lang/pricing")
       published!(site, "/:lang/blog")

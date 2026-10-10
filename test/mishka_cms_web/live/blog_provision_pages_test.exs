@@ -213,36 +213,56 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     html
   end
 
+  # One record of each kind the provisioned pages read, and every page's address.
+  defp every_page!(site, url_mode) do
+    post = publish!(site, "Ash in production")
+    collection = create_collection!(site_id: site.id, status: :active)
+    tag = [] |> tag(site.id) |> generate()
+    user = create_user!(site_id: site.id)
+    blogger = [site_id: site.id, user_id: user.id] |> blogger(site.id) |> generate()
+    team = [site_id: site.id, status: :active] |> team(site.id) |> generate()
+    provision!(site)
+
+    [
+      english(url_mode, "/blog"),
+      english(url_mode, "/blog/#{post.slug}"),
+      english(url_mode, "/blog/category/#{collection.slug}"),
+      english(url_mode, "/blog/tag/#{tag.slug}"),
+      english(url_mode, "/blog/categories"),
+      english(url_mode, "/blog/tags"),
+      english(url_mode, "/blog/author/#{blogger.slug}"),
+      english(url_mode, "/blog/team/#{team.slug}"),
+      english(url_mode, "/blog/people")
+    ]
+  end
+
   describe "every provisioned page" do
     test "renders for a reader who is not signed in", %{
       url_mode: url_mode,
       site: site,
       conn: conn
     } do
-      post = publish!(site, "Ash in production")
-      collection = create_collection!(site_id: site.id, status: :active)
-      tag = [] |> tag(site.id) |> generate()
-      user = create_user!(site_id: site.id)
-      blogger = [site_id: site.id, user_id: user.id] |> blogger(site.id) |> generate()
-      team = [site_id: site.id, status: :active] |> team(site.id) |> generate()
-      provision!(site)
-
-      urls = [
-        english(url_mode, "/blog"),
-        english(url_mode, "/blog/#{post.slug}"),
-        english(url_mode, "/blog/category/#{collection.slug}"),
-        english(url_mode, "/blog/tag/#{tag.slug}"),
-        english(url_mode, "/blog/categories"),
-        english(url_mode, "/blog/tags"),
-        english(url_mode, "/blog/author/#{blogger.slug}"),
-        english(url_mode, "/blog/team/#{team.slug}"),
-        english(url_mode, "/blog/people")
-      ]
-
-      for url <- urls do
+      for url <- every_page!(site, url_mode) do
         assert {:ok, view, html} = live(conn, url), "#{url} did not render"
         assert_drew!(html, url)
         assert_drew!(render_async(view, @async), url)
+      end
+    end
+
+    # `?q[a]=b` arrives as a map and `?tags[]=x` as a list. A key named like a capture never replaces
+    # the captured segment, so `?slug[a]=b` on a post still reads the post by its slug — before, it
+    # handed the read a map and the page answered 500.
+    test "renders when the query string nests a value, under a capture's name too", %{
+      url_mode: url_mode,
+      site: site,
+      conn: conn
+    } do
+      queries = ["?slug[a]=b&category[a]=b&tag[a]=b", "?page[a]=1&q[a]=b&tags[]=x&tags[]=y"]
+
+      for url <- every_page!(site, url_mode), query <- queries do
+        assert {:ok, view, html} = live(conn, url <> query), "#{url <> query} did not render"
+        assert_drew!(html, url <> query)
+        assert_drew!(render_async(view, @async), url <> query)
       end
     end
 
@@ -391,8 +411,8 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     end
 
     # A PAGER ON A PATTERN PAGE MUST NOT WRITE THE PATTERN. `@page.path` is `/:lang/blog`, so a page
-    # that handed the list its own path would produce `/:lang/blog?page=2` — a URL that works only
-    # because a query string beats a capture, and reads like a bug to everyone who sees it.
+    # that handed the list its own path would produce `/:lang/blog?page=2` — a URL no reader could
+    # have typed, which reads like a bug to everyone who sees it.
     test "pages itself through a URL a reader could have typed", %{
       url_mode: url_mode,
       site: site,

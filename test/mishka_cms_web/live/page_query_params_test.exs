@@ -214,15 +214,17 @@ defmodule MishkaCmsWeb.PageQueryParamsTest do
       end
     end
 
-    # THE QUERY STRING IS THE VISITOR'S OWN WORD. A page whose pattern captures `slug` and whose URL
-    # also carries `?slug=` gets the typed one, because that is the one the reader can see.
-    test "a query key of the same name wins over the captured segment", %{conn: conn, site: site} do
+    # THE PATH WINS, as a path param does in Phoenix's router: the page answered for the captured
+    # value, and `?slug[a]=b` would otherwise hand every record read a map instead of a slug.
+    test "the captured segment wins over a query key of the same name", %{conn: conn, site: site} do
       base = "/clash-#{System.unique_integer([:positive])}"
       published!(site, base <> "/:slug", @slug_template)
 
       {:ok, view, _html} = live(conn, base <> "/from-path?slug=from-query")
+      assert asked(view) == ["from-path"]
 
-      assert asked(view) == ["from-query"]
+      {:ok, view, _html} = live(conn, base <> "/from-path?slug[a]=b")
+      assert asked(view) == ["from-path"]
     end
   end
 
@@ -239,6 +241,17 @@ defmodule MishkaCmsWeb.PageQueryParamsTest do
       {:ok, view, _html} = live(conn, path)
 
       assert asked(view) == ["none"]
+    end
+
+    # `q[a]=b` and `tags[]=x` arrive as a map and a list, which `URI.encode_query/1` cannot write
+    # back — the page raised in `mount/3` and every such address answered 500.
+    test "and loads with a nested query string, a map and a list", %{conn: conn, path: path} do
+      assert conn |> get(path <> "?page=3&q[a]=b&tags[]=x") |> html_response(200) =~
+               ~s(data-role="asked")
+
+      {:ok, view, _html} = live(conn, path <> "?page=3&q[a]=b&tags[]=x&tags[]=y")
+
+      assert asked(view) == ["3"]
     end
 
     # THE HALF THAT MAKES BACK WORK. `<.link patch>` re-runs `handle_params/3` without remounting, so
