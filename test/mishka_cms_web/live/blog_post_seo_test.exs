@@ -12,6 +12,9 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
   """
   use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
 
+  @repo Application.compile_env!(:mishka_cms_core, :repo)
+  use Oban.Testing, repo: @repo
+
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
   import MishkaBlog.Dev.Generator, only: [blogger: 2, post_blogger: 1, post_collection: 1]
@@ -20,7 +23,8 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
   alias MishkaBlog.Plugins.PageSeo
   alias MishkaBlog.Provision
   alias MishkaCmsCore.Runtime.Page
-  alias MishkaCmsCore.Runtime.Seo
+  alias MishkaCmsCore.Runtime.{Seo, ShareCard}
+  alias MishkaCmsCore.Runtime.Workers.ShareCardRefreshWorker
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
   alias MishkaInstaller.Event.EventHandler
@@ -173,6 +177,45 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
              Enum.find(schema, &(&1["@type"] == "BreadcrumbList"))
 
     refute Enum.any?(schema, &(&1["@type"] == "WebPage"))
+  end
+
+  test "a card drawn after the post's save is in its head on the first visit", %{
+    url_mode: url_mode,
+    site: site,
+    conn: conn
+  } do
+    dir = Path.join(System.tmp_dir!(), "post_cards_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    Application.put_env(:mishka_cms_core, :media_static_dir, dir)
+
+    on_exit(fn ->
+      Application.delete_env(:mishka_cms_core, :media_static_dir)
+      File.rm_rf(dir)
+    end)
+
+    post = post!(site)
+    target = MishkaBlog.ShareCards.target(post)
+    :ok = ShareCard.refresh(site.id, target)
+
+    [look] =
+      all_enqueued(worker: ShareCardRefreshWorker, args: %{target: %{"record" => "blog:post"}})
+
+    :ok = perform_job(ShareCardRefreshWorker, look.args)
+    assert [draw] = all_enqueued(worker: ShareCard)
+    assert draw.args["card"]["eyebrow"] == "Engineering"
+    assert [%{"name" => "Shahryar"}] = draw.args["card"]["people"]
+    :ok = perform_job(ShareCard, draw.args)
+
+    doc =
+      conn
+      |> get(english(url_mode, "/blog/#{post.slug}"))
+      |> html_response(200)
+      |> LazyHTML.from_document()
+
+    assert attr(doc, ~s(meta[property="og:image"]), "content") ==
+             [Seo.base(site.host) <> ShareCard.url(site.id, draw.args["key"])]
+
+    assert all_enqueued(worker: ShareCard) == [draw]
   end
 
   test "what the post page sets wins over the post's own, and names the post's variables", %{
