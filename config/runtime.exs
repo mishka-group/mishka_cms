@@ -129,6 +129,9 @@ if config_env() == :prod do
     mnesia_dir: Path.join(mishka_data, "mnesia"),
     essential: [MishkaInstaller.Event.Event, MishkaInstaller.Installer.Installer]
 
+  # The CLDR data of each language a site reads, downloaded once and kept across redeploys.
+  config :localize, locale_cache_dir: Path.join(mishka_data, "localize")
+
   # WHO IS ASKING, BEHIND THE REVERSE PROXIES. Every request reaches the CMS from a proxy, so
   # `RemoteIp` reads the visitor from `x-forwarded-for`, right to left, passing over private addresses
   # (Coolify's own network) and these: Cloudflare's, as production runs

@@ -96,3 +96,6 @@ config :mishka_cms_core,
 config :mishka_cms_core, :official_ui_kits, [
   %{key: :styled, label: "Chelekom — styled", file: "chelekom.json", tag: "test", url: nil}
 ]
+
+# The tests read dates and numbers in English, which ships with `localize`: nothing is downloaded.
+config :localize, allow_runtime_locale_download: false

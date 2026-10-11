@@ -54,6 +54,9 @@ npm-debug.log
 __extensions/ash*/
 __extensions/mishka_gervaz/
 /priv/static/uploads
+
+# CLDR data `localize` downloads for a language other than English.
+/priv/localize/
 /priv/static/uploads_archived
 __extensions/.keep
 

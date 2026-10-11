@@ -85,7 +85,7 @@ defmodule MishkaCms.MixProject do
       # DataBase Stuff
       {:phoenix_ecto, "~> 4.7"},
       {:ecto_sql, "~> 3.14"},
-      {:decimal, "~> 3.1"},
+      {:decimal, "~> 3.2", override: true},
       {:postgrex, "~> 0.22"},
 
       # Req/Res Stuff

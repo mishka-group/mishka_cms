@@ -119,7 +119,7 @@ defmodule MishkaCms.Plugs.UploadsGateTest do
     end
 
     test "the other static files keep their long-lived caching", %{conn: conn} do
-      assert conn |> get("/favicon.ico") |> get_resp_header("cache-control") == ["public"]
+      assert conn |> get("/fonts/fonts.css") |> get_resp_header("cache-control") == ["public"]
     end
   end
 

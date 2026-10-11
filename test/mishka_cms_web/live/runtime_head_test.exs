@@ -279,7 +279,7 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
       assert attr(doc, ~s(meta[property="og:title"]), "content") == ["Plain page"]
       assert attr(doc, ~s(meta[property="og:url"]), "content") == [url]
       assert attr(doc, ~s(meta[property="og:site_name"]), "content") == ["The Studio"]
-      assert attr(doc, ~s(meta[property="og:locale"]), "content") == ["en"]
+      assert attr(doc, ~s(meta[property="og:locale"]), "content") == ["en_US"]
       assert attr(doc, ~s(meta[name="twitter:card"]), "content") == ["summary"]
       assert attr(doc, ~s(meta[name="twitter:title"]), "content") == ["Plain page"]
 

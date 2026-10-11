@@ -1,7 +1,7 @@
 defmodule MishkaCmsWeb.SeoFilesTest do
   @moduledoc """
   A site's `/robots.txt`, `/sitemap.xml` and the gzipped `/sitemap-00001.xml.gz`… files beside it
-  through the CMS's whole browser pipeline.
+  through the CMS's whole browser pipeline, and its `/favicon.ico`.
 
   They are `MishkaCmsCoreWeb.SeoController`'s, not a static file's or a page's. They answer the
   `Accept` a crawler sends for a text, an xml or a gzipped file, while a page asked the same is
@@ -211,6 +211,32 @@ defmodule MishkaCmsWeb.SeoFilesTest do
           "application/x-gzip"
         ] do
       assert_error_sent 406, fn -> fetch(site, path, accept: accept) end
+    end
+  end
+
+  describe "favicon.ico" do
+    @image_accept "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+
+    test "is the site's own favicon, not a static file, whatever Accept a browser sends", %{
+      site: site
+    } do
+      icon = "/uploads/#{site.id}/media/icon.png"
+      {:ok, _} = Settings.put("site.favicon", icon, site_id: site.id)
+
+      for accept <- [@image_accept, "*/*", @browser] do
+        conn = fetch(site, "/favicon.ico", accept: accept)
+
+        assert conn.status == 302, "/favicon.ico refused #{accept}"
+        assert conn.private.phoenix_controller == MishkaCmsCoreWeb.SeoController
+        assert get_resp_header(conn, "location") == [icon]
+      end
+    end
+
+    test "is a 404 for a site with no favicon", %{site: site} do
+      conn = fetch(site, "/favicon.ico", accept: @image_accept)
+
+      assert conn.status == 404
+      assert get_resp_header(conn, "cache-control") == ["no-store"]
     end
   end
 
