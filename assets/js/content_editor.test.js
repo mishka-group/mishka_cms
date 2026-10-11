@@ -8,6 +8,7 @@ import config, {
   COMPONENT_MIME,
   EVENT,
   TYPED_WAIT,
+  CODE_LANGUAGES,
   besideOf,
   codeAsText,
   contentFrom,
@@ -57,7 +58,8 @@ function fixture(stored) {
            data-format="html" data-debounce="5" data-components="#ed-components"
            data-placeholder="Write here" data-label-id="ed-label"
            data-label-edit="Settings" data-label-remove="Remove" data-label-code="Code"
-           data-label-code-error="Not one component"></div>
+           data-label-code-error="Not one component"
+           data-label-code-language="Code language" data-label-code-plain="Plain text"></div>
       <button type="button" id="ed-components-toggle">Components</button>
       <div id="ed-components">
         <div data-role="content-editor-panel" id="ed-panel">
@@ -343,6 +345,118 @@ describe("opening highlighted code", () => {
   test("content with no highlighted code is handed over as it is", () => {
     const html = "<p>Intro</p><pre><code class=\"language-sql\">select 1;\nselect 2;</code></pre>";
     expect(codeAsText(html)).toBe(html);
+  });
+});
+
+describe("a code block's language", () => {
+  function pickers(surface) {
+    return [...surface.querySelectorAll("[data-role='content-code-language']")];
+  }
+
+  function choose(select, value) {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function opened(stored) {
+    return editorFor(stored, { segments: { segments: [{ type: "html", html: stored }] } });
+  }
+
+  test("each block shows the language it is stored with, and plain code as plain text", async () => {
+    const { surface } = await opened(
+      '<pre><code class="language-elixir">IO.puts(1)</code></pre><pre><code>plain</code></pre>',
+    );
+
+    const [elixir, plain] = pickers(surface);
+
+    expect(elixir.value).toBe("elixir");
+    expect(plain.value).toBe("");
+    expect(plain.selectedOptions[0].textContent).toBe("Plain text");
+    expect(elixir.getAttribute("aria-label")).toBe("Code language");
+  });
+
+  test("offers the languages the blog highlights", async () => {
+    const { surface } = await opened("<pre><code>x</code></pre>");
+    const values = [...pickers(surface)[0].options].map((option) => option.value);
+
+    expect(values).toEqual(["", ...CODE_LANGUAGES.map(([value]) => value)]);
+    expect(values).toEqual(expect.arrayContaining(["elixir", "heex", "html", "css", "js", "ts"]));
+  });
+
+  test("choosing one marks the block, and what is saved says so", async () => {
+    const { surface, mirror, editor } = await opened("<pre><code>const a = 1;</code></pre>");
+
+    choose(pickers(surface)[0], "js");
+    await settle();
+
+    expect(editor.state.doc.firstChild.attrs.language).toBe("js");
+    expect(mirror.value).toContain('<code class="language-js">const a = 1;</code>');
+    expect(pickers(surface)[0].value).toBe("js");
+  });
+
+  test("choosing plain text takes the language off", async () => {
+    const { surface, mirror } = await opened('<pre><code class="language-css">a{}</code></pre>');
+
+    choose(pickers(surface)[0], "");
+    await settle();
+
+    expect(mirror.value).toContain("<code>a{}</code>");
+  });
+
+  test("a language the list does not have is kept, and shown as it is written", async () => {
+    const { surface, mirror, editor } = await opened(
+      '<pre><code class="language-bash">ls -la</code></pre><p>After</p>',
+    );
+
+    expect(pickers(surface)[0].value).toBe("bash");
+
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+    editor.commands.insertContent("!");
+    await settle();
+
+    expect(mirror.value).toContain('<code class="language-bash">ls -la</code>');
+  });
+
+  test("a block made from the toolbar starts as plain text, its code still typed into", async () => {
+    const { surface, editor, mirror } = await opened("<p>x</p>");
+
+    editor.chain().focus("end").toggleCodeBlock().insertContent(" && mix test").run();
+    await settle();
+
+    expect(pickers(surface)[0].value).toBe("");
+    expect(mirror.value).toContain("<code>x &amp;&amp; mix test</code>");
+  });
+
+  test("code is left to right, a block made from a paragraph and one stored otherwise too", async () => {
+    const stored = '<p dir="auto">x</p><pre dir="rtl"><code>y</code></pre><pre dir="auto"><code>z</code></pre>';
+    const { surface, editor, mirror } = await opened(stored);
+
+    editor.chain().setTextSelection(1).toggleCodeBlock().insertContent("!").run();
+    await settle();
+
+    expect(mirror.value.match(/<pre[^>]*>/g)).toEqual(['<pre dir="ltr">', '<pre dir="ltr">', '<pre dir="ltr">']);
+    expect([...surface.querySelectorAll("[data-role='content-code'] pre")].map((pre) => pre.dir)).toEqual([
+      "ltr",
+      "ltr",
+      "ltr",
+    ]);
+  });
+
+  test("its picker is outside the text: nothing it does reaches the document", async () => {
+    const { surface, editor } = await opened("<pre><code>x</code></pre>");
+    const picker = pickers(surface)[0];
+    const view = editor.view;
+
+    expect(picker.closest("[contenteditable='false']")).not.toBeNull();
+
+    const caught = [];
+    for (const type of ["mousedown", "keydown"]) {
+      picker.addEventListener(type, (event) => caught.push(event));
+      picker.dispatchEvent(new Event(type, { bubbles: true }));
+    }
+
+    for (const event of caught) expect(view.docView.children[0].stopEvent(event)).toBe(true);
+    expect(editor.state.doc.firstChild.textContent).toBe("x");
   });
 });
 
