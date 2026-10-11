@@ -138,3 +138,7 @@ accounts, all with the seeds' development password:
 
 `<site>` is the site's name: `admin@site-a.test`. `master@example.com` and `master1..3@example.com`
 are masters holding `*`; `none@example.com` (localhost) holds nothing.
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE).
