@@ -23,6 +23,7 @@
 import { Extension, Node, getHTMLFromFragment } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import CodeBlock from "@tiptap/extension-code-block";
 import Image from "@tiptap/extension-image";
 
 export const COMPONENT_MIME = "application/x-mishka-component";
@@ -763,7 +764,8 @@ function direction(fallback) {
 
 // EACH BLOCK FINDS ITS OWN DIRECTION, so a Persian paragraph beside an English one reads right in
 // the editor and on the page — what Tiptap's `textDirection: "auto"` does, which the engine does
-// not pass. Code is always left to right.
+// not pass. Code is always left to right: whatever `dir` a stored block or the paragraph it was
+// made from holds, it is written `ltr`.
 export const ContentDirection = Extension.create({
   name: "contentDirection",
 
@@ -773,8 +775,124 @@ export const ContentDirection = Extension.create({
         types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "listItem"],
         attributes: { dir: direction("auto") },
       },
-      { types: ["codeBlock"], attributes: { dir: direction("ltr") } },
+      {
+        types: ["codeBlock"],
+        attributes: {
+          dir: { default: "ltr", parseHTML: () => "ltr", renderHTML: () => ({ dir: "ltr" }) },
+        },
+      },
     ];
+  },
+});
+
+// ---- a code block's language ---------------------------------------------------------------
+
+// The languages a code block can be marked as: the ones Mishka Blog highlights, and Shell, which a
+// post draws plain under its name. Each is stored as `<code class="language-…">`.
+export const CODE_LANGUAGES = [
+  ["elixir", "Elixir"],
+  ["heex", "HEEx"],
+  ["eex", "EEx"],
+  ["erlang", "Erlang"],
+  ["html", "HTML"],
+  ["css", "CSS"],
+  ["js", "JavaScript"],
+  ["ts", "TypeScript"],
+  ["json", "JSON"],
+  ["sql", "SQL"],
+  ["diff", "Diff"],
+  ["shell", "Shell"],
+];
+
+const LISTED = new Set(CODE_LANGUAGES.map(([value]) => value));
+
+function option(value, text) {
+  const element = document.createElement("option");
+  element.value = value;
+  element.textContent = text;
+  return element;
+}
+
+// A code block in the editor: its language, picked above the code, and the code. The picker is
+// outside the text, so no click or key on it reaches the document; choosing is one step to undo.
+// A language a stored block holds that the list does not — `bash` from an older post — is kept,
+// and offered as it is written.
+function codeView({ node, editor, getPos }) {
+  const labels = editor.options.element ? editor.options.element.dataset : {};
+
+  const dom = document.createElement("div");
+  dom.dataset.role = "content-code";
+
+  const head = document.createElement("div");
+  head.dataset.role = "content-code-head";
+  head.setAttribute("contenteditable", "false");
+
+  const picker = document.createElement("select");
+  picker.dataset.role = "content-code-language";
+  picker.setAttribute("aria-label", labels.labelCodeLanguage || "Language");
+  picker.append(
+    option("", labels.labelCodePlain || "Plain text"),
+    ...CODE_LANGUAGES.map(([value, text]) => option(value, text)),
+  );
+
+  const unlisted = option("", "");
+
+  const pre = document.createElement("pre");
+  pre.dir = "ltr";
+  const code = document.createElement("code");
+  pre.appendChild(code);
+  head.appendChild(picker);
+  dom.append(head, pre);
+
+  function paint() {
+    const language = node.attrs.language || "";
+
+    if (language && !LISTED.has(language)) {
+      unlisted.value = language;
+      unlisted.textContent = language;
+      if (!unlisted.parentNode) picker.appendChild(unlisted);
+    } else if (unlisted.parentNode) {
+      unlisted.remove();
+    }
+
+    picker.value = language;
+    picker.disabled = !editor.isEditable;
+    code.className = language ? `language-${language}` : "";
+  }
+
+  picker.addEventListener("change", () => {
+    const pos = typeof getPos === "function" ? getPos() : null;
+    if (typeof pos !== "number" || !editor.isEditable) return;
+
+    editor
+      .chain()
+      .command(({ tr }) => {
+        tr.setNodeAttribute(pos, "language", picker.value || null);
+        return true;
+      })
+      .run();
+  });
+
+  paint();
+
+  return {
+    dom,
+    contentDOM: code,
+    update(updated) {
+      if (updated.type !== node.type) return false;
+      node = updated;
+      paint();
+      return true;
+    },
+    stopEvent: (event) => head.contains(event.target),
+    ignoreMutation: (mutation) => mutation.type === "attributes" || head.contains(mutation.target),
+  };
+}
+
+// Tiptap's own code block, drawn with its language picker. What it stores is Tiptap's, unchanged.
+export const CodeBlockLanguage = CodeBlock.extend({
+  addNodeView() {
+    return (props) => codeView(props);
   },
 });
 
@@ -1620,12 +1738,14 @@ export const BlockHandle = Extension.create({
 export default {
   extensions: [
     ContentDirection,
+    CodeBlockLanguage,
     Image.configure({ inline: true }),
     MishkaComponent,
     ContentBridge,
     BlockHandle,
   ],
   starterKit: {
+    codeBlock: false,
     link: {
       openOnClick: false,
       autolink: true,
