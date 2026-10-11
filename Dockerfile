@@ -134,12 +134,12 @@ USER nobody
 
 EXPOSE 4000
 
-# favicon.ico is served by Plug.Static ahead of the router, so this answers before the CMS is
-# installed and without a Host the tenant lookup knows; robots.txt is each site's own, and the
-# lookup refuses it on localhost. `localhost` is excluded from the force_ssl redirect (Plug.SSL
-# default), so plain http works here.
+# fonts/fonts.css is served by Plug.Static ahead of the router, so this answers before the CMS is
+# installed and without a Host the tenant lookup knows; favicon.ico and robots.txt are each site's
+# own, and the lookup refuses them on localhost. `localhost` is excluded from the force_ssl redirect
+# (Plug.SSL default), so plain http works here.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-  CMD curl -fsS "http://localhost:${PORT:-4000}/favicon.ico" > /dev/null || exit 1
+  CMD curl -fsS "http://localhost:${PORT:-4000}/fonts/fonts.css" > /dev/null || exit 1
 
 # Migrations are NOT run here on purpose (ROADMAP_DISTRIBUTED_CMS.md, phase 1): run
 # `/app/bin/migrate` as the deploy's pre-start command, then start.
