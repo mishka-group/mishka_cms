@@ -45,6 +45,12 @@ config :phoenix, :filter_parameters, ["password", "secret", "api_key", "token"]
 # MishkaGervaz gettext backend - use our app's Gettext for i18n in DSL labels
 config :mishka_gervaz, :gettext_backend, MishkaCmsCore.Gettext
 
+# Unicode CLDR data for `MishkaCmsCore.Localized` — dates, numbers, lists and language names in a
+# reader's language. English ships with `localize`; any other language a site publishes in is
+# downloaded the first time it is read, into priv/localize/locales (config/runtime.exs keeps it on
+# MISHKA_DATA_DIR in production), so an admin adding a language needs nothing else.
+config :localize, otp_app: :mishka_cms, allow_runtime_locale_download: true
+
 config :mishka_cms, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
