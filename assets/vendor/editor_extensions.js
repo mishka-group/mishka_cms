@@ -105,16 +105,44 @@ export function escapeAttribute(value) {
     .replace(/>/g, "&gt;");
 }
 
-// The document the server's segments describe: its HTML as it is, and each component as the
-// element the block parses from.
+// The document the server's segments describe: its HTML as it is — its code blocks as their text,
+// `codeAsText/1` — and each component as the element the block parses from.
 export function contentFrom(segments) {
   return (segments || [])
     .map((segment) =>
       segment.type === "component"
         ? `<div data-mishka-component="" data-name="${escapeAttribute(segment.name)}" data-marker="${escapeAttribute(segment.marker)}"></div>`
-        : segment.html || "",
+        : codeAsText(segment.html || ""),
     )
     .join("");
+}
+
+// HIGHLIGHTED CODE KEEPS ITS LINES. Tiptap takes every text node that is a line break alone — `\n`,
+// or `\n` and two spaces — out of the HTML it is handed, before it reads it; and a block the old
+// site highlighted holds just that between its tokens, `<span class="w">\n</span>`, so
+// `# Export the set` and `mix export` on the next line opened as `# Export the setmix export`, and
+// were saved so. A code block holds plain text in the editor anyway: each is handed over as its text,
+// with a `<br>` in it as a line break, and the server highlights it again when it is saved.
+export function codeAsText(html) {
+  if (typeof html !== "string" || !/<pre[\s>]/i.test(html)) return html;
+
+  inert = inert || document.implementation.createHTMLDocument("");
+
+  const holder = inert.createElement("div");
+  holder.innerHTML = html;
+
+  let marked = false;
+
+  for (const pre of holder.querySelectorAll("pre")) {
+    const code = Array.from(pre.children).find((child) => child.tagName === "CODE") || pre;
+    if (!code.firstElementChild) continue;
+
+    for (const br of code.querySelectorAll("br")) br.replaceWith("\n");
+    code.textContent = code.textContent;
+    marked = true;
+  }
+
+  return marked ? holder.innerHTML : html;
 }
 
 function toggle(el, attr, on) {
@@ -1323,6 +1351,9 @@ export const ContentBridge = Extension.create({
   onBeforeCreate() {
     const nonce = cspNonce();
     if (nonce) this.editor.setOptions({ injectNonce: nonce });
+
+    const content = this.editor.options.content;
+    if (typeof content === "string") this.editor.setOptions({ content: codeAsText(content) });
   },
 
   onCreate() {

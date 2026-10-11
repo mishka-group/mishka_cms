@@ -9,6 +9,7 @@ import config, {
   EVENT,
   TYPED_WAIT,
   besideOf,
+  codeAsText,
   contentFrom,
   controllerOf,
   dropComponent,
@@ -281,6 +282,67 @@ describe("opening stored content", () => {
 
     hook.emit(EVENT, { id: "other", styles: "/assets/css/content-editor-2/ccc" });
     expect(link().getAttribute("href")).toBe("/assets/css/content-editor-1/bbb");
+  });
+});
+
+describe("opening highlighted code", () => {
+  // As the old site highlighted it, and as posts imported from it are stored: a line break is a
+  // token of its own.
+  const HIGHLIGHTED =
+    '<pre class="highlight"><code class="language-elixir">' +
+    '<span class="c1"># Export the set</span><span class="w">\n</span>' +
+    '<span class="n">mix</span><span class="w"> </span><span class="n">export</span>' +
+    '<span class="w">\n  </span><span class="ss">:ok</span><span class="w">\n\n</span>' +
+    '<span class="c1"># And again</span></code></pre>';
+
+  const LINES = "# Export the set\nmix export\n  :ok\n\n# And again";
+
+  function codeBlocks(editor) {
+    const found = [];
+
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "codeBlock") found.push({ text: node.textContent, ...node.attrs });
+    });
+
+    return found;
+  }
+
+  test("keeps every line and its language", async () => {
+    const { editor } = await editorFor(`<p>Run it:</p>${HIGHLIGHTED}`, {
+      segments: { segments: [{ type: "html", html: `<p>Run it:</p>${HIGHLIGHTED}` }] },
+    });
+
+    expect(codeBlocks(editor)).toEqual([{ text: LINES, language: "elixir", dir: "ltr" }]);
+  });
+
+  test("and so does the content the server split around a component", async () => {
+    const stored = `${HIGHLIGHTED}<p>${MARKER}</p>`;
+
+    const { editor } = await editorFor(stored, {
+      segments: {
+        segments: [
+          { type: "html", html: HIGHLIGHTED },
+          { type: "component", name: "callout", marker: MARKER },
+        ],
+      },
+    });
+
+    expect(components(editor)).toHaveLength(1);
+    expect(codeBlocks(editor)).toEqual([{ text: LINES, language: "elixir", dir: "ltr" }]);
+  });
+
+  test("a line break written as <br> is a line break", async () => {
+    const stored = '<pre><code class="language-js">let a = 1;<br>let b = 2;</code></pre>';
+    const { editor } = await editorFor(stored, {
+      segments: { segments: [{ type: "html", html: stored }] },
+    });
+
+    expect(codeBlocks(editor)).toEqual([{ text: "let a = 1;\nlet b = 2;", language: "js", dir: "ltr" }]);
+  });
+
+  test("content with no highlighted code is handed over as it is", () => {
+    const html = "<p>Intro</p><pre><code class=\"language-sql\">select 1;\nselect 2;</code></pre>";
+    expect(codeAsText(html)).toBe(html);
   });
 });
 
