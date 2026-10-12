@@ -19,6 +19,8 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 
+  alias MishkaCms.Test.EventCannotRun
+
   alias MishkaCmsCore.Runtime.States.{
     AssetsState,
     SettingsState,
@@ -185,6 +187,14 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
       assert %URI{path: "/welcome-back", query: query} = URI.parse(to)
       assert URI.decode_query(query) == %{"site" => site.id, "path" => "/:lang/auth"}
     end
+
+    test "sends them to the site root while runtime:page:visitors_only_redirected cannot run",
+         %{site: site} do
+      EventCannotRun.stub!("runtime:page:visitors_only_redirected")
+      conn = signed_in_as(create_user!(site_id: site.id))
+
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, "/en/auth")
+    end
   end
 
   describe "a signed-in-only page" do
@@ -214,6 +224,12 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
 
       assert %URI{path: "/welcome-back", query: query} = URI.parse(to)
       assert URI.decode_query(query) == %{"site" => site.id, "path" => "/:lang/auth/sign-out"}
+    end
+
+    test "sends them to the sign-in page while runtime:page:signed_in_only_redirected cannot run" do
+      EventCannotRun.stub!("runtime:page:signed_in_only_redirected")
+
+      assert {:error, {:redirect, %{to: "/en/auth"}}} = live(on_site(), "/en/auth/sign-out")
     end
   end
 

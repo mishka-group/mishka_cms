@@ -321,16 +321,21 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
       assert html_response(get(on_site(site), english(url_mode, "/docs/guide")), 200)
 
       assert english_sign_in?(
-               redirected_to(get(on_site(site), english(url_mode, "/docs/guide/upgrade"))),
+               redirected_to(
+                 get(on_site(site), english(url_mode, "/docs/guide/install/upgrade"))
+               ),
                url_mode
              )
 
       assert_error_sent(404, fn ->
-        get(signed_in(site, @locked), english(url_mode, "/docs/guide/upgrade"))
+        get(signed_in(site, @locked), english(url_mode, "/docs/guide/install/upgrade"))
       end)
 
       assert html_response(
-               get(signed_in(site, ["staff:*"]), english(url_mode, "/docs/guide/upgrade")),
+               get(
+                 signed_in(site, ["staff:*"]),
+                 english(url_mode, "/docs/guide/install/upgrade")
+               ),
                200
              )
     end

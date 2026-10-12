@@ -1,6 +1,6 @@
 defmodule MishkaCmsWeb.DocumentPageSeoTest do
   @moduledoc """
-  The head of the documentation's provisioned page of a document, `/:lang/docs/:workspace/:section`,
+  The head of the documentation's provisioned page of a document, `/:lang/docs/:workspace/*section`,
   as a crawler reads it: the page's own title, summary and JSON-LD, put there by
   `MishkaDocument.Plugins.PageSeo` on `runtime:page:seo`.
 

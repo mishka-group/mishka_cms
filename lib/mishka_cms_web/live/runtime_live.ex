@@ -191,7 +191,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
                       site.name,
                       site.id
                     )
-                    |> then(&Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1))
+                    |> then(
+                      &Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1,
+                        cannot_run: {:error, :cannot_run}
+                      )
+                    )
                     |> admit(page_module, socket)
                     |> case do
                       {{:ok, _result}, socket} ->
@@ -363,7 +367,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
                 site_name,
                 site_id
               )
-              |> then(&Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1))
+              |> then(
+                &Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1,
+                  cannot_run: {:error, :cannot_run}
+                )
+              )
               |> admit(page_module, socket)
               |> case do
                 {{:ok, _result}, socket} ->
@@ -386,6 +394,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> case do
                     {:ok, socket} ->
                       new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
+
                       {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
 
                     {:sign_in, socket} ->
@@ -635,7 +644,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
             case compiled do
               {:ok, _result} ->
-                Hook.call("RuntimeLive.RuntimeLayout.AfterCompile", page_module.render(assigns))
+                Hook.call(
+                  "RuntimeLive.RuntimeLayout.AfterCompile",
+                  page_module.render(assigns)
+                )
 
               {:error, reason} ->
                 _ =

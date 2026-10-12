@@ -15,6 +15,7 @@ defmodule MishkaCms.Plugs.UploadsGateTest do
   import MishkaCms.Test.Factory
 
   alias MishkaCms.Plugs.UploadsGate
+  alias MishkaCms.Test.EventCannotRun
   alias MishkaCmsCore.Accounts.{LiveSockets, Permission, UserPermission}
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, ViewerState}
   alias MishkaCmsCore.Settings
@@ -90,6 +91,15 @@ defmodule MishkaCms.Plugs.UploadsGateTest do
     end
 
     test "an offline site's file is refused", %{conn: conn} do
+      site = site_with_file(:offline)
+
+      assert conn |> get(site.file) |> refused?()
+    end
+
+    test "an offline site's file is refused while web:request:upload_unavailable cannot run", %{
+      conn: conn
+    } do
+      EventCannotRun.stub!("web:request:upload_unavailable")
       site = site_with_file(:offline)
 
       assert conn |> get(site.file) |> refused?()

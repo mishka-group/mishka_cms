@@ -103,7 +103,9 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
   @spec refuse(Plug.Conn.t()) :: Plug.Conn.t()
   def refuse(conn) do
     site = conn.assigns[:current_site]
-    conn = Hook.call("web:request:site_unavailable", conn, meta: %{state: :offline, site: site})
+
+    conn =
+      Hook.call("web:request:site_unavailable", conn, meta: %{state: :offline, site: site})
 
     if conn.halted, do: conn, else: conn |> answer_offline(site) |> halt()
   end

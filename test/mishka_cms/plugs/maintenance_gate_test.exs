@@ -10,6 +10,7 @@ defmodule MishkaCms.Plugs.MaintenanceGateTest do
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, ViewerState}
   alias MishkaCmsCore.Settings
   alias MishkaCms.Plugs.MaintenanceGate
+  alias MishkaCms.Test.EventCannotRun
   alias Phoenix.LiveView.Socket
 
   require Ash.Query
@@ -157,6 +158,19 @@ defmodule MishkaCms.Plugs.MaintenanceGateTest do
       assert conn.halted
       assert conn.status == 503
       assert conn.resp_body =~ "Down for Maintenance"
+    end
+
+    for event <- ["web:request:site_unavailable", "web:request:offline_page"] do
+      @event event
+
+      test "an anonymous visitor still gets the maintenance page while #{event} cannot run" do
+        EventCannotRun.stub!(@event)
+
+        conn = call("/")
+        assert conn.halted
+        assert conn.status == 503
+        assert conn.resp_body =~ "Down for Maintenance"
+      end
     end
 
     # A master signs in on the master site's own address and nowhere else, so only that site's page

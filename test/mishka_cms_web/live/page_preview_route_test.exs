@@ -21,6 +21,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 
+  alias MishkaCms.Test.EventCannotRun
   alias MishkaCmsCore.Accounts.{LiveSockets, Permission}
   alias MishkaCmsCore.ErrorsExceptions.NotFoundError
   alias MishkaCmsCore.Runtime.{DraftPreviewAssets, Page, PageDraft}
@@ -223,6 +224,15 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       assert_raise MishkaCmsCore.ErrorsExceptions.NotFoundError, fn ->
         live(on_host("localhost"), "/_preview/page/definitely-not-a-token")
       end
+    end
+
+    test "and an unknown token's stylesheet is not found while web:request:preview_unavailable cannot run" do
+      EventCannotRun.stub!("web:request:preview_unavailable")
+
+      refused = "localhost" |> on_host() |> get("/_preview/page/definitely-not-a-token/css")
+
+      assert refused.status == 404
+      assert get_resp_header(refused, "cache-control") == ["no-store"]
     end
 
     # A live page carries no draft banner — there is nothing temporary about it. The banner's CSS
