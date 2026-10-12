@@ -50,12 +50,12 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
   import Plug.Conn
 
   alias MishkaCmsCore.Accounts.Helper
+  alias MishkaCmsCore.PluginEvent
   alias MishkaCmsCore.Runtime.Languages
   alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
   alias MishkaCmsCore.Runtime.States.ViewerState
   alias MishkaCmsCore.Settings
   alias MishkaCmsWeb.ErrorHTML
-  alias MishkaInstaller.Event.Hook
 
   @default_message gettext_noop(
                      "We are currently undergoing maintenance. Please check back soon."
@@ -103,7 +103,9 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
   @spec refuse(Plug.Conn.t()) :: Plug.Conn.t()
   def refuse(conn) do
     site = conn.assigns[:current_site]
-    conn = Hook.call("web:request:site_unavailable", conn, meta: %{state: :offline, site: site})
+
+    conn =
+      PluginEvent.call("web:request:site_unavailable", conn, meta: %{state: :offline, site: site})
 
     if conn.halted, do: conn, else: conn |> answer_offline(site) |> halt()
   end
@@ -134,7 +136,7 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
       |> put_resp_content_type("text/html")
 
     {page, meta} = offline_page(conn, site)
-    conn = Hook.call("web:request:offline_page", conn, meta: Map.put(meta, :site, site))
+    conn = PluginEvent.call("web:request:offline_page", conn, meta: Map.put(meta, :site, site))
 
     if conn.halted, do: conn, else: send_resp(conn, 503, page)
   end

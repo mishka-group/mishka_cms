@@ -1,10 +1,13 @@
 defmodule MishkaCmsWeb.ErrorHTMLTest do
   use MishkaCmsWeb.ConnCase
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog, only: [capture_log: 1]
   import MishkaCms.Test.Factory
+  alias MishkaCms.Test.EventCannotRun
   alias MishkaCmsWeb.ErrorHTML
   alias MishkaCmsCore.Runtime.ErrorPage
-  alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
+  alias MishkaCmsCore.Runtime.Compilers.{Helpers, ModuleCompiler}
+  alias MishkaCmsCore.Runtime.States.{CompileFailureState, WebRunTimeMetaDataState}
   @moduletag :unit
   @moduletag :capture_log
 
@@ -213,6 +216,46 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       # Should return default Phoenix error message
       result = ErrorHTML.render("404.html", %{conn: conn})
       assert result == "Not Found"
+    end
+
+    test "falls back to Phoenix default for a page that does not compile while ErrorHTML.Render.CompileError cannot run",
+         %{conn: conn, site: site} do
+      EventCannotRun.stub!("ErrorHTML.Render.CompileError")
+      WebRunTimeMetaDataState.delete_by_site(site.name)
+      on_exit(fn -> WebRunTimeMetaDataState.delete_by_site(site.name) end)
+
+      [error_page] = ErrorPage |> Ash.Query.set_tenant(site.id) |> Ash.read!(authorize?: false)
+
+      :ok =
+        WebRunTimeMetaDataState.save(%{
+          id: error_page.id,
+          path: error_page.path,
+          site: site.name,
+          title: error_page.name,
+          created_at: error_page.inserted_at,
+          section: "ErrorPage",
+          priority: 0
+        })
+
+      module = Helpers.module_name(error_page.id, site.name, "ErrorPage")
+      :ok = ModuleCompiler.unload(module)
+      :ok = CompileFailureState.record(module, :compilation_error)
+      on_exit(fn -> CompileFailureState.clear(module) end)
+
+      log =
+        capture_log(fn ->
+          assert ErrorHTML.render("404.html", %{conn: conn}) == "Not Found"
+        end)
+
+      refute log =~ "failed to render error page"
+    end
+
+    test "falls back to Phoenix default when no error page exists while ErrorHTML.Render.CompileError cannot run",
+         %{conn: conn} do
+      EventCannotRun.stub!("ErrorHTML.Render.CompileError")
+      WebRunTimeMetaDataState.clear()
+
+      assert ErrorHTML.render("404.html", %{conn: conn}) == "Not Found"
     end
   end
 
