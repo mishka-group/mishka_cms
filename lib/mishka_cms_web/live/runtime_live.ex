@@ -87,7 +87,6 @@ defmodule MishkaCmsWeb.RuntimeLive do
   use MishkaCmsWeb, :live_view
   alias MishkaCmsCore.Accounts.AuthRateLimit
   alias MishkaCmsCore.Accounts.Checks.AccessPermissions
-  alias MishkaCmsCore.PluginEvent
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Runtime.Compilers.Helpers
   alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo, SiteAvailability}
@@ -169,7 +168,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
             # `MishkaCmsCore.LiveUserAuth.load_current_user/1` verifies one from it.
             joined_path =
               %{path: path, site: site}
-              |> then(&PluginEvent.call("RuntimeLive.OnMount.BeforePathTransform", &1).path)
+              |> then(&Hook.call("RuntimeLive.OnMount.BeforePathTransform", &1).path)
               |> Enum.join("/")
               |> then(fn path ->
                 if String.starts_with?(path, "/"), do: path, else: "/" <> path
@@ -192,7 +191,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
                       site.name,
                       site.id
                     )
-                    |> then(&Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1))
+                    |> then(
+                      &Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1,
+                        cannot_run: {:error, :cannot_run}
+                      )
+                    )
                     |> admit(page_module, socket)
                     |> case do
                       {{:ok, _result}, socket} ->
@@ -207,7 +210,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                           |> sign_in_assets(path, site)
                           |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
 
-                        PluginEvent.call("RuntimeLive.OnMount.AfterCompile", new_socket)
+                        Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
 
                       {:sign_in, socket} ->
                         sign_in(socket, params, site.id)
@@ -246,7 +249,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
             final_result =
               {:ok, new_socket, layout: {MishkaCmsWeb.Layouts, :runtime}}
-              |> then(&PluginEvent.call("RuntimeLive.OnMount.Return", &1))
+              |> then(&Hook.call("RuntimeLive.OnMount.Return", &1))
 
             {final_result, %{}}
           end
@@ -259,7 +262,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
       page_module: page_module,
       page: %{path: path},
       private: %{site: site, site_id: site_id}
-    } = PluginEvent.call("RuntimeLive.OnRender.BeforeRender", assigns)
+    } = Hook.call("RuntimeLive.OnRender.BeforeRender", assigns)
 
     :telemetry.span(
       [:mishka_cms, :runtime, :render],
@@ -273,7 +276,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
               %{private: %{site: ^site, page_module: ^page_module}} =
                 page_module.__page_information__()
 
-              PluginEvent.call("RuntimeLive.OnRender.AfterCompile", page_module.render(assigns))
+              Hook.call("RuntimeLive.OnRender.AfterCompile", page_module.render(assigns))
 
             {:error, reason} ->
               _ = Hook.call("RuntimeLive.OnRender.AfterCompileError", reason, return: false)
@@ -326,7 +329,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
             # `RuntimeLive.HandleParams.BeforeParams`, above, is handed the socket.
             joined_path =
               %{path: path, site: current_site}
-              |> then(&PluginEvent.call("RuntimeLive.HandleParams.BeforePathTransform", &1).path)
+              |> then(&Hook.call("RuntimeLive.HandleParams.BeforePathTransform", &1).path)
               |> Enum.join("/")
               |> then(fn path ->
                 if String.starts_with?(path, "/"), do: path, else: "/" <> path
@@ -364,7 +367,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
                 site_name,
                 site_id
               )
-              |> then(&Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1))
+              |> then(
+                &Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1,
+                  cannot_run: {:error, :cannot_run}
+                )
+              )
               |> admit(page_module, socket)
               |> case do
                 {{:ok, _result}, socket} ->
@@ -388,8 +395,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                     {:ok, socket} ->
                       new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
 
-                      {:noreply,
-                       PluginEvent.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
+                      {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
 
                     {:sign_in, socket} ->
                       {:noreply, sign_in(socket, params, site_id)}
@@ -449,7 +455,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
       page_module: page_module,
       private: %{site: site},
       page: %{path: path}
-    } = PluginEvent.call("RuntimeLive.HandleEvent.BeforeEvent", socket.assigns)
+    } = Hook.call("RuntimeLive.HandleEvent.BeforeEvent", socket.assigns)
 
     :telemetry.span(
       [:mishka_cms, :runtime, :handle_event],
@@ -477,12 +483,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
           {:ok, socket} ->
             result =
               apply(page_module, :handle_event, [event_name, event_params, socket])
-              |> then(&PluginEvent.call("RuntimeLive.HandleEvent.AfterCallEvent", &1))
+              |> then(&Hook.call("RuntimeLive.HandleEvent.AfterCallEvent", &1))
 
             final_result =
               case result do
                 {:noreply, %Phoenix.LiveView.Socket{} = socket} ->
-                  {:noreply, PluginEvent.call("RuntimeLive.HandleEvent.ReturnCallEvent", socket)}
+                  {:noreply, Hook.call("RuntimeLive.HandleEvent.ReturnCallEvent", socket)}
 
                 other ->
                   _ =
@@ -586,7 +592,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
       page_module: page_module,
       private: %{site: site},
       page: %{path: path}
-    } = PluginEvent.call("RuntimeLive.HandleInfo.BeforeInfo", socket.assigns)
+    } = Hook.call("RuntimeLive.HandleInfo.BeforeInfo", socket.assigns)
 
     :telemetry.span(
       [:mishka_cms, :runtime, :handle_info],
@@ -596,12 +602,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
         result =
           apply(page_module, :handle_info, [message, socket])
-          |> then(&PluginEvent.call("RuntimeLive.HandleInfo.AfterCallInfo", &1))
+          |> then(&Hook.call("RuntimeLive.HandleInfo.AfterCallInfo", &1))
 
         final_result =
           case result do
             {:noreply, %Phoenix.LiveView.Socket{} = socket} ->
-              {:noreply, PluginEvent.call("RuntimeLive.HandleInfo.ReturnCallInfo", socket)}
+              {:noreply, Hook.call("RuntimeLive.HandleInfo.ReturnCallInfo", socket)}
 
             other ->
               _ = Hook.call("RuntimeLive.HandleInfo.AfterCallInfoError", other, return: false)
@@ -638,7 +644,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
             case compiled do
               {:ok, _result} ->
-                PluginEvent.call(
+                Hook.call(
                   "RuntimeLive.RuntimeLayout.AfterCompile",
                   page_module.render(assigns)
                 )
@@ -1122,7 +1128,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # `runtime:page:visitors_only_redirected` redirected the socket elsewhere first.
   defp send_home(socket, page_module) do
     socket =
-      PluginEvent.call("runtime:page:visitors_only_redirected", socket,
+      Hook.call("runtime:page:visitors_only_redirected", socket,
         meta: %{
           site_id: page_module.__page_information__([:private, :site_id]),
           path: page_module.__page_information__([:page, :path])
@@ -1141,7 +1147,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
     site_id = page_module.__page_information__([:private, :site_id])
 
     socket =
-      PluginEvent.call("runtime:page:signed_in_only_redirected", socket,
+      Hook.call("runtime:page:signed_in_only_redirected", socket,
         meta: %{site_id: site_id, path: page_module.__page_information__([:page, :path])}
       )
 

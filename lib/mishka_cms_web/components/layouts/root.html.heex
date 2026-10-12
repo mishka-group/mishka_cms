@@ -10,7 +10,7 @@
     <.live_title default="Mishka CMS" suffix={if(assigns[:admin_css], do: " - Mishka CMS")}>
       {assigns[:page_title]}
     </.live_title>
-    {raw(MishkaCmsCore.PluginEvent.call("RootHtml.MetaTags", %{html: "", assigns: assigns}).html)}<MishkaCmsWeb.RuntimeLive.page_head
+    {raw(MishkaInstaller.Event.Hook.call("RootHtml.MetaTags", %{html: "", assigns: assigns}).html)}<MishkaCmsWeb.RuntimeLive.page_head
       :if={assigns[:runtime_page]}
       seo={assigns[:page_seo]}
       csp_nonce={assigns[:csp_nonce]}
@@ -169,13 +169,13 @@
     />
 
     <% js =
-      MishkaCmsCore.PluginEvent.call("RootHtml.InlineScript", %{js: nil, assigns: assigns}).js %>
+      MishkaInstaller.Event.Hook.call("RootHtml.InlineScript", %{js: nil, assigns: assigns}).js %>
     <script :if={!is_nil(js)} nonce={assigns[:csp_nonce]}>
       {raw(js)}
     </script>
 
     {raw(
-      MishkaCmsCore.PluginEvent.call("RootHtml.ExternalAssets", %{html: "", assigns: assigns}).html
+      MishkaInstaller.Event.Hook.call("RootHtml.ExternalAssets", %{html: "", assigns: assigns}).html
     )}
   </head>
   <body>

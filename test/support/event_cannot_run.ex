@@ -1,7 +1,7 @@
 defmodule MishkaCms.Test.EventCannotRun do
   @moduledoc """
-  Makes mishka_installer events answer as events whose plugins are not all loaded —
-  `{:error, [%{action: :call, field: :event, plugins: [...]}]}` from `Hook.call/3` — for one test,
+  Makes mishka_installer events answer as events whose plugins are not all loaded — `Hook.call/3`
+  runs none of them and answers its `cannot_run:` option, or the state it is given — for one test,
   and puts each back as it was when the test exits: rebuilt from its stored plugins, or not compiled
   at all when it was not, so `Hook.call/3` hands the state straight back again.
 

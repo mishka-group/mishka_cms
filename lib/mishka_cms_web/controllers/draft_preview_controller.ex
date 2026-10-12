@@ -63,7 +63,7 @@ defmodule MishkaCmsWeb.DraftPreviewController do
 
   defp refuse(conn, site_id, reason) do
     conn =
-      MishkaCmsCore.PluginEvent.call("web:request:preview_unavailable", conn,
+      MishkaInstaller.Event.Hook.call("web:request:preview_unavailable", conn,
         meta: %{site_id: site_id, reason: reason}
       )
 

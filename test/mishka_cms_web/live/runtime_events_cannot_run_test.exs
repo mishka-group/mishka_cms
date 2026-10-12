@@ -1,9 +1,10 @@
 defmodule MishkaCmsWeb.RuntimeEventsCannotRunTest do
   @moduledoc """
   A database page while an event `RuntimeLive` or the root layout fires cannot run — one of its
-  plugins is not loaded, so `MishkaInstaller.Event.Hook.call/3` answers `{:error, ...}` — is served
-  with core's own answer, as if the event had no plugins: the first paint, the connected mount, a
-  page event and a message each go on.
+  plugins is not loaded, so `MishkaInstaller.Event.Hook.call/3` runs none of them — is served with
+  core's own answer, as if the event had no plugins: the first paint, the connected mount, a page
+  event and a message each go on. An access check on the compiled page (`AclAfterCompile`) refuses
+  it instead, through its `cannot_run:` answer.
 
   Each event is stubbed alone, so a test names the one it covers.
 
@@ -121,6 +122,21 @@ defmodule MishkaCmsWeb.RuntimeEventsCannotRunTest do
 
         assert read(view, "count") == "0"
         assert has_element?(view, "#site-layout #page-body")
+      end
+    end
+  end
+
+  describe "an access check" do
+    for event <- [
+          "RuntimeLive.OnMount.AclAfterCompile",
+          "RuntimeLive.HandleParams.AclAfterCompile"
+        ] do
+      @event event
+
+      test "refuses the page while #{event} cannot run", %{page: page} do
+        EventCannotRun.stub!(@event)
+
+        assert_error_sent 500, fn -> get(on_site(), page.path) end
       end
     end
   end

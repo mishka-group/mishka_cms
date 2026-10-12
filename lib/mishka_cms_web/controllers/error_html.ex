@@ -6,7 +6,6 @@ defmodule MishkaCmsWeb.ErrorHTML do
   """
   use MishkaCmsWeb, :html
   require Logger
-  alias MishkaCmsCore.PluginEvent
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.States.{CompileFailureState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Runtime.Compilers.{ErrorCompiler, Helpers}
@@ -95,7 +94,7 @@ defmodule MishkaCmsWeb.ErrorHTML do
                 template: template,
                 fallback: status_message(template)
               }
-              |> then(&PluginEvent.call("ErrorHTML.Render.CompileError", &1))
+              |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
               |> Map.get(:fallback)
           end
 
@@ -118,7 +117,7 @@ defmodule MishkaCmsWeb.ErrorHTML do
         template: template,
         fallback: status_message(template)
       }
-      |> then(&PluginEvent.call("ErrorHTML.Render.CompileError", &1))
+      |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
       |> Map.get(:fallback)
   end
 

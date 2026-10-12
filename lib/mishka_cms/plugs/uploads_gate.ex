@@ -62,7 +62,7 @@ defmodule MishkaCms.Plugs.UploadsGate do
 
   defp refuse(conn, state, site_id) do
     conn =
-      MishkaCmsCore.PluginEvent.call("web:request:upload_unavailable", conn,
+      MishkaInstaller.Event.Hook.call("web:request:upload_unavailable", conn,
         meta: %{state: state, site_id: site_id}
       )
 
