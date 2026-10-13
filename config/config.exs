@@ -54,7 +54,18 @@ config :localize, otp_app: :mishka_cms, allow_runtime_locale_download: true
 config :mishka_cms, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
-  queues: [default: 5, modules: 8, assets: 2, sitemaps: 1, maintenance: 2, notify: 5, mail: 2],
+  # `share_cards` starts paused: the boot resumes it with the Share-card workers setting
+  # (`MishkaCmsCore.Runtime.ShareCardQueue`), so a card is never drawn before that is read.
+  queues: [
+    default: 5,
+    modules: 8,
+    assets: 2,
+    sitemaps: 1,
+    maintenance: 2,
+    notify: 5,
+    mail: 2,
+    share_cards: [limit: 1, paused: true]
+  ],
   repo: MishkaCms.Repo,
   # A job a stopped node was running (a restart, a deploy) stays `executing` until this moves it
   # back to `available`. Longer than any compile or asset build, so a running job is not rescued.
