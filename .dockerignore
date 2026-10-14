@@ -44,14 +44,9 @@ erl_crash.dump
 /priv/static/assets/
 /priv/static/cache_manifest.json
 
-# Each extension is also a standalone mix project: its build artifacts, dependencies and suites are
-# not part of the release. `mix admin_css` scans every directory under __extensions/, so the
-# extensions themselves stay in the context.
-__extensions/*/_build/
-__extensions/*/deps/
-__extensions/*/test/
-__extensions/*/.mnesia/
-__extensions/*/priv/static/temp/
+# A developer's checkouts of the CMS packages. The image takes them from GitHub, as mix.lock pins
+# them, the same as a build from git does.
+/__extensions/
 
 # Host runtime state and generated assets. priv/repo/migrations stays: the root migrations are
 # generated, not in git, and the image takes the building machine's (see the Dockerfile).
