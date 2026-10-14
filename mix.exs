@@ -131,11 +131,26 @@ defmodule MishkaCms.MixProject do
       {:guarded_struct, "~> 0.1"},
 
       # Extentions
-      {:mishka_cms_core, path: "__extensions/mishka_cms_core"},
-      {:mishka_blog, path: "__extensions/mishka_blog"},
-      {:mishka_document, path: "__extensions/mishka_document"},
-      {:mishka_gervaz, path: "__extensions/mishka_gervaz"}
+      mishka_dep(:mishka_cms_core),
+      mishka_dep(:mishka_blog),
+      mishka_dep(:mishka_document),
+      mishka_dep(:mishka_gervaz)
     ]
+  end
+
+  # A CMS package is the checkout under `__extensions/<name>` when there is one, and otherwise
+  # `mishka-group/<name>` on GitHub at the revision mix.lock pins, as in a Docker build.
+  # `MISHKA_DEPS=github` takes GitHub even beside a checkout. To move the pins to the newest master:
+  #
+  #     MISHKA_DEPS=github MIX_DEPS_PATH=<an empty folder> mix deps.update mishka_cms_core mishka_blog mishka_document mishka_gervaz
+  #
+  # From GitHub each package is `override: true`, because they name each other as `path: "../<name>"`.
+  defp mishka_dep(name) do
+    case File.dir?(Path.expand("__extensions/#{name}", __DIR__)) and
+           System.get_env("MISHKA_DEPS") != "github" do
+      true -> {name, path: "__extensions/#{name}"}
+      false -> {name, github: "mishka-group/#{name}", branch: "master", override: true}
+    end
   end
 
   defp aliases do

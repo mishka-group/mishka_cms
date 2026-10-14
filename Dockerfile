@@ -1,3 +1,21 @@
+# syntax=docker/dockerfile:1
+
+# THE CMS PACKAGES COME FROM GITHUB. mishka_cms_core, mishka_blog, mishka_document and mishka_gervaz
+# are fetched by `mix deps.get` at the revisions mix.lock pins (mix.exs, `mishka_dep/1`); the
+# `__extensions/` checkouts a developer has are not in the build context. Three of those repositories
+# are private, so the build reads a GitHub token from the BuildKit secret GITHUB_TOKEN — a token
+# with read access to their contents. It is mounted for the `deps.get` step alone and is in no layer
+# and no image. Without the secret the packages are fetched anonymously, which is enough once every
+# one of them is public.
+#
+#   Coolify, on the application's Environment Variables page: set "Build secrets" to "Docker
+#   BuildKit secrets" ("Use Docker Build Secrets" in older versions), then add GITHUB_TOKEN with
+#   "Build time: Available during build" and "Runtime: Not available in the container". Coolify
+#   passes each build-time variable as `--secret id=<NAME>,env=<NAME>`. With "Standard build
+#   arguments" it would be a build argument instead, which the image's history keeps.
+#
+#   By hand: GITHUB_TOKEN=... docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN .
+#
 # Builder and runner images come from Docker Hub. Debian rather than Alpine, to avoid the DNS
 # resolution problems musl has in production.
 #
@@ -22,7 +40,7 @@ FROM ${BUN_IMAGE} AS bun
 
 FROM ${BUILDER_IMAGE} AS builder
 
-# A C toolchain for the NIFs, git for the heroicons git dependency.
+# A C toolchain for the NIFs, git for the git dependencies.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -40,18 +58,15 @@ ENV MIX_ENV="prod"
 
 COPY mix.exs mix.lock ./
 
-# The extensions and mishka_gervaz are PATH dependencies today
-# (`{:mishka_cms_core, path: "__extensions/mishka_cms_core"}`), so they have to be in the build
-# context before `deps.get` can resolve them. They are also what `mix admin_css` scans for the
-# dashboard's Tailwind classes. An edit inside an extension invalidates the dependency cache layer;
-# that is inherent to path dependencies.
-#
-# WHEN THEY MOVE TO THEIR OWN REPOSITORIES, installed from Hex or GitHub, this line and the `path:`
-# entries in mix.exs go together — delete both, and nothing else changes: `deps.get` fetches them
-# into `deps/`, and both Tailwind scanners already enumerate `deps/mishka_*` for exactly this reason.
-COPY __extensions __extensions
-
-RUN mix deps.get --only $MIX_ENV
+# The token goes to git as an `Authorization` header in variables of this one command, never into a
+# URL or a git config file, so no layer holds it and no git error can print it.
+RUN --mount=type=secret,id=GITHUB_TOKEN,required=false \
+    if [ -s /run/secrets/GITHUB_TOKEN ]; then \
+      export GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+        GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$(cat /run/secrets/GITHUB_TOKEN)" | base64 -w0)"; \
+    fi \
+    && mix deps.get --only $MIX_ENV
 RUN mkdir config
 
 # Compile-time config before deps.compile, so a config change recompiles the dependencies.
