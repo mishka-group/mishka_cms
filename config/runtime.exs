@@ -129,6 +129,14 @@ if config_env() == :prod do
     mnesia_dir: Path.join(mishka_data, "mnesia"),
     essential: [MishkaInstaller.Event.Event, MishkaInstaller.Installer.Installer]
 
+  # Every uploaded file — media under `uploads/` and `uploads_archived/`, share cards, files sent
+  # through a page's form — kept across redeploys. The endpoint serves `/uploads` from this folder.
+  uploads_root = Path.join(mishka_data, "static")
+
+  config :mishka_cms_core,
+    media_static_dir: uploads_root,
+    page_upload_dir: Path.join(uploads_root, "uploads")
+
   # The CLDR data of each language a site reads, downloaded once and kept across redeploys.
   config :localize, locale_cache_dir: Path.join(mishka_data, "localize")
 

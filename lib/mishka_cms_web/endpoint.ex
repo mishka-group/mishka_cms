@@ -46,9 +46,11 @@ defmodule MishkaCmsWeb.Endpoint do
   # or a CDN asks again before every reuse — a copy kept from while the site was up would outlive it.
   plug MishkaCms.Plugs.UploadsGate, session: @session_options
 
+  # From the folder the files are written to, asked on every request: `priv/static` in development,
+  # the volume under MISHKA_DATA_DIR in production (`:media_static_dir`, config/runtime.exs).
   plug Plug.Static,
     at: "/",
-    from: :mishka_cms,
+    from: {MishkaCmsCore.Runtime.Media, :static_dir, []},
     gzip: !code_reloading?,
     only: ~w(uploads),
     cache_control_for_etags: "no-cache",

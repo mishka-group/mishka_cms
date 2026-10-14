@@ -128,7 +128,8 @@ ENV LC_ALL=en_US.UTF-8
 
 WORKDIR "/app"
 
-# mishka_data is MISHKA_DATA_DIR's default (config/runtime.exs) and the mount point for its volume.
+# mishka_data is MISHKA_DATA_DIR's default (config/runtime.exs) and the mount point for its volume:
+# Mnesia, the installer's store, the CLDR and Chelekom caches and every uploaded file (`static/`).
 # Created here and owned by the release user, so a named volume initialised from it is writable by
 # `nobody` and Mnesia can start. A bind mount needs the same ownership on the host (uid 65534).
 RUN mkdir -p /app/mishka_data && chown -R nobody:root /app
