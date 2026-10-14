@@ -10,9 +10,9 @@
 # change both together. DEBIAN_VERSION MUST be the same snapshot for both stages: the NIFs compiled
 # in the builder (bcrypt_elixir, picosat_elixir, lazy_html) link against its glibc and libssl.
 ARG ELIXIR_VERSION=1.20.4
-ARG OTP_VERSION=29.1.1
-ARG DEBIAN_VERSION=trixie-20260918-slim
-ARG BUN_VERSION=1.4.2
+ARG OTP_VERSION=29.1.2
+ARG DEBIAN_VERSION=trixie-20261005-slim
+ARG BUN_VERSION=1.4.3
 
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
