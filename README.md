@@ -1,144 +1,99 @@
-## Direct Dev usage
+<div align="center">
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-mishkagroup-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/mishkagroup)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-mishka--group-ea4aaa?style=flat-square&logo=github)](https://github.com/sponsors/mishka-group)
+
+# Mishka CMS
+
+**An [open source real-time CMS](https://mishka.tools/cms) for Elixir and Phoenix LiveView. One install runs many websites.**
+
+[Website](https://mishka.tools/cms) · [Documentation](https://mishka.tools/cms/docs) · [Admin preview](https://mishka.tools/cms#demo) · [Hire us](https://mishka.tools/hire-us)
+
+</div>
+
+## 📖 What is Mishka CMS?
+
+Mishka CMS is an [open source real-time CMS](https://mishka.tools/cms) written in Elixir on Phoenix LiveView and the Ash framework. One install serves many websites. Each site is a tenant with its own domain, languages, pages, layouts, components, media, users and permissions, and master users work across all of them.
+
+Pages, layouts, components, error pages, stylesheets and JavaScript hooks are stored in the database and compiled at runtime. You edit them in the browser with a visual page builder or a code editor, save a draft, and publish. Publishing does not need a redeploy.
+
+This repository is the application that runs the CMS: the Phoenix endpoint, the router, the release scripts and the Dockerfile. The engine and the extensions are separate packages that it loads.
+
+## 🧩 Part of Mishka CMS
+
+This is [Mishka CMS](https://mishka.tools/cms) itself. It loads three packages: [mishka_cms_core](https://github.com/mishka-group/mishka_cms_core), the engine; [mishka_blog](https://github.com/mishka-group/mishka_blog), the [blog extension](https://mishka.tools/cms/extensions/blog); and [mishka_document](https://github.com/mishka-group/mishka_document), the [documentation extension](https://mishka.tools/cms/extensions/documentation). The admin screens are built with [Mishka Gervaz](https://mishka.tools/gervaz), plugins and events run on [Mishka Installer](https://mishka.tools/installer), and the UI components come from [Mishka Chelekom](https://mishka.tools/chelekom).
+
+## ✨ Features
+
+- Many sites from one install. Master users manage every site, tenant users see only their own, and the data layer keeps tenants apart. See [multi-tenant sites](https://mishka.tools/cms#tenant).
+- Live editing. A visual page builder and a code editor write pages in HEEx, EEx or Markdown. Drafts autosave, a draft can be previewed through a shareable link, and every saved version can be restored.
+- A stylesheet and a script bundle for each site, built at runtime from that site's own templates, Tailwind CSS v4 styles and JavaScript hooks.
+- SEO from the page itself: title, description, canonical address, Open Graph and Twitter tags, JSON-LD, a `sitemap.xml` and `robots.txt` for every site, and a 1200 x 630 share card for a page with no image of its own.
+- Several languages per site, translation keys for templates (`t("nav.blog")`), and dates, numbers and language names written the way each language writes them.
+- Sign-in controls: password or emailed sign-in link, optional two-step sign-in with an authenticator app and recovery codes, rate limits per IP address and per account, and a captcha from Cloudflare Turnstile, Google reCAPTCHA or hCaptcha, chosen per site.
+- Permissions written as plain names such as `admin:dashboard:blog:post`, with wildcards, separate for the dashboard and for the API.
+- An admin that updates live over LiveView, with notifications and an activity log.
+- A JSON:API under `/api/json`, described by an OpenAPI spec, with Swagger UI for API admins.
+- Plugins instead of forks. Every action fires a named event such as `blog:comment:after_create` through Mishka Installer, and plugins hook in by priority.
+- A first-run install wizard, and blog and documentation extensions you can install per site.
+
+The website's [features section](https://mishka.tools/cms#platform) walks through the main ones.
+
+## 🚀 Getting started
+
+You need Elixir 1.18 or newer (`.tool-versions` pins Elixir 1.20.4 on Erlang/OTP 29.1.1), PostgreSQL and [bun](https://bun.sh). In development the app connects to PostgreSQL as `postgres` with the password `postgres`; `DB_HOST` and `DB_NAME` change the host and the database name.
 
 ```bash
+git clone https://github.com/mishka-group/mishka_cms.git
+cd mishka_cms
+
 mix deps.get
-mix deps.compile
-mix compile
-mix ecto.drop # if you have before
+mix assets.setup
+
 mix ecto.create
-# Delete everything inside the `priv/resource_snapshots/repo`
-# Delete everything inside the `priv/repo/migrations` except `.formatter.exs`
-mix oban.install
+mix oban.install --yes
 mix ash.codegen cms_with_extensions
 mix ash.migrate
-mix run priv/repo/dev_seeds.exs
 
-# Note it would be better to run `mix tailwind.install` and `mix esbuild.install` one time!, before starting server
-iex -S mix phx.server
+mix assets.build
+mix phx.server
 ```
 
-### Import all components from Mishka Chelekom
-```elixir
-cd ../mishka_chelekom
-# → writes priv/components/chelekom.json
-mix mishka.ui.export priv/components --cms --name chelekom --yes
+The migrations are generated and not stored in the repository, so `mix ash.codegen` is part of the setup. `mix dev_reset` repeats the database steps from an empty database and drops the existing one.
 
-# Copy from Mishka Chelekom to Mishka CMS
-cp priv/components/chelekom.json \
-../__extensions/mishka_cms_core/priv/cms_ui_kits/chelekom.json
+Open <http://localhost:4000>. Until the CMS is installed, every request goes to `/install`. The wizard creates the master admin and the first site, lets you choose the Chelekom components and the extensions to install, and sets the site title, the sender address and the languages. When it finishes, sign in with the master account.
 
-# After it, we can install with this function in iex
-MishkaCmsCore.Runtime.Handlers.UiKitHandler.install_chelekom!(cleanup: true)
-```
+For a development database filled with sample sites, users, pages, blog posts and documents, run `mix run priv/repo/dev_seeds.exs`.
 
-## Docker Dev
+Without a local Elixir or PostgreSQL, use the development container in `examples/docker`, which has Elixir, bun and a PostgreSQL 18 database, and run the same `mix` commands inside it:
 
 ```bash
-docker compose -f dev-docker-compose.yml up -d
-docker compose -f dev-docker-compose.yml down
-docker exec -it elixir_dev bash
-````
-
-## Docker Dev Database
-
-```bash
-<!-- You need it one time, or make data fresh -->
-mix ecto.drop; mix ash.setup; mix run priv/repo/entry_dev_test_seeds.exs ; iex -S mix phx.server
+docker compose -f examples/docker/dev-docker-compose.yml up -d
+docker compose -f examples/docker/dev-docker-compose.yml exec app bash
 ```
 
+## 🚢 Deploy
 
-```
-npx openapi-typescript http://localhost:4000/api/json/open_api -o api-types.ts
-```
+The `Dockerfile` in the repository root builds a release. Set `DATABASE_URL`, `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET`, and mount a volume at `MISHKA_DATA_DIR` (`/app/mishka_data` in the image) for Mnesia, uploaded files and caches. Run `/app/bin/migrate` before `/app/bin/server`. The image copies `priv/`, so run `mix ash.codegen cms_with_extensions` where you build it.
 
-## Permission names
+## 📚 Documentation
 
-Every admin permission is a plain string, `admin:<surface>:<area>[:<sub_area>]`, written in full
-where it is used and never built from pieces. `test/mishka_cms/permission_names_test.exs` fails the
-build on a name that does not follow the grammar (a typo or an old name), on one neither the core
-install nor an extension's install creates, and on a list that names a wildcard beside a name it
-covers.
+- [Mishka CMS documentation](https://mishka.tools/cms/docs), which is still being written
+- [Features](https://mishka.tools/cms#platform), [multi-tenant sites](https://mishka.tools/cms#tenant), the [interactive admin preview](https://mishka.tools/cms#demo) and the [extensions](https://mishka.tools/cms#extensions)
+- The [Mishka Blog extension](https://mishka.tools/cms/extensions/blog) and the [Mishka Document extension](https://mishka.tools/cms/extensions/documentation)
+- [Mishka Installer documentation](https://mishka.tools/installer/docs), for plugins and events
+- The [Mishka blog](https://mishka.tools/blog), for releases and articles
 
-- **Surface**: `dashboard` is the admin screens and the data they read and write. `api` is the admin
-  JSON:API, GraphQL and the `/ws/gql` socket. A request on the API runs with
-  `shared: %{admin_surface: :api}` in its Ash context (`MishkaCmsCore.Runtime.Plugs.AdminSurfacePlug`).
-  A policy lists both surfaces' names, and `MishkaCmsCore.Accounts.Checks.AccessPermissions` counts
-  an `admin:dashboard:` name only on the dashboard and an `admin:api:` name only on the API.
-- **Area**: a singular, lower snake_case noun. The runtime sections are `runtime:site`,
-  `runtime:page`, `runtime:layout`, `runtime:component`, `runtime:error_page`,
-  `runtime:stylesheet`, `runtime:js_hook`, `runtime:media`, `runtime:translation` and
-  `runtime:activity`; the others are `setting`, `user` and `permission`. An extension's area is its
-  name and its section: `blog:post`, `blog:comment`, `document:workspace`, `document:section`.
-- **Code**: `code` (both surfaces) writes every code-bearing runtime type, and
-  `admin:dashboard:code` opens every builder. There is no builder name.
-- **Wildcards**, only as the whole last segment: `*` (everything within the holder's own site, both
-  surfaces), `admin:*` (both surfaces), `admin:dashboard:*` (the whole dashboard and nothing on the
-  API), `admin:api:*` (the whole API and nothing on the dashboard), `admin:<surface>:runtime:*`
-  (every runtime section), `admin:<surface>:<extension>:*`. A held wildcard covers every name under
-  it, so a gate lists only the leaf names it means.
-- **Any admin of a surface** is not a name. It is the entry `{:under, "admin:dashboard"}` (or
-  `{:under, "admin:api"}`), held by anyone holding anything under that prefix. The dashboard door,
-  Home, Notifications and Settings ask it.
-- A master is a user with no site. No permission makes one.
+## 💬 Community and support
 
-### Runtime rules
+- Report a bug or ask a question in [GitHub issues](https://github.com/mishka-group/mishka_cms/issues).
+- Read about new releases on the [Mishka blog](https://mishka.tools/blog).
+- For a custom extension, a migration from another CMS or priority support, [hire the Mishka team](https://mishka.tools/hire-us).
 
-The code-bearing types are pages, layouts, components, error pages, stylesheets and JS hooks.
+## 💖 Support the project
 
-- **Reading** them (lists, records, drafts, versions) is open to any admin of the surface.
-- **Writing** a code-bearing type T (create, update, delete, restore, its code included) takes
-  `runtime:T` or `code`:
-  `permissions: ["admin:dashboard:runtime:page", "admin:api:runtime:page", "admin:dashboard:code", "admin:api:code"]`.
-  `runtime:T` alone writes T's code; `code` alone writes all six types.
-- **The builder** is a dashboard screen. On a page, layout, component or error page it opens for
-  that type's `admin:dashboard:runtime:` name or `admin:dashboard:code`:
-  `admin:dashboard:runtime:page` alone opens the page builder and no other. The
-  builder's own rows for that type (history, snapshots, review notes, snippets, builder events)
-  follow the same rule. What every builder shares (element CSS, reusable classes, design tokens,
-  the studio and preset settings, the Builder sidebar entries) takes any of the four types' names
-  or `code`.
-- **A site's `page_code` switch** set to off stops Elixir and typed HEEx for everyone.
-- **Sites, media, translations and activity** take `runtime:<section>` for every write, for reading
-  activity, and for every read of sites but `read_any` and `get_any`. Media and translations are
-  read by any admin. Code plays no part.
+Mishka CMS is free and open source. You can support its development through [GitHub Sponsors](https://github.com/sponsors/mishka-group) or [Buy Me a Coffee](https://www.buymeacoffee.com/mishkagroup).
 
-### Adding an area
+## 📜 License
 
-1. Add its names, with a description each, to the list its install creates: the core's in
-   `MishkaCmsCore.Install.Bootstrap` (`permissions/0`), created by the install and the dev seeds; an
-   extension's in the `permissions:` of its provision manifest, created when the extension is installed
-   on a site (Set up, or the install wizard's extensions step), as its components and pages are.
-2. Enforce it on the data, one name per surface:
-   `authorize_if {MishkaCmsCore.Accounts.Checks.AccessPermissions, permissions: ["admin:dashboard:blog:post", "admin:api:blog:post"]}`.
-3. Gate the screen with the dashboard name: the sidebar item's `permissions:`
-   (`["admin:dashboard:blog:post"]`), which `MishkaCmsCore.Sidebar.PageGuard` also reads. Widgets
-   and settings take the same list.
-4. Test it as a limited admin holding only that area (allowed), as a holder of another area
-   (refused), and through the API with `admin:api:<area>` (allowed) against
-   `admin:dashboard:<area>` (refused).
-
-Stored names are never renamed: a name that is no longer checked grants nothing.
-
-### Dev seed accounts
-
-`mix run priv/repo/dev_seeds.exs` gives every dev site (`localhost`, `site-a`, `site-b`) these
-accounts, all with the seeds' development password:
-
-| Account | Holds |
-| --- | --- |
-| `admin@<site>.test` | `*` |
-| `viewer@<site>.test` | nothing |
-| `builder@<site>.test` | `admin:dashboard:runtime:page` (pages with their code, and the page builder) |
-| `developer@<site>.test` | `admin:dashboard:code` (every code-bearing type, and every builder) |
-| `writer@<site>.test` | `admin:dashboard:blog:post` |
-| `moderator@<site>.test` | `admin:dashboard:blog:comment` |
-| `editor@<site>.test` | `admin:dashboard:document:section` |
-| `accounts@<site>.test` | `admin:dashboard:user`, `admin:dashboard:permission` |
-| `api@<site>.test` | `admin:api:*` (no dashboard) |
-
-`<site>` is the site's name: `admin@site-a.test`. `master@example.com` and `master1..3@example.com`
-are masters holding `*`; `none@example.com` (localhost) holds nothing.
-
-## License
-
-Apache License 2.0 — see [`LICENSE`](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).
