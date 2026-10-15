@@ -105,6 +105,22 @@ defmodule MishkaCmsWeb.PageQueryParamsTest do
     |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
   end
 
+  # A COMPONENT THAT FINDS NOTHING AT THE ADDRESS sends `:mishka_runtime_not_found`, and the page
+  # asks for the same address again as a request, so it is answered with the 404 page.
+  describe "a component that finds nothing at the address" do
+    test "sends the browser to the address it was patched to, its query too", %{
+      conn: conn,
+      path: path
+    } do
+      {:ok, view, _html} = live(conn, path)
+      render_patch(view, path <> "?page=999")
+
+      send(view.pid, :mishka_runtime_not_found)
+
+      assert_redirect(view, path <> "?page=999")
+    end
+  end
+
   # ONE PAGE PER POST IS NOT A CMS. A page stored at `/post/:slug` answers every post's URL, and the
   # segment the visitor asked for reaches the template the same way a query key does — so one live
   # component serves them all.

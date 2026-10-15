@@ -13,6 +13,9 @@ defmodule MishkaCms.Plugs.UploadsGate do
   An admin here is a dashboard admin, holding anything under `admin:dashboard`
   (`MishkaCmsCore.Runtime.SiteAvailability.allowed_in?/4` on `:dashboard`), as for the site's pages. An admin of the API alone is refused.
 
+  A closed site's file is sent to whoever may see it with `cache-control: private, no-store`, so no
+  cache keeps it for the visitors it is refused to.
+
   The viewer of a closed site's file is the user the signed session cookie names, as
   `MishkaCmsCore.Runtime.States.ViewerState` caches them, with no query. The cookie is only read:
   `Plug.Session` further down still owns the session.
@@ -47,7 +50,7 @@ defmodule MishkaCms.Plugs.UploadsGate do
 
   defp gate(conn, site_id, state, session) do
     if SiteAvailability.allowed_in?(state, site_id, viewer(conn, session), :dashboard),
-      do: conn,
+      do: register_before_send(conn, &put_resp_header(&1, "cache-control", "private, no-store")),
       else: refuse(conn, state, site_id)
   end
 

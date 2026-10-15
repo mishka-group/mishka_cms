@@ -169,9 +169,14 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     assert %{
              "headline" => "Ash in production",
              "author" => [%{"@type" => "Person", "name" => "Shahryar"}],
-             "publisher" => %{"name" => "The Studio"},
+             "publisher" => %{"@id" => org_id},
              "mainEntityOfPage" => ^url
            } = Enum.find(schema, &(&1["@type"] == "BlogPosting"))
+
+    assert String.ends_with?(org_id, "/#organization")
+
+    assert %{"@id" => ^org_id, "name" => "The Studio"} =
+             Enum.find(schema, &(&1["@type"] == "Organization"))
 
     assert %{"itemListElement" => [_home, _blog, %{"item" => ^url}]} =
              Enum.find(schema, &(&1["@type"] == "BreadcrumbList"))
@@ -295,6 +300,8 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
       conn |> get(english(url_mode, "/blog")) |> html_response(200) |> LazyHTML.from_document()
 
     assert attr(doc, ~s(meta[property="og:type"]), "content") == ["website"]
-    assert [%{"@type" => "WebPage"}] = json_ld(doc)
+
+    assert [%{"@type" => "WebPage"}, %{"@type" => "WebSite"}, %{"@type" => "Organization"}] =
+             json_ld(doc)
   end
 end

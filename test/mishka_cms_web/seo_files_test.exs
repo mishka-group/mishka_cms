@@ -153,11 +153,13 @@ defmodule MishkaCmsWeb.SeoFilesTest do
     for conn <- [sitemap, file], do: assert(get_resp_header(conn, "x-robots-tag") == ["noindex"])
 
     for conn <- [robots, sitemap],
-        do: assert(get_resp_header(conn, "cache-control") == ["private, max-age=60"])
+        do: assert(get_resp_header(conn, "cache-control") == ["public, max-age=60"])
+
+    for conn <- [robots, sitemap, file], do: assert(get_resp_header(conn, "set-cookie") == [])
 
     # SENT AS IT IS STORED: the server's response compression leaves a response marked
     # `no-transform` alone, and would gzip the gzipped file again otherwise.
-    assert get_resp_header(file, "cache-control") == ["private, max-age=60, no-transform"]
+    assert get_resp_header(file, "cache-control") == ["public, max-age=60, no-transform"]
   end
 
   @browser "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -229,6 +231,7 @@ defmodule MishkaCmsWeb.SeoFilesTest do
         assert conn.status == 302, "/favicon.ico refused #{accept}"
         assert conn.private.phoenix_controller == MishkaCmsCoreWeb.SeoController
         assert get_resp_header(conn, "location") == [icon]
+        assert get_resp_header(conn, "set-cookie") == []
       end
     end
 

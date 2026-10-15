@@ -288,6 +288,9 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
         assert Enum.empty?(LazyHTML.query(doc, absent)), "#{absent} was emitted with no value"
       end
 
+      website = site_url <> "/#website"
+      organization = site_url <> "/#organization"
+
       assert [
                %{
                  "@context" => "https://schema.org",
@@ -295,8 +298,21 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
                  "name" => "Plain page",
                  "url" => ^url,
                  "inLanguage" => "en",
-                 "isPartOf" => %{"@type" => "WebSite", "name" => "The Studio", "url" => ^site_url}
-               } = web_page
+                 "isPartOf" => %{"@id" => ^website}
+               } = web_page,
+               %{
+                 "@type" => "WebSite",
+                 "@id" => ^website,
+                 "name" => "The Studio",
+                 "url" => ^site_url,
+                 "publisher" => %{"@id" => ^organization}
+               },
+               %{
+                 "@type" => "Organization",
+                 "@id" => ^organization,
+                 "name" => "The Studio",
+                 "url" => ^site_url
+               }
              ] = json_ld(doc)
 
       refute Map.has_key?(web_page, "description")
@@ -323,7 +339,8 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
       assert attr(doc, ~s(meta[property="og:image:alt"]), "content") == ["About the studio"]
       assert attr(doc, ~s(meta[name="twitter:card"]), "content") == ["summary_large_image"]
 
-      assert [%{"description" => "What the studio does.", "image" => ^image}] = json_ld(doc)
+      assert [%{"description" => "What the studio does.", "image" => ^image}, _site, _publisher] =
+               json_ld(doc)
     end
 
     test "gives way to a stored tag with the same name", %{site: site} do
@@ -511,8 +528,11 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
       assert attr(doc, ~s(meta[name="keywords"]), "content") == ["first, records"]
       assert attr(doc, ~s(link[rel="canonical"]), "href") == [base() <> path]
 
-      assert [%{"@type" => "WebPage", "name" => "Record first", "image" => ^image}] =
-               json_ld(doc)
+      assert [
+               %{"@type" => "WebPage", "name" => "Record first", "image" => ^image},
+               %{"@type" => "WebSite"},
+               %{"@type" => "Organization"}
+             ] = json_ld(doc)
     end
 
     test "is asked again on a live patch to another record", %{site: site} do
