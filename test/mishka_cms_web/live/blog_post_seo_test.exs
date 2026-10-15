@@ -295,6 +295,8 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
       conn |> get(english(url_mode, "/blog")) |> html_response(200) |> LazyHTML.from_document()
 
     assert attr(doc, ~s(meta[property="og:type"]), "content") == ["website"]
-    assert [%{"@type" => "WebPage"}] = json_ld(doc)
+
+    assert [%{"@type" => "WebPage"}, %{"@type" => "WebSite"}, %{"@type" => "Organization"}] =
+             json_ld(doc)
   end
 end
