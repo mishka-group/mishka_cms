@@ -70,16 +70,33 @@ defmodule MishkaCms.Plugs.UploadsGateTest do
   end
 
   describe "through the endpoint, as a visitor" do
-    test "an open site's file is served, and every reuse of it is checked first", %{conn: conn} do
+    test "an open site's file is served, kept a day by any cache with its ETag, and no cookie", %{
+      conn: conn
+    } do
       site = site_with_file(:open)
 
       served = get(conn, site.file)
       assert served.status == 200
       assert served.resp_body == "site file"
-      assert get_resp_header(served, "cache-control") == ["no-cache"]
+      assert get_resp_header(served, "cache-control") == ["public, max-age=86400"]
+      assert [etag] = get_resp_header(served, "etag")
+      assert get_resp_header(served, "set-cookie") == []
 
       versioned = get(build_conn(), site.file <> "?vsn=1")
-      assert get_resp_header(versioned, "cache-control") == ["no-cache"]
+      assert get_resp_header(versioned, "cache-control") == ["public, max-age=86400"]
+
+      unchanged = build_conn() |> put_req_header("if-none-match", etag) |> get(site.file)
+      assert unchanged.status == 304
+    end
+
+    test "an open site's share card is kept a year by any cache", %{conn: conn} do
+      site = site_with_file(:open)
+      card = on_disk!(site.id, "share/0123456789abcdef0123456789abcdef.jpg")
+
+      served = get(conn, card)
+      assert served.status == 200
+      assert get_resp_header(served, "cache-control") == ["public, max-age=31536000, immutable"]
+      assert get_resp_header(served, "set-cookie") == []
     end
 
     test "a switched-off site's file is refused, on its own address and on another", %{conn: conn} do
@@ -128,8 +145,14 @@ defmodule MishkaCms.Plugs.UploadsGateTest do
       end
     end
 
-    test "the other static files keep their long-lived caching", %{conn: conn} do
-      assert conn |> get("/fonts/fonts.css") |> get_resp_header("cache-control") == ["public"]
+    test "the fonts and images the app ships are kept a week by any cache, and send no cookie", %{
+      conn: conn
+    } do
+      font = get(conn, "/fonts/fonts.css")
+
+      assert font.status == 200
+      assert get_resp_header(font, "cache-control") == ["public, max-age=604800"]
+      assert get_resp_header(font, "set-cookie") == []
     end
   end
 
@@ -260,6 +283,28 @@ defmodule MishkaCms.Plugs.UploadsGateTest do
         refute offline.file |> fetch(cookie_for(viewer)) |> served?(),
                "an offline site's file went to an API admin of site #{inspect(viewer.site_id)}"
       end
+    end
+
+    test "a closed site's file goes to whoever may see it kept by no cache" do
+      site = site_with_file(:offline)
+
+      sent =
+        site.file
+        |> fetch(cookie_for(viewer!(site.id, true)))
+        |> put_resp_header("cache-control", "public, max-age=86400")
+        |> send_resp(200, "site file")
+
+      assert get_resp_header(sent, "cache-control") == ["private, no-store"]
+
+      open = site_with_file(:open)
+
+      sent =
+        open.file
+        |> fetch(nil)
+        |> put_resp_header("cache-control", "public, max-age=86400")
+        |> send_resp(200, "site file")
+
+      assert get_resp_header(sent, "cache-control") == ["public, max-age=86400"]
     end
 
     test "a session whose user the cache does not know is a visitor" do
