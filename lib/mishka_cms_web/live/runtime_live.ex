@@ -521,14 +521,14 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # nothing to raise into, so it says so the way the guides say to, with `send/2`, and the answer is
   # given here.
   #
-  # A FULL LOAD, NOT A LIVE ONE. `redirect/2` puts the same address through the router again as an
-  # ordinary request; the component raises `NotFoundError` on that render and Phoenix draws the 404
-  # page with a 404 STATUS. Raising here instead would crash the view, and on a patch the client
-  # remounts into the same missing subject and crashes again — a loop where the visitor wanted a
-  # page. On the very first render there is no socket to redirect and the component raises outright,
-  # which is the same answer without the round trip.
+  # A FULL LOAD, NOT A LIVE ONE. `redirect/2` puts the same address, its query too, through the
+  # router again as an ordinary request; the component raises `NotFoundError` on that render and
+  # Phoenix draws the 404 page with a 404 STATUS. Raising here instead would crash the view, and on a
+  # patch the client remounts into the same missing subject and crashes again — a loop where the
+  # visitor wanted a page. On the very first render there is no socket to redirect and the component
+  # raises outright, which is the same answer without the round trip.
   def handle_info(:mishka_runtime_not_found, socket) do
-    {:noreply, redirect(socket, to: socket.assigns[:current_path] || "/")}
+    {:noreply, redirect(socket, to: socket.private[@address] || "/")}
   end
 
   def handle_info({:css_updated, hash}, socket) do
