@@ -169,9 +169,14 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     assert %{
              "headline" => "Ash in production",
              "author" => [%{"@type" => "Person", "name" => "Shahryar"}],
-             "publisher" => %{"name" => "The Studio"},
+             "publisher" => %{"@id" => org_id},
              "mainEntityOfPage" => ^url
            } = Enum.find(schema, &(&1["@type"] == "BlogPosting"))
+
+    assert String.ends_with?(org_id, "/#organization")
+
+    assert %{"@id" => ^org_id, "name" => "The Studio"} =
+             Enum.find(schema, &(&1["@type"] == "Organization"))
 
     assert %{"itemListElement" => [_home, _blog, %{"item" => ^url}]} =
              Enum.find(schema, &(&1["@type"] == "BreadcrumbList"))
