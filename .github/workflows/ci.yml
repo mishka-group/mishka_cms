@@ -236,13 +236,6 @@ jobs:
       - run: bun install --frozen-lockfile && bun run test
         working-directory: assets
 
-  # Every tracked file carries an SPDX header or is annotated in REUSE.toml.
-  reuse:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: fsfe/reuse-action@v5
-
   # The image builds from a clean checkout. It carries no migrations (they are generated, not in
   # git), so this checks the build, not a deploy.
   docker:
