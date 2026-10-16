@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // THE SOCKET, THE PROGRESS BAR AND THE PAGE-LEVEL LISTENERS — everything that is the same whoever is
 // looking. It takes the hooks rather than owning them, because the two audiences bring different
 // ones: `app.js` brings the admin's, `site.js` brings a public page's.

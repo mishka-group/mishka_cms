@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // THE HOOK CARRIES NO EDITOR AT ALL, as `pb_code_editor.js` carries no CodeMirror. It fetches
 // `content_editor.js` the first time a content editor appears — the address the layout publishes as
 // `<meta name="pb-content-editor-src">` — and runs the engine that file hangs on

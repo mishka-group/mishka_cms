@@ -1,4 +1,8 @@
 #!/usr/bin/env elixir
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Dev Seeds — realistic, production-like data covering all extensions.
 # Run with: mix run priv/repo/dev_seeds.exs
 #

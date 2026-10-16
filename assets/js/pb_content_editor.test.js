@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // THE HOOK THE ADMIN BUNDLE CARRIES for the content editor: it fetches the editor's bundle on the

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.PagePreviewRouteTest do
   @moduledoc """
   `/_preview/page/:token` serves a LIVE page, not only a draft — and it answers on whatever host the

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.RuntimeLive do
   @moduledoc """
   A Phoenix LiveView module that handles runtime rendering of dynamically compiled CMS pages.

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.InterpolatedClassTest do
   @moduledoc """
   No Tailwind class may be assembled by interpolation, anywhere the build-time scanner has to find it.

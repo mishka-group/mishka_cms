@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.DocumentPageSeoTest do
   @moduledoc """
   The head of the documentation's provisioned page of a document, `/:lang/docs/:workspace/*section`,

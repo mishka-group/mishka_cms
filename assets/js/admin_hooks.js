@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // THE HOOKS ONLY THE ADMIN EVER MOUNTS — the page builder, the dashboard's widget grid, the review
 // composer's `@` list, the Assets dropzone. No public template names one of these, and the elements
 // they attach to exist only under /admin.

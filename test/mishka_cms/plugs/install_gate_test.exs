@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Plugs.InstallGateTest do
   @moduledoc """
   Real plug tests driving the gate through every install state with concrete conns. The flag

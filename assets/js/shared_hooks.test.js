@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import SharedHooks from "./shared_hooks.js";

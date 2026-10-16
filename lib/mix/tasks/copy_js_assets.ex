@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule Mix.Tasks.CopyJsAssets do
   @moduledoc """
   Copies JavaScript assets (app.js and vendor files) to priv/static/temp/js_assets

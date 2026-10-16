@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.ContentEditorEngineTest do
   @moduledoc """
   The admin's content editor runs Mishka Chelekom's headless `editor` engine, the one the core's

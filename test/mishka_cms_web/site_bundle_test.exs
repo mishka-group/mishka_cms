@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.SiteBundleTest do
   @moduledoc """
   A site's CSS and JS bundle, `/assets/css|js/<site>/<hash>`, as a visitor, a site admin and a master

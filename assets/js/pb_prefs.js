@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // Which components this person stars, and which ones they reached for last.
 //
 // Neither is content. A star says nothing about the site, the page or the document — it says what

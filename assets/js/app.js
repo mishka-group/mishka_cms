@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // THE ADMIN'S JAVASCRIPT, and only the admin's.
 //
 // Loaded by every page under /admin — the dashboard, the page builder and its canvas. A visitor

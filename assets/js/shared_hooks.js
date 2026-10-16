@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // THE HOOKS BOTH SIDES MOUNT. A flash notice dismisses itself wherever it appears, a
 // copy-to-clipboard button is a copy-to-clipboard button, and a captcha is asked on the sign-in pages
 // and tried on the settings page. Everything else belongs to exactly one audience — see

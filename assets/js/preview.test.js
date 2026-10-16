@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // A LINK THAT LEAVES THE PREVIEW OPENS THE PUBLISHED PAGE IN A NEW TAB; ONE THAT STAYS, STAYS.

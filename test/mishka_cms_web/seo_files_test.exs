@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.SeoFilesTest do
   @moduledoc """
   A site's `/robots.txt`, `/sitemap.xml` and the gzipped `/sitemap-00001.xml.gz`… files beside it

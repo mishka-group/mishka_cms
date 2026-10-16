@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Plugs.UploadsGateTest do
   @moduledoc """
   A site's uploaded files as a visitor, a site admin and a master fetch them: served while the site is

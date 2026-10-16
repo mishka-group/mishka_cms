@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.ApiOfflineTest do
   @moduledoc """
   What an offline site's JSON:API and GraphQL answer, through the whole endpoint, to a visitor, the

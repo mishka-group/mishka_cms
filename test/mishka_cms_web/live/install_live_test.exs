@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.InstallLiveTest do
   @moduledoc """
   Real LiveView tests for the installer wizard (config → ui-kit picker → settings → done). They drive

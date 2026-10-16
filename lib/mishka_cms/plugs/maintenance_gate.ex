@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Plugs.MaintenanceGate do
   @moduledoc """
   Joomla-style "site offline" gate. When the `cms.offline` setting is on, every front-end request is

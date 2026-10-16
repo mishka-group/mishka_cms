@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsCore.Install.UiKitCatalogTest do
   @moduledoc """
   Pure tests against the REAL `chelekom.json` (136 components) — the dependency-closure /

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.AuthRateLimitTest do
   @moduledoc """
   How often someone may sign in, ask for a password reset, ask for a sign-in link and try their

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Test.EventCannotRun do
   @moduledoc """
   Makes mishka_installer events answer as events whose plugins are not all loaded — `Hook.call/3`

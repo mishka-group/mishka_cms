@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   @moduledoc """
   A site the installer sets up gets the extensions the operator TICKED, and nothing it did not.

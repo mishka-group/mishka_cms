@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.TranslationRenderTest do
   @moduledoc """
   A word a runtime template asks `t/1` for, as a visitor reads it, driven through the REAL router.
