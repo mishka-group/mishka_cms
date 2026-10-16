@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.GraphqlSocket do
   @moduledoc """
   The socket GraphQL subscriptions run on, at `/ws/gql`, bound to the site of the address it is

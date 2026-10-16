@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # This Scripts is used to set data for different use cases
 #
 # For Stress Testing: `mix run priv/repo/stress_test_seeds.exs`

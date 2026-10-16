@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // THE HOOK CARRIES NO CODEMIRROR AT ALL. It fetches `code_editor.js` the first time a code box
 // appears on screen and mounts what that file hangs on `window.PbCodeMirror`. The admin bundle stays
 // the size it was; the 262 KB is paid by the one screen that uses it, once, and then it is cached.

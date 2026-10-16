@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.PreviewLeavingLinksTest do
   @moduledoc """
   A link that leaves a preview opens the published page in a new tab — and only a preview does that.

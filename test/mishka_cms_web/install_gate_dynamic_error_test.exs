@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.InstallGateDynamicErrorTest do
   @moduledoc """
   Endpoint-level proof that a post-install `GET /install` routes through the app's dynamic error

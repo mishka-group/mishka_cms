@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.SandboxDisconnectLogFilterTest do
   @moduledoc """
   Pins the `:logger` primary filter installed in `test_helper.exs`: the Ecto-sandbox

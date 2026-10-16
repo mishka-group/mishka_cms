@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // LOADED ON DEMAND, NOT WITH THE ADMIN BUNDLE — the rich-text editor's engine, Tiptap and
 // ProseMirror, fetched by `pb_content_editor.js` the first time a content editor appears, the way
 // `code_editor.js` is for CodeMirror. It hangs itself on `window.MishkaContentEditor`.

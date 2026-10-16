@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // A PREVIEW IS ONE PAGE, NOT A SITE — loaded by the `:preview` layout and by nothing else.
 //
 // `/_preview/:resource/:token` draws one record. A link built on `@page.path` points back at it and

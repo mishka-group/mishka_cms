@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # This is a configuration file for igniter.
 # For option documentation, see https://hexdocs.pm/igniter/Igniter.Project.IgniterConfig.html
 # To keep it up to date, use `mix igniter.setup`

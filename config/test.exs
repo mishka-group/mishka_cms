@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 import Config
 config :mishka_cms, Oban, testing: :manual
 config :mishka_cms_core, token_signing_secret: "wx4H2IZdYD3YU8ttLCI9jr2UBCVZHorf"

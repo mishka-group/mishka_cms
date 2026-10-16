@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // Where a drop would land, and what to draw for it.
 //
 // This is the half of the builder's drag and drop that the browser answers on its own — geometry,

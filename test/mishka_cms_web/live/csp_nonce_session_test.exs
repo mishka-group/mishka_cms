@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.CspNonceSessionTest do
   @moduledoc """
   Every response names its own CSP nonce, and the LiveView it serves renders with exactly that one.

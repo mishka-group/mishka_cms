@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // The two decisions the browser makes about naming somebody in a review note, with no DOM in
 // either of them. The hook in `app.js` owns the textarea and the pushes; this owns the reading and
 // the writing, so both can be tested without a LiveSocket.

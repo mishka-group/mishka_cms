@@ -1,0 +1,28 @@
+version = 1
+
+# Files that cannot carry an SPDX comment header: Markdown, JSON, lock files, binaries (images,
+# fonts, uploads), gettext catalogs, vendored browser code, Docker and CI config, the release
+# overlay scripts, and the license texts themselves. Source files carry their header in place.
+
+[[annotations]]
+path = [
+  "**/*.md",
+  "**/*.json",
+  "assets/bun.lock",
+  "mix.lock",
+  "assets/vendor/**",
+  "priv/**",
+  "examples/**",
+  "rel/env.sh.eex",
+  "rel/overlays/bin/**",
+  ".github/workflows/ci.yml",
+  ".dockerignore",
+  ".gitignore",
+  ".tool-versions",
+  "Dockerfile",
+  "LICENSE",
+  "LICENSES/**",
+  "REUSE.toml",
+]
+SPDX-FileCopyrightText = "2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>"
+SPDX-License-Identifier = "Apache-2.0"

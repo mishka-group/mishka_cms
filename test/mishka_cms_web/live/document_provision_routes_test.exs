@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.DocumentProvisionRoutesTest do
   @moduledoc """
   The paths `MishkaDocument.Provision` gives a site are paths the runtime can actually answer.

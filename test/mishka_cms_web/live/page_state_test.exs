@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.PageStateTest do
   @moduledoc """
   A database page starts with the assigns it declares in `Page.state`, through `RuntimeLive`.

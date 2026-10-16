@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: REUSE
+
+# Started by hand from the Actions tab: every tracked file carries an SPDX header or is covered by
+# REUSE.toml.
+on:
+  workflow_dispatch:
+
+jobs:
+  reuse:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: fsfe/reuse-action@v5
+        with:
+          args: lint

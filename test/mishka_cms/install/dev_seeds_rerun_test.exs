@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Install.DevSeedsRerunTest do
   @moduledoc """
   Running the dev seeds a second time on the database they already seeded.

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.RuntimeHeadTest do
   @moduledoc """
   A database page's title, SEO tags and schema reach `<head>`, and a marketing page's head does not

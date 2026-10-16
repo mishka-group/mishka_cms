@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.RedirectNavigationTest do
   @moduledoc """
   A site's redirect rule answers a live navigation as well as a request. `SiteLookupPlug` serves the

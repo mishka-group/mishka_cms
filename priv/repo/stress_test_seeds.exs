@@ -1,4 +1,8 @@
 #!/usr/bin/env elixir
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Stress Test Seeds — large volumes of data for performance and pagination testing.
 # Run with: mix run priv/repo/stress_test_seeds.exs
 #

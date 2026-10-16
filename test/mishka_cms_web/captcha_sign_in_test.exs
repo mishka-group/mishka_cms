@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.CaptchaSignInTest do
   @moduledoc """
   The sign-in pages of a site that asks a captcha (`MishkaCmsCore.Captcha`), through the router as a

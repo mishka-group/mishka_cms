@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.RecordLabelsGettextTest do
   @moduledoc """
   Every record a refusal names by its `:label` — "That layout is not one this site can use." — can

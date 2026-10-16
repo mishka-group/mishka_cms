@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // React portals the canvas content into an <iframe> body. jsdom — unlike real browsers,
 // which load a `srcDoc` iframe as the iframe's initial document — fires iframe `load` events
 // that hand back a fresh body node, so React's portal reconciliation can try to remove a node

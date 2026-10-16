@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Dev.AdminCssTest do
   @moduledoc """
   `mix admin_css` builds both stylesheets even while `mix tailwind` is held by someone else.

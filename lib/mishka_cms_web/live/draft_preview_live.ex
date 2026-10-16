@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCmsWeb.DraftPreviewLive do
   @moduledoc """
   Serves a runtime preview at the shareable `/_preview/:resource/:token` URL as a *real LiveView*,

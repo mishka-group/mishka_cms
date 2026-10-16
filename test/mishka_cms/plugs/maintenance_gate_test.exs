@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule MishkaCms.Plugs.MaintenanceGateTest do
   @moduledoc """
   Real tests for the Joomla-style offline gate: it reads the `cms.offline` setting from the RAM cache
