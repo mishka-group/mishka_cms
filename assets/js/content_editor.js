@@ -6,8 +6,8 @@
 // ProseMirror, fetched by `pb_content_editor.js` the first time a content editor appears, the way
 // `code_editor.js` is for CodeMirror. It hangs itself on `window.MishkaContentEditor`.
 //
-// `../vendor/editor.js` is Mishka Chelekom's headless `editor` engine (the `chelekom_headless-editor`
-// hook, ui kit 0.0.10-alpha.8, Chelekom commit 0e701ce4), copied byte for byte out of
+// `../vendor/editor.js` is Mishka Chelekom's headless `editor` engine (the `chelekom-headless-editor`
+// hook, ui kit 0.0.10-alpha.9, Chelekom commit 1973a209), copied byte for byte out of
 // mishka_cms_core's `priv/cms_ui_kits/chelekom_headless.json` and never edited — the drift test in
 // `test/mishka_cms/content_editor_engine_test.exs` says how to refresh it. What the CMS adds is
 // `../vendor/editor_extensions.js`, the file the engine imports for its extensions.

@@ -68,14 +68,14 @@ defmodule MishkaCms.MixProject do
       {:ash_authentication,
        github: "team-alembic/ash_authentication", branch: "main", override: true},
       {:jose, "~> 1.11", override: true},
-      {:ash_postgres, "~> 2.13"},
+      {:ash_postgres, "~> 2.14"},
       {:ash_json_api, "~> 1.7"},
       {:ash_graphql, "~> 1.12"},
       {:ash_phoenix, "~> 2.3"},
-      {:ash, "~> 3.33"},
-      {:ash_paper_trail, "~> 0.7"},
+      {:ash, "~> 3.36"},
+      {:ash_paper_trail, "~> 0.8"},
       {:ash_slug, "~> 0.2"},
-      {:ash_oban, "~> 0.8"},
+      {:ash_oban, "~> 0.10"},
 
       # Queue Stuff
       {:oban, "~> 2.24"},
@@ -85,7 +85,7 @@ defmodule MishkaCms.MixProject do
       {:absinthe_phoenix, "~> 2.0"},
       {:sourceror, "~> 1.12", only: [:dev, :test]},
       {:open_api_spex, "~> 3.22"},
-      {:mishka_installer, "~> 0.1.13"},
+      {:mishka_installer, "~> 0.1.14"},
 
       # DataBase Stuff
       {:phoenix_ecto, "~> 4.7"},
@@ -94,8 +94,8 @@ defmodule MishkaCms.MixProject do
       {:postgrex, "~> 0.22"},
 
       # Req/Res Stuff
-      {:bandit, "~> 1.12"},
-      {:swoosh, "~> 1.28"},
+      {:bandit, "~> 1.13"},
+      {:swoosh, "~> 1.29"},
       {:req, "~> 0.7"},
       {:dns_cluster, "~> 0.3"},
 
@@ -132,7 +132,7 @@ defmodule MishkaCms.MixProject do
        compile: false,
        depth: 1},
       {:html_sanitize_ex, "~> 1.5", override: true},
-      {:guarded_struct, "~> 0.1"},
+      {:guarded_struct, "~> 0.1.4"},
 
       # Extentions
       mishka_dep(:mishka_cms_core),

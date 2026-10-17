@@ -5,7 +5,7 @@
 defmodule MishkaCms.ContentEditorEngineTest do
   @moduledoc """
   The admin's content editor runs Mishka Chelekom's headless `editor` engine, the one the core's
-  `chelekom_headless` kit installs on a site as the global JS hook `chelekom_headless-editor`. The
+  `chelekom_headless` kit installs on a site as the global JS hook `chelekom-headless-editor`. The
   admin cannot load a site's bundle, so `assets/vendor/editor.js` is a copy of that hook's
   `content`, and `assets/package.json` installs exactly the packages the hook lists.
 
@@ -18,7 +18,7 @@ defmodule MishkaCms.ContentEditorEngineTest do
   use ExUnit.Case, async: true
 
   @assets Path.expand("../../assets", __DIR__)
-  @refresh "Refresh the copy as this module's doc says: the kit's `chelekom_headless-editor` hook " <>
+  @refresh "Refresh the copy as this module's doc says: the kit's `chelekom-headless-editor` hook " <>
              "is the source of truth for the engine and its packages."
 
   defp hook do
@@ -28,7 +28,7 @@ defmodule MishkaCms.ContentEditorEngineTest do
     |> File.read!()
     |> Jason.decode!()
     |> Map.fetch!("js_hooks")
-    |> Enum.find(&(&1["name"] == "chelekom_headless-editor"))
+    |> Enum.find(&(&1["name"] == "chelekom-headless-editor"))
   end
 
   defp package, do: @assets |> Path.join("package.json") |> File.read!() |> Jason.decode!()
