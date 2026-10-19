@@ -16,6 +16,7 @@ import { Socket } from "phoenix";
 import { LiveSocket } from "phoenix_live_view";
 import { hooks as colocatedHooks } from "phoenix-colocated/mishka_cms";
 import topbar from "../vendor/topbar";
+import { syncHead } from "./head_sync";
 
 export function boot(Hooks) {
   const csrfToken = document
@@ -78,6 +79,8 @@ export function boot(Hooks) {
     old.removeAttribute("id");
     old.after(link);
   });
+
+  window.addEventListener("phx:mishka:head", (e) => syncHead(e.detail));
 
   window.addEventListener("phx:mishka:js-updated", () => {
     if (document.getElementById("mishka-update-banner")) return;
