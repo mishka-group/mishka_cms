@@ -5,12 +5,24 @@
 defmodule MishkaCms.MixProject do
   use Mix.Project
   @version "0.0.1"
+  @source_url "https://github.com/mishka-group/mishka_cms"
 
   def project do
     [
       app: :mishka_cms,
       version: @version,
-      elixir: "~> 1.18",
+      name: "Mishka CMS",
+      description: description(),
+      package: package(),
+      homepage_url: "https://mishka.tools/cms",
+      source_url: @source_url,
+      docs: [
+        main: "readme",
+        source_ref: "v#{@version}",
+        extras: ["README.md"],
+        source_url: @source_url
+      ],
+      elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       test_paths: test_paths(),
       start_permanent: Mix.env() == :prod,
@@ -19,6 +31,24 @@ defmodule MishkaCms.MixProject do
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       consolidate_protocols: Mix.env() != :dev
+    ]
+  end
+
+  defp description do
+    "An open source real-time CMS for Elixir and Phoenix LiveView, where one install runs many websites."
+  end
+
+  defp package do
+    [
+      licenses: ["Apache-2.0"],
+      maintainers: ["Shahryar Tavakkoli", "Mona Aghili"],
+      links: %{
+        "Mishka CMS" => "https://mishka.tools/cms",
+        "Official document" => "https://mishka.tools/cms/docs",
+        "GitHub" => @source_url,
+        "Sponsor" => "https://github.com/sponsors/mishka-group",
+        "Contributors" => "#{@source_url}/graphs/contributors"
+      }
     ]
   end
 
