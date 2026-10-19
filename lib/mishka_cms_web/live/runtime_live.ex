@@ -113,11 +113,17 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # receiving its own messages.
   @page_topic :mishka_cms_runtime_page_topic
 
+  # Where `mount/3` leaves whether this connected mount came from a live navigation — a link to
+  # another LiveView, whose `<head>` is still the previous page's — until `handle_params/3` has pushed
+  # the head of the address the socket landed on.
+  @navigated :mishka_cms_runtime_navigated
+
   def mount(%{"path" => path} = params, %{"current_site" => site} = session, socket) do
     socket =
       socket
       |> speaking(session[Languages.session()], site.id)
       |> assign(:client_request, client_request(socket))
+      |> note_navigation()
 
     query = visitor_query(params)
 
@@ -699,9 +705,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
   blank line to every marketing page's head too.
 
   It renders once per HTTP response, which is the response a crawler reads, and marks each tag
-  `data-mishka-seo`. A patch to another database page updates `<title>` and, through the
-  `mishka:head` event `handle_params/3` pushes, replaces the marked tags (`boot.js`); a live
-  navigation that mounts a new LiveView updates `<title>` and keeps these tags.
+  `data-mishka-seo`. A patch to another database page, and a live navigation that mounts a new
+  LiveView, update `<title>` and, through the `mishka:head` event `handle_params/3` pushes, replace
+  the marked tags (`boot.js`).
   """
   attr :seo, :map, default: nil, doc: "`@page_seo`, with its `tags` and its `schema`"
   attr :csp_nonce, :string, default: nil
@@ -867,22 +873,44 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   # THE HEAD OF AN ADDRESS THE SOCKET MOVED TO. The root layout draws `page_head/1` once, with the
   # response, and only `<title>` follows a live navigation, so a patch to another page of the same
-  # LiveView leaves the tags of the page it came from in `<head>`. When this address resolves other
+  # LiveView, or a navigation to another LiveView, leaves the tags of the page it came from in
+  # `<head>`. When this address resolves other
   # tags or schema than the one the socket was on, `mishka:head` hands them to `boot.js`, which
-  # replaces the ones `page_head/1` marked. Nothing is sent for the address the socket mounted on, whose
-  # head the response carries, or for one with the same head.
-  defp push_head(socket, nil), do: socket
+  # replaces the ones `page_head/1` marked. The first address of a mount that a live navigation made
+  # (`note_navigation/1`) is sent too, since the page it came from drew the head the browser has.
+  # Nothing is sent for the address of a full load, whose head the response carries, or for one with
+  # the same head.
+  defp push_head(socket, nil) do
+    case socket.private[@navigated] do
+      true -> socket |> put_private(@navigated, false) |> send_head()
+      _first_load_or_consumed -> socket
+    end
+  end
 
   defp push_head(%{assigns: %{page_seo: seo}} = socket, before) do
     case {seo.tags, seo.schema} == {before.tags, before.schema} do
-      true ->
-        socket
+      true -> socket
+      false -> send_head(socket)
+    end
+  end
 
-      false ->
-        push_event(socket, "mishka:head", %{
-          tags: for({name, attrs} <- seo.tags, do: %{tag: name, attrs: Map.new(attrs)}),
-          schema: seo.schema
-        })
+  defp send_head(%{assigns: %{page_seo: seo}} = socket) do
+    push_event(socket, "mishka:head", %{
+      tags: for({name, attrs} <- seo.tags, do: %{tag: name, attrs: Map.new(attrs)}),
+      schema: seo.schema
+    })
+  end
+
+  # A CONNECTED MOUNT THAT A LIVE NAVIGATION MADE: the client sends the page it came from as
+  # `_live_referer` when it navigates from one LiveView to another, and on no other mount. A full load
+  # carries none, and its response has the head already.
+  defp note_navigation(socket) do
+    case connected?(socket) && get_connect_params(socket) do
+      %{"_live_referer" => referer} when is_binary(referer) and referer != "" ->
+        put_private(socket, @navigated, true)
+
+      _full_load_or_not_connected ->
+        socket
     end
   end
 

@@ -272,6 +272,37 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
                Enum.find(back, &match?(%{tag: "meta", attrs: %{"name" => "description"}}, &1))
     end
 
+    # A LIVE NAVIGATION MOUNTS A NEW LIVEVIEW, whose first `handle_params/3` has no address before it
+    # to compare with; the client says it came from a page by sending `_live_referer`, and the head
+    # in the browser is that page's.
+    test "pushes the head of the page a live navigation mounts on, and none on a full load", %{
+      page: page
+    } do
+      {:ok, full, _html} = live(on_site(), page.path)
+      refute_push_event(full, "mishka:head", %{}, 50)
+
+      conn =
+        Phoenix.LiveViewTest.put_connect_params(on_site(), %{
+          "_live_referer" => base() <> "/en/elsewhere"
+        })
+
+      {:ok, navigated, _html} = live(conn, page.path)
+
+      assert_push_event(navigated, "mishka:head", %{tags: tags, schema: schema})
+
+      assert %{attrs: %{"content" => ~s(The page's "own" <description>)}} =
+               Enum.find(tags, &match?(%{tag: "meta", attrs: %{"name" => "description"}}, &1))
+
+      assert %{attrs: %{"href" => href}} =
+               Enum.find(tags, &match?(%{tag: "link", attrs: %{"rel" => "canonical"}}, &1))
+
+      assert href == base() <> "/en/about"
+      assert [_ | _] = schema
+
+      render_patch(navigated, page.path <> "?utm=feed")
+      refute_push_event(navigated, "mishka:head", %{}, 50)
+    end
+
     test "pushes nothing when a patch moves to an address with the same head", %{page: page} do
       {:ok, view, _html} = live(on_site(), page.path)
 
