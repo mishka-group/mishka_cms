@@ -681,11 +681,6 @@ msgstr ""
 msgid "Website"
 msgstr ""
 
-#: lib/mishka_cms_web/live/runtime_live.ex:1052
-#, elixir-autogen, elixir-format
-msgid "You must log in to access this page."
-msgstr ""
-
 #: lib/mishka_cms_web/live/install_live.ex:420
 #, elixir-autogen, elixir-format
 msgid "Your site %{host} is ready — sign in as the master admin to continue."

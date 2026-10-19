@@ -74,8 +74,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
       * `var_docs` — `[]`. The variables this plugin fills, `[%{key: "post.title", label: "Post
         title"}]`, so an editor can list them. Return them whether or not this request filled them.
       * `permissions` — `[]`. The record's own permission names. Named, the address opens only for
-        whoever holds one of them, after the page's own: nobody signed in is sent to sign in, and
-        somebody signed in without one gets the 404. The head says `noindex, nofollow`.
+        whoever holds one of them, after the page's own: anybody else, signed in or not, gets the
+        404. The head says `noindex, nofollow`.
       * `page`, `site_id`, `params` — the `:page` section of `__page_information__/0`, the site, and
         `@query_params`: the path's captures (`"slug"`) and the query string. Read only. The
         visual editor asks with `params` empty, for `var_docs` and a preview, or with a sample
@@ -97,7 +97,6 @@ defmodule MishkaCmsWeb.RuntimeLive do
   alias MishkaCmsCore.Runtime.Plugs.{LanguagePlug, SiteLookupPlug}
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.PageState
-  alias MishkaCmsCoreWeb.ReturnTo
   alias MishkaInstaller.Event.Hook
 
   require Logger
@@ -215,9 +214,6 @@ defmodule MishkaCmsWeb.RuntimeLive do
                           |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
 
                         Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
-
-                      {:sign_in, socket} ->
-                        sign_in(socket, params, site.id)
 
                       {:visitors_only, socket} ->
                         send_home(socket, page_module)
@@ -395,18 +391,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> assign(:query_params, query_params(params, captured))
                   |> assign_page_seo(uri)
                   |> admit_record(page_module)
-                  |> case do
-                    {:ok, socket} ->
-                      new_socket = MishkaCmsCore.Runtime.PageUpload.allow(socket, page_module)
-
-                      {:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", new_socket)}
-
-                    {:sign_in, socket} ->
-                      {:noreply, sign_in(socket, params, site_id)}
-                  end
-
-                {:sign_in, socket} ->
-                  {:noreply, sign_in(socket, params, site_id)}
+                  |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
+                  |> then(&{:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", &1)})
 
                 {:visitors_only, socket} ->
                   {:noreply, send_home(socket, page_module)}
@@ -557,8 +543,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # older than the refusal would let the same visitor straight back in.
   #
   # Whoever no longer holds a permission is sent back to the address, where `mount/3` gives them the
-  # site's 403 or the sign-in it would have given them had they asked a second later. Whoever still
-  # holds one notices nothing.
+  # site's 404 it would have given them had they asked a second later. Whoever still holds one
+  # notices nothing.
   #
   # Matching `topic` in both the message and this socket's own private admits only the subscription
   # `mount/3` made; the same page's `created` or `destroyed` belongs to whoever subscribed to those.
@@ -891,8 +877,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   # A PAGE THAT NAMES PERMISSIONS OPENS ONLY FOR WHOEVER HOLDS ONE OF THEM, asked of
   # `AccessPermissions` the way every admin gate asks it, so `*` and `admin:*` grant here what they
-  # grant there. Nobody signed in is sent to sign in; somebody signed in without one gets the site's
-  # 403.
+  # grant there. Everybody else, a visitor who is not signed in included, gets the site's 404.
   #
   # Asked in `mount/3` and again in `handle_params/3`, because a `<.link patch>` to another page runs
   # only the second, and the first HTTP response is refused in `mount/3` before anything is drawn.
@@ -904,7 +889,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # whichever user this page needed and no other.
   #
   # A visitors-only page answers `:visitors_only` for a signed-in visitor, and a signed-in-only page
-  # `:signed_in_only` for one who is not, before any permission.
+  # `:signed_in_only` for one who is not, before any permission. A page nobody may open raises.
   defp admit({:ok, _result} = compiled, page_module, socket) do
     required = page_module.__page_information__([:acl, :permissions])
     visitors_only = extra?(page_module, :visitors_only)
@@ -921,9 +906,6 @@ defmodule MishkaCmsWeb.RuntimeLive do
       {[], _nobody_in_particular} ->
         {compiled, socket}
 
-      {_required, nil} ->
-        {:sign_in, socket}
-
       {required, user} ->
         if AccessPermissions.match?(user, %{}, permissions: required),
           do: {compiled, socket},
@@ -936,23 +918,18 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # A PAGE THAT SHOWS A RECORD OPENS ONLY FOR WHOEVER THE RECORD ADMITS TOO, asked after `admit/3`
   # admitted them to the page. The record's permissions are what the plugin answering for its kind
   # put in the head (`assign_page_seo/2`), read with the record itself, and they are asked the way
-  # `admit/3` asks a page's: nobody signed in is sent to sign in, somebody signed in without one gets
-  # the 404. A record naming none asks nothing and loads nobody.
+  # `admit/3` asks a page's: everybody else, a visitor who is not signed in included, gets the 404.
+  # A record naming none asks nothing and loads nobody.
   defp admit_record(%{assigns: %{page_seo: %{permissions: [_ | _] = required}}} = socket, page) do
     socket = MishkaCmsCore.LiveUserAuth.load_current_user(socket)
+    user = socket.assigns[:current_user]
 
-    case socket.assigns[:current_user] do
-      nil ->
-        {:sign_in, socket}
-
-      user ->
-        if AccessPermissions.match?(user, %{}, permissions: required),
-          do: {:ok, socket},
-          else: refuse_as_missing(socket, page, required, user)
-    end
+    if AccessPermissions.match?(user, %{}, permissions: required),
+      do: socket,
+      else: refuse_as_missing(socket, page, required, user)
   end
 
-  defp admit_record(socket, _page_module), do: {:ok, socket}
+  defp admit_record(socket, _page_module), do: socket
 
   # A PAGE SOMEBODY MAY NOT OPEN ANSWERS WHAT A PAGE THAT IS NOT THERE ANSWERS — the site's 404, with
   # the same exception, status and sentence `WebRunTimeMetaDataState.resolve!/3` raises for an address
@@ -962,10 +939,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
   #
   # THE SYSTEM STILL KNOWS IT WAS A REFUSAL. The telemetry event carries the page, the permissions it
   # wanted and who asked, which is what the log feature will read later; nothing of that reaches the
-  # visitor. A visitor who is not signed in is NOT sent here — they are redirected to sign in, because
-  # a members-only page has to be reachable by signing in, and that does tell an anonymous prober the
-  # address exists. Closing that needs a per-page "hide that this page exists" flag, which is its own
-  # task.
+  # visitor.
+  #
+  # A VISITOR WHO IS NOT SIGNED IN IS REFUSED THE SAME WAY, as `user: nil`: the answer must not tell
+  # whoever asks whether the address exists, and a redirect to sign in would.
   defp refuse_as_missing(socket, page_module, required, user) do
     page = page_module.__page_information__([:page]) || %{}
 
@@ -977,17 +954,23 @@ defmodule MishkaCmsWeb.RuntimeLive do
         path: page[:path],
         site_id: socket.assigns[:private][:site_id],
         required: required,
-        actor_id: user.id
+        actor_id: actor_id(user)
       }
     )
 
     Logger.info(
-      "[RuntimeLive] #{user.id} may not open #{page[:path]} (wants #{Enum.join(required, ", ")}); answered as missing"
+      "[RuntimeLive] #{asker(user)} may not open #{page[:path]} (wants #{Enum.join(required, ", ")}); answered as missing"
     )
 
     raise MishkaCmsCore.ErrorsExceptions.NotFoundError,
       message: "Sorry, the page you are looking for does not exist or has been moved."
   end
+
+  defp actor_id(%{id: id}), do: id
+  defp actor_id(nil), do: nil
+
+  defp asker(%{id: id}), do: id
+  defp asker(nil), do: "a visitor who is not signed in"
 
   # THE SAME QUESTION `admit/3` ASKS, ASKED OF A SOCKET THAT IS ALREADY ON THE PAGE: once because the
   # page now names permissions it did not, once before the page acts on an event. Same check,
@@ -1018,9 +1001,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
   defp readmit_record(answer), do: answer
 
   # BACK TO THE ADDRESS, AS A REQUEST RATHER THAN A NAVIGATION. Refusing here would mean writing a
-  # second copy of what `mount/3` already decides — the 403 for somebody signed in, the sign-in with
-  # `return_to` for somebody who is not — so the browser asks for the page again instead, and the one
-  # place that answers that question answers it.
+  # second copy of what `mount/3` already decides — the site's 404 — so the browser asks for the page
+  # again instead, and the one place that answers that question answers it.
   defp refuse(socket), do: redirect(socket, to: socket.private[@address])
 
   # THE COMPILED MODULE IS BROUGHT UP TO THE ROW IT HAS JUST BEEN TOLD ABOUT, and only when the two
@@ -1163,9 +1145,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # THE SIGN-IN PAGE IN THE LANGUAGE THE VISITOR IS READING — the one `speaking/3` read off the
   # address — so a reader on `/fa/...` signs in on `/fa/auth`, and one in the site's first language
   # on `/auth` when the site leaves it unprefixed.
-  defp sign_in_address(socket, site_id, query \\ "") do
+  defp sign_in_address(socket, site_id) do
     address = SiteLookupPlug.auth_address(socket.assigns[:site_language], site_id)
-    MishkaCmsCore.Helpers.path(socket, address <> query)
+    MishkaCmsCore.Helpers.path(socket, address)
   end
 
   # The address the visitor's socket came from: `:x_headers` read the way the endpoint's
@@ -1218,24 +1200,6 @@ defmodule MishkaCmsWeb.RuntimeLive do
     end
   rescue
     _unreadable -> true
-  end
-
-  # BACK TO THE PAGE THAT ASKED, once signed in: the sign-in page in the visitor's language, the
-  # query kept, hands `return_to` on to the sign-in it starts, and
-  # `MishkaCmsCoreWeb.AuthController` redirects there.
-  #
-  # WHAT TRAVELS IS A SIGNATURE, NOT AN ADDRESS. The address is the route this request already
-  # matched, so it is this site's by construction; signing it is what lets the controller tell it
-  # apart from the one a stranger would rather send people to. `~p` refuses to build an address a
-  # browser would read as another origin — it raises instead — so what reaches `ReturnTo.sign/2`
-  # here is always something it mints a token for.
-  defp sign_in(socket, %{"path" => path} = params, site_id) do
-    return_to = ReturnTo.sign(socket, ~p"/#{path}?#{query_params(params, %{})}")
-    query = "?" <> URI.encode_query(%{"return_to" => return_to})
-
-    socket
-    |> put_flash(:error, gettext("You must log in to access this page."))
-    |> redirect(to: sign_in_address(socket, site_id, query))
   end
 
   defp compile_layout({site, layout_path}, page_site_id) do

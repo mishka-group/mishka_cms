@@ -11,12 +11,12 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
   compiler, so every page compiled with no permissions and a members-only page was public.
 
   `MishkaCmsWeb.RuntimeLive` now asks `AccessPermissions` — the check every admin gate uses, `*`
-  included — in `mount/3` and again in `handle_params/3`. A visitor who is not signed in is sent to
-  sign in with the page as `return_to`, and brought back to it; a user holding none of the
-  permissions is answered as though the page were not there: the site's 404, the same exception and
-  the same sentence an address nothing is stored at gets, so a refusal cannot be told from a miss.
-  The refusal itself is not lost — it is a telemetry event and a log line, for whoever asks the
-  system later. Both answer the first HTTP response, a `live` mount and a live navigation alike.
+  included — in `mount/3` and again in `handle_params/3`. Anybody holding none of the permissions,
+  a visitor who is not signed in included, is answered as though the page were not there: the site's
+  404, the same exception and the same sentence an address nothing is stored at gets, so a refusal
+  cannot be told from a miss. The refusal itself is not lost — it is a telemetry event and a log
+  line, for whoever asks the system later. Both answer the first HTTP response, a `live` mount and a
+  live navigation alike.
 
   The permissions are actions, and a user's own wildcards cover them the way they cover an admin
   gate's: `staff:*` on a page opens for `staff:*` or `*`, not for the narrower `staff:editor`.
@@ -106,17 +106,22 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
       end
     end
 
-    test "sends a visitor who is not signed in to sign in, with the page to come back to", %{
-      members: members
-    } do
+    test "answers a visitor who is not signed in with the same 404, as a request and as a mount",
+         %{
+           site: site,
+           members: members
+         } do
       asked = members.path <> "?tab=2"
 
-      assert returns_to(redirected_to(get(on_site(), asked))) == asked
+      {404, _headers, guest} = assert_error_sent(404, fn -> get(on_site(), asked) end)
 
-      assert {:error, {:redirect, %{to: sign_in, flash: %{"error" => _message}}}} =
-               live(on_site(), asked)
+      {404, _headers, outsider} =
+        assert_error_sent(404, fn -> get(signed_in(site, ["members:write"]), asked) end)
 
-      assert returns_to(sign_in) == asked
+      refute has_page?(guest)
+      assert guest == outsider
+
+      assert_raise NotFoundError, fn -> live(on_site(), asked) end
     end
 
     # `mount/3` runs the page's `OnMount.AfterCompile` hook and registers its uploads before
@@ -125,31 +130,37 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
       params = %{"path" => String.split(String.trim_leading(members.path, "/"), "/")}
       session = %{"current_site" => site}
 
-      assert {:ok, %{redirected: {:redirect, %{to: sign_in}}}, _options} =
-               MishkaCmsWeb.RuntimeLive.mount(params, session, bare_socket(nil))
-
-      assert returns_to(sign_in) == members.path
-
-      outsider = member!(site, ["members:write"])
-
-      assert_raise NotFoundError, fn ->
-        MishkaCmsWeb.RuntimeLive.mount(params, session, bare_socket(outsider))
+      for reader <- [nil, member!(site, ["members:write"])] do
+        assert_raise NotFoundError, fn ->
+          MishkaCmsWeb.RuntimeLive.mount(params, session, bare_socket(reader))
+        end
       end
     end
   end
 
   describe "a live navigation into a page that names permissions" do
-    test "sends a visitor who is not signed in to sign in", %{public: public, members: members} do
-      {:ok, view, _html} = live(on_site(), public.path)
-      assert {:error, {:redirect, %{to: patched}}} = render_patch(view, members.path)
-      assert returns_to(patched) == members.path
+    test "refuses a visitor who is not signed in with the 404, on a patch and on a navigate", %{
+      public: public,
+      members: members
+    } do
+      Process.flag(:trap_exit, true)
 
       {:ok, view, _html} = live(on_site(), public.path)
-      assert {:error, {:redirect, %{to: navigated}}} = live_redirect(view, to: members.path)
-      assert returns_to(navigated) == members.path
+
+      assert {{%NotFoundError{}, _stacktrace}, _call} =
+               catch_exit(render_patch(view, members.path))
+
+      {:ok, view, _html} = live(on_site(), public.path)
+
+      assert {%{reason: "reload", status: 404}, _call} =
+               catch_exit(live_redirect(view, to: members.path))
     end
 
-    test "refuses a user holding none of them", %{site: site, public: public, members: members} do
+    test "refuses a user holding none of them, on a patch and on a navigate", %{
+      site: site,
+      public: public,
+      members: members
+    } do
       Process.flag(:trap_exit, true)
       conn = signed_in(site, ["members:write"])
 
@@ -157,6 +168,11 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
 
       assert {{%NotFoundError{}, _stacktrace}, _call} =
                catch_exit(render_patch(view, members.path))
+
+      {:ok, view, _html} = live(conn, public.path)
+
+      assert {%{reason: "reload", status: 404}, _call} =
+               catch_exit(live_redirect(view, to: members.path))
     end
 
     test "follows a user holding one of them", %{site: site, public: public, members: members} do
@@ -169,7 +185,7 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
     end
   end
 
-  describe "signing in from a page that sent the visitor there" do
+  describe "signing in at an address that carries a signed page to come back to" do
     # `/auth?return_to=…` is the site's sign-in page in its first language, the query kept, and the
     # sign-in that page starts carries `return_to` to the controller.
     test "lands back on that page", %{site: site, members: members} do
@@ -177,7 +193,9 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
       user = member!(site, ["members:read"])
       asked = members.path <> "?tab=2"
 
-      "/auth?" <> _query = sign_in_page = redirected_to(get(on_site(), asked))
+      sign_in_page =
+        "/auth?" <> URI.encode_query(%{"return_to" => ReturnTo.sign(@endpoint, asked)})
+
       assert html_response(get(on_site(), sign_in_page), 200) =~ ~s(id="auth-sign-in-form")
 
       {:ok, view, _html} = live(on_site(), sign_in_page)
@@ -256,15 +274,6 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
     }
 
     %{socket | private: Map.put(socket.private, :connect_info, %{})}
-  end
-
-  # The page to come back to is a signature, not an address, so what the sign-in URL carries is only
-  # readable back through `ReturnTo` — which is exactly what the controller will do with it.
-  defp returns_to("/auth?" <> query) do
-    query
-    |> URI.decode_query()
-    |> Map.get("return_to")
-    |> then(&ReturnTo.verify(@endpoint, &1))
   end
 
   defp has_page?(html),
