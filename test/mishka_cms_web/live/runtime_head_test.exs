@@ -217,6 +217,99 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
       assert page_title(view) == "Contact the studio"
     end
 
+    # THE TAGS OF THE FIRST RESPONSE ARE MARKED, so the browser can tell them from the rest of
+    # `<head>` when a patch brings the head of another page (`boot.js`, `head_sync.js`).
+    test "marks every tag and every schema it draws for the browser to replace", %{page: page} do
+      doc = LazyHTML.from_document(get_page(page.path))
+      drawn = LazyHTML.query(doc, "head [data-mishka-seo]")
+
+      tags = drawn |> Enum.flat_map(&LazyHTML.tag/1) |> Enum.uniq() |> Enum.sort()
+
+      assert Enum.count(drawn) > 5
+      assert tags == ["link", "meta", "script"]
+      assert Enum.empty?(LazyHTML.query(doc, ~s(head meta[charset][data-mishka-seo])))
+      assert Enum.empty?(LazyHTML.query(doc, ~s(head meta[name="csrf-token"][data-mishka-seo])))
+    end
+
+    # A PATCH TO ANOTHER PAGE KEEPS THE LIVEVIEW AND THE HEAD THE RESPONSE DREW, so what the new
+    # address resolved is pushed, and nothing is pushed when the socket mounts on an address.
+    test "pushes the head of the page a patch moves to, and none on the page it mounted on", %{
+      site: site,
+      page: page
+    } do
+      other =
+        published!(site,
+          name: "Contact the studio",
+          title: "Contact the studio",
+          seo_tags: [
+            meta("description", "Write to the studio"),
+            %{tag: "link", attrs: %{"rel" => "canonical", "href" => "/en/contact"}}
+          ]
+        )
+
+      {:ok, view, _html} = live(on_site(), page.path)
+      refute_push_event(view, "mishka:head", %{}, 50)
+
+      render_patch(view, other.path)
+
+      assert_push_event(view, "mishka:head", %{tags: tags, schema: schema})
+
+      assert %{attrs: %{"content" => "Write to the studio"}} =
+               Enum.find(tags, &match?(%{tag: "meta", attrs: %{"name" => "description"}}, &1))
+
+      assert %{attrs: %{"href" => href}} =
+               Enum.find(tags, &match?(%{tag: "link", attrs: %{"rel" => "canonical"}}, &1))
+
+      assert href == base() <> "/en/contact"
+      assert Enum.all?(tags, &(&1.tag in ["meta", "link"]))
+      assert [_ | _] = schema
+      assert Enum.all?(schema, &is_binary/1)
+
+      render_patch(view, page.path)
+      assert_push_event(view, "mishka:head", %{tags: back})
+
+      assert %{attrs: %{"content" => ~s(The page's "own" <description>)}} =
+               Enum.find(back, &match?(%{tag: "meta", attrs: %{"name" => "description"}}, &1))
+    end
+
+    # A LIVE NAVIGATION MOUNTS A NEW LIVEVIEW, whose first `handle_params/3` has no address before it
+    # to compare with; the client says it came from a page by sending `_live_referer`, and the head
+    # in the browser is that page's.
+    test "pushes the head of the page a live navigation mounts on, and none on a full load", %{
+      page: page
+    } do
+      {:ok, full, _html} = live(on_site(), page.path)
+      refute_push_event(full, "mishka:head", %{}, 50)
+
+      conn =
+        Phoenix.LiveViewTest.put_connect_params(on_site(), %{
+          "_live_referer" => base() <> "/en/elsewhere"
+        })
+
+      {:ok, navigated, _html} = live(conn, page.path)
+
+      assert_push_event(navigated, "mishka:head", %{tags: tags, schema: schema})
+
+      assert %{attrs: %{"content" => ~s(The page's "own" <description>)}} =
+               Enum.find(tags, &match?(%{tag: "meta", attrs: %{"name" => "description"}}, &1))
+
+      assert %{attrs: %{"href" => href}} =
+               Enum.find(tags, &match?(%{tag: "link", attrs: %{"rel" => "canonical"}}, &1))
+
+      assert href == base() <> "/en/about"
+      assert [_ | _] = schema
+
+      render_patch(navigated, page.path <> "?utm=feed")
+      refute_push_event(navigated, "mishka:head", %{}, 50)
+    end
+
+    test "pushes nothing when a patch moves to an address with the same head", %{page: page} do
+      {:ok, view, _html} = live(on_site(), page.path)
+
+      render_patch(view, page.path <> "?utm=feed")
+      refute_push_event(view, "mishka:head", %{}, 50)
+    end
+
     # The layout is stored but not routed, so it can be neither found nor compiled.
     @tag :capture_log
     test "leaves out a layout it cannot find, and keeps its own tags", %{site: site} do

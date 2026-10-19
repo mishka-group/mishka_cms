@@ -113,11 +113,17 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # receiving its own messages.
   @page_topic :mishka_cms_runtime_page_topic
 
+  # Where `mount/3` leaves whether this connected mount came from a live navigation — a link to
+  # another LiveView, whose `<head>` is still the previous page's — until `handle_params/3` has pushed
+  # the head of the address the socket landed on.
+  @navigated :mishka_cms_runtime_navigated
+
   def mount(%{"path" => path} = params, %{"current_site" => site} = session, socket) do
     socket =
       socket
       |> speaking(session[Languages.session()], site.id)
       |> assign(:client_request, client_request(socket))
+      |> note_navigation()
 
     query = visitor_query(params)
 
@@ -375,6 +381,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
               |> admit(page_module, socket)
               |> case do
                 {{:ok, _result}, socket} ->
+                  head_before = socket.assigns[:page_seo]
+
                   # A LIVE NAVIGATION LANDS ON A DIFFERENT PAGE, and that page's uploads are not the
                   # ones mount registered. `allow_upload/3` refuses a name already registered, so
                   # `MishkaCmsCore.Runtime.PageUpload.allow/2` skips what is there and adds what the
@@ -391,6 +399,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> assign(:query_params, query_params(params, captured))
                   |> assign_page_seo(uri)
                   |> admit_record(page_module)
+                  |> push_head(head_before)
                   |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
                   |> then(&{:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", &1)})
 
@@ -695,17 +704,19 @@ defmodule MishkaCmsWeb.RuntimeLive do
   carries none of it. Call it there with no whitespace before it: on a line of its own it adds a
   blank line to every marketing page's head too.
 
-  It renders once per HTTP response, which is the response a crawler reads. A live navigation to
-  another database page updates `<title>` and keeps these tags.
+  It renders once per HTTP response, which is the response a crawler reads, and marks each tag
+  `data-mishka-seo`. A patch to another database page, and a live navigation that mounts a new
+  LiveView, update `<title>` and, through the `mishka:head` event `handle_params/3` pushes, replace
+  the marked tags (`boot.js`).
   """
   attr :seo, :map, default: nil, doc: "`@page_seo`, with its `tags` and its `schema`"
   attr :csp_nonce, :string, default: nil
 
   def page_head(%{seo: %{tags: _, schema: _}} = assigns) do
     ~H"""
-    <meta :for={{"meta", attrs} <- @seo.tags} {attrs} />
-    <link :for={{"link", attrs} <- @seo.tags} {attrs} />
-    <script :for={json <- @seo.schema} type="application/ld+json" nonce={@csp_nonce}>
+    <meta :for={{"meta", attrs} <- @seo.tags} {attrs} data-mishka-seo />
+    <link :for={{"link", attrs} <- @seo.tags} {attrs} data-mishka-seo />
+    <script :for={json <- @seo.schema} type="application/ld+json" nonce={@csp_nonce} data-mishka-seo>
       <%= raw(json) %>
     </script>
     """
@@ -858,6 +869,49 @@ defmodule MishkaCmsWeb.RuntimeLive do
       )
 
     assign(socket, page_seo: seo, page_title: seo.title)
+  end
+
+  # THE HEAD OF AN ADDRESS THE SOCKET MOVED TO. The root layout draws `page_head/1` once, with the
+  # response, and only `<title>` follows a live navigation, so a patch to another page of the same
+  # LiveView, or a navigation to another LiveView, leaves the tags of the page it came from in
+  # `<head>`. When this address resolves other
+  # tags or schema than the one the socket was on, `mishka:head` hands them to `boot.js`, which
+  # replaces the ones `page_head/1` marked. The first address of a mount that a live navigation made
+  # (`note_navigation/1`) is sent too, since the page it came from drew the head the browser has.
+  # Nothing is sent for the address of a full load, whose head the response carries, or for one with
+  # the same head.
+  defp push_head(socket, nil) do
+    case socket.private[@navigated] do
+      true -> socket |> put_private(@navigated, false) |> send_head()
+      _first_load_or_consumed -> socket
+    end
+  end
+
+  defp push_head(%{assigns: %{page_seo: seo}} = socket, before) do
+    case {seo.tags, seo.schema} == {before.tags, before.schema} do
+      true -> socket
+      false -> send_head(socket)
+    end
+  end
+
+  defp send_head(%{assigns: %{page_seo: seo}} = socket) do
+    push_event(socket, "mishka:head", %{
+      tags: for({name, attrs} <- seo.tags, do: %{tag: name, attrs: Map.new(attrs)}),
+      schema: seo.schema
+    })
+  end
+
+  # A CONNECTED MOUNT THAT A LIVE NAVIGATION MADE: the client sends the page it came from as
+  # `_live_referer` when it navigates from one LiveView to another, and on no other mount. A full load
+  # carries none, and its response has the head already.
+  defp note_navigation(socket) do
+    case connected?(socket) && get_connect_params(socket) do
+      %{"_live_referer" => referer} when is_binary(referer) and referer != "" ->
+        put_private(socket, @navigated, true)
+
+      _full_load_or_not_connected ->
+        socket
+    end
   end
 
   # The path asked for, without empty segments or a trailing slash, and the page of a list it asks
