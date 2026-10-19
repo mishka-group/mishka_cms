@@ -5,12 +5,22 @@
 defmodule MishkaCms.MixProject do
   use Mix.Project
   @version "0.0.1"
+  @source_url "https://github.com/mishka-group/mishka_cms"
 
   def project do
     [
       app: :mishka_cms,
       version: @version,
-      elixir: "~> 1.18",
+      name: "Mishka CMS",
+      homepage_url: "https://mishka.tools/cms",
+      source_url: @source_url,
+      docs: [
+        main: "readme",
+        extras: ["README.md"],
+        source_ref: "master",
+        source_url: @source_url
+      ],
+      elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       test_paths: test_paths(),
       start_permanent: Mix.env() == :prod,
