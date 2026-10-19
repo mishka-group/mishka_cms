@@ -42,7 +42,6 @@ defmodule MishkaCmsWeb.PageCurrentUserTest do
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.States.SiteState
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
-  alias MishkaCmsCoreWeb.ReturnTo
 
   # Nothing in it names the visitor, which is the point of every page built from it.
   @silent ~S(<div id="page-body" data-page={@page.path}>page</div>)
@@ -328,8 +327,7 @@ defmodule MishkaCmsWeb.PageCurrentUserTest do
       conn = signed_in_as(user)
       revoke!(user)
 
-      assert {:error, {:redirect, %{to: sign_in}}} = live(conn, members.path)
-      assert returns_to(sign_in) == members.path
+      assert_raise NotFoundError, fn -> live(conn, members.path) end
     end
 
     # The socket is already open on a page that loaded nobody, so the only thing that can answer
@@ -348,8 +346,10 @@ defmodule MishkaCmsWeb.PageCurrentUserTest do
 
       revoke!(user)
 
-      assert {:error, {:redirect, %{to: sign_in}}} = render_patch(view, members.path)
-      assert returns_to(sign_in) == members.path
+      Process.flag(:trap_exit, true)
+
+      assert {{%NotFoundError{}, _stacktrace}, _call} =
+               catch_exit(render_patch(view, members.path))
     end
   end
 
@@ -620,15 +620,6 @@ defmodule MishkaCmsWeb.PageCurrentUserTest do
     on_site()
     |> Plug.Test.init_test_session(%{})
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
-  end
-
-  # The page to come back to is a signature, not an address, so what the sign-in URL carries is only
-  # readable back through `ReturnTo` — which is exactly what the controller will do with it.
-  defp returns_to("/auth?" <> query) do
-    query
-    |> URI.decode_query()
-    |> Map.get("return_to")
-    |> then(&ReturnTo.verify(@endpoint, &1))
   end
 
   defp on_site do

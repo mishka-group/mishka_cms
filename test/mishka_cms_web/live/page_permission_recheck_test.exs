@@ -19,7 +19,7 @@ defmodule MishkaCmsWeb.PagePermissionRecheckTest do
 
   Both ask `MishkaCmsCore.Accounts.Checks.AccessPermissions`, the check every other gate asks, and
   both answer a refusal by sending the browser back to the address — where `mount/3` gives the site's
-  403 or the sign-in, exactly as it would to somebody arriving a second later. That is a refusal only
+  404, exactly as it would to somebody arriving a second later. That is a refusal only
   because the module the mount reads has already been made to agree with the row; the request that
   answers the refusal is asserted here, not just the redirect.
 
@@ -39,7 +39,6 @@ defmodule MishkaCmsWeb.PagePermissionRecheckTest do
   alias MishkaCmsCore.Runtime.Compilers.Helpers
   alias MishkaCmsCore.Runtime.States.SiteState
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
-  alias MishkaCmsCoreWeb.ReturnTo
 
   setup do
     SiteState.clear()
@@ -97,8 +96,8 @@ defmodule MishkaCmsWeb.PagePermissionRecheckTest do
       permissions!(public, ["members:read"])
       assert_redirect(view, public.path)
 
-      assert {:error, {:redirect, %{to: sign_in}}} = live(on_site(), public.path)
-      assert returns_to(sign_in) == public.path
+      assert_raise NotFoundError, fn -> live(on_site(), public.path) end
+      assert_error_sent(404, fn -> get(on_site(), public.path) end)
     end
 
     test "gives the signed-in viewer the site's 404 on that request", %{
@@ -335,13 +334,6 @@ defmodule MishkaCmsWeb.PagePermissionRecheckTest do
       context: %{page_code: :package}
     )
     |> Ash.update!()
-  end
-
-  defp returns_to("/auth?" <> query) do
-    query
-    |> URI.decode_query()
-    |> Map.get("return_to")
-    |> then(&ReturnTo.verify(@endpoint, &1))
   end
 
   defp published!(site, permissions) do

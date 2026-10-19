@@ -115,8 +115,8 @@ defmodule MishkaCmsWeb.LanguageRoutingTest do
   end
 
   # A SIGN-IN IS ASKED FOR IN THE LANGUAGE THE VISITOR IS READING, at the address the site's URL mode
-  # gives that language: a page that needs a member, a page only a signed-in visitor opens, the
-  # dashboard.
+  # gives that language: a page only a signed-in visitor opens, the dashboard. A page that needs a
+  # member sends nobody to sign in: whoever may not open it gets the site's 404.
   describe "sending a visitor to sign in" do
     setup %{site: site} do
       published!(site, "/:lang/members", nil, permissions: ["members:read"])
@@ -127,26 +127,30 @@ defmodule MishkaCmsWeb.LanguageRoutingTest do
     end
 
     test "keeps the reader's language, the first one unprefixed", %{site: _site} do
-      assert on_site() |> get("/fa/members") |> sign_in_page() == "/fa/auth"
-      assert on_site() |> get("/members") |> sign_in_page() == "/auth"
-      assert on_site() |> get("/members") |> redirected_to() =~ "/auth?return_to="
-      assert on_site() |> get("/fa/auth/sign-out") |> redirected_to() == "/fa/auth"
+      assert on_site() |> get("/fa/auth/sign-out") |> sign_in_page() == "/fa/auth"
       assert on_site() |> get("/auth/sign-out") |> redirected_to() == "/auth"
     end
 
     test "names every language when the site prefixes them all", %{site: site} do
       prefix_all!(site)
 
-      assert on_site() |> get("/fa/members") |> sign_in_page() == "/fa/auth"
-      assert on_site() |> get("/en/members") |> sign_in_page() == "/en/auth"
-      assert on_site() |> get("/en/auth/sign-out") |> redirected_to() == "/en/auth"
+      assert on_site() |> get("/fa/auth/sign-out") |> sign_in_page() == "/fa/auth"
+      assert on_site() |> get("/en/auth/sign-out") |> sign_in_page() == "/en/auth"
     end
 
     test "from a live navigation, in the language of the page navigated to", %{site: _site} do
       {:ok, view, _html} = live(on_site(), "/fa/pricing")
 
-      assert {:error, {:redirect, %{to: "/fa/auth?return_to=" <> _token}}} =
-               live_redirect(view, to: "/fa/members")
+      assert {:error, {:redirect, %{to: "/fa/auth"}}} =
+               live_redirect(view, to: "/fa/auth/sign-out")
+    end
+
+    @tag :capture_log
+    test "is not what a page that needs a member does: a visitor who is not signed in gets the 404",
+         %{site: _site} do
+      for path <- ["/members", "/fa/members"] do
+        assert_error_sent(404, fn -> get(on_site(), path) end)
+      end
     end
 
     # THE ADMIN KEEPS ITS OWN LANGUAGE, the session's `admin_language`, and the one a visitor reads
