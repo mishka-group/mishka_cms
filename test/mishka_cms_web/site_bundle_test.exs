@@ -294,6 +294,11 @@ defmodule MishkaCmsWeb.SiteBundleTest do
   end
 
   describe "a preview link" do
+    # The master site's address serves every site's previews; another site's serves none.
+    setup do
+      %{main: site!(master: true)}
+    end
+
     # The preview page as a link holder opens it, on an address that is not the record's site.
     defp preview_js!(page, host) do
       on_exit(fn -> DraftPreviewAssets.purge(page) end)
@@ -301,16 +306,16 @@ defmodule MishkaCmsWeb.SiteBundleTest do
       :sys.get_state(view.pid).socket.assigns[:preview_js]
     end
 
-    test "gets its site's bundle on any address, to whoever holds the link", %{
+    test "gets its site's bundle on the master site's address, to whoever holds the link", %{
       site: site,
-      other: other
+      main: main
     } do
       js =
         site.id
         |> then(&create_page!(site_id: &1, template: "<b>x</b>"))
-        |> preview_js!(other.host)
+        |> preview_js!(main.host)
 
-      conn = other.host |> on_host() |> get(js)
+      conn = main.host |> on_host() |> get(js)
 
       assert conn.status == 200
       assert conn.resp_body == "/* #{site.name} js */"
@@ -335,24 +340,24 @@ defmodule MishkaCmsWeb.SiteBundleTest do
 
     test "stops once the preview is purged, as publishing or discarding it does", %{
       site: site,
-      other: other
+      main: main
     } do
       page = create_page!(site_id: site.id, template: "<b>x</b>")
-      js = preview_js!(page, other.host)
+      js = preview_js!(page, main.host)
       DraftPreviewAssets.purge(page)
 
-      assert other.host |> on_host() |> get(js) |> refused?()
+      assert main.host |> on_host() |> get(js) |> refused?()
     end
 
-    test "follows its site's state", %{site: site, other: other} do
+    test "follows its site's state", %{site: site, main: main} do
       js =
         site.id
         |> then(&create_page!(site_id: &1, template: "<b>x</b>"))
-        |> preview_js!(other.host)
+        |> preview_js!(main.host)
 
       offline!(site)
 
-      assert other.host |> on_host() |> get(js) |> refused?()
+      assert main.host |> on_host() |> get(js) |> refused?()
     end
   end
 

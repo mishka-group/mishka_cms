@@ -11,13 +11,14 @@ defmodule MishkaCmsWeb.DraftPreviewController do
   classes are styled without ever touching the live site bundle, and is keyed by the draft's
   `preview_token`. The preview page itself is `MishkaCmsWeb.DraftPreviewLive`, which links this URL.
 
-  Only under a token a preview was opened with, and by its record's site's state, as the preview page
-  itself: while that site is switched off, to a master, and while it is offline to its own admins
-  too. An admin here holds anything under `admin:dashboard`
+  Only under a token a preview was opened with, on an address that may show it
+  (`MishkaCmsCore.Runtime.DraftPreviewAssets.served_on?/2`: its site's own or the master site's), and
+  by its record's site's state, as the preview page itself: while that site is switched off, to a
+  master, and while it is offline to its own admins too. An admin here holds anything under `admin:dashboard`
   (`MishkaCmsCore.Runtime.SiteAvailability.allowed_in?/4` on `:dashboard`); an admin of the API alone is refused.
 
   Anything else is a 404 that no cache keeps. A plugin on `web:request:preview_unavailable` hears it
-  first, with `%{site_id: site_id | nil, reason: :missing | :offline | :inactive}` as its meta, and
+  first, with `%{site_id: site_id | nil, reason: :missing | :offline | :inactive | :other_site}` as its meta, and
   may answer instead by halting the conn.
   """
   use MishkaCmsWeb, :controller
@@ -26,7 +27,7 @@ defmodule MishkaCmsWeb.DraftPreviewController do
   alias MishkaCmsCore.Runtime.States.AssetsState
 
   def css(conn, %{"token" => token}) do
-    case preview_css(token, conn.assigns[:current_user]) do
+    case preview_css(token, conn.assigns[:current_user], conn.assigns[:current_site]) do
       {:ok, css} ->
         conn
         |> put_resp_content_type("text/css")
@@ -38,8 +39,9 @@ defmodule MishkaCmsWeb.DraftPreviewController do
     end
   end
 
-  defp preview_css(token, viewer) do
+  defp preview_css(token, viewer, current_site) do
     with {:ok, site_id} <- DraftPreviewAssets.site(token),
+         :ok <- on_its_address(site_id, current_site),
          :ok <- reachable(site_id, viewer) do
       case AssetsState.get_value(token, "css") do
         css when is_binary(css) -> {:ok, css}
@@ -49,6 +51,12 @@ defmodule MishkaCmsWeb.DraftPreviewController do
       :error -> {:error, nil, :missing}
       {:refused, site_id, state} -> {:error, site_id, state}
     end
+  end
+
+  defp on_its_address(site_id, current_site) do
+    if DraftPreviewAssets.served_on?(site_id, current_site),
+      do: :ok,
+      else: {:refused, site_id, :other_site}
   end
 
   defp reachable(nil, _viewer), do: :ok

@@ -40,8 +40,9 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
     admin = create_site!(name: "localhost", host: "localhost", active: true, master: true)
     other = create_site!(name: "elsewhere", host: "elsewhere.test", active: true)
+    third = create_site!(name: "third", host: "third.test", active: true)
 
-    for site <- [admin, other] do
+    for site <- [admin, other, third] do
       SiteState.save(%{
         id: site.id,
         name: site.name,
@@ -61,7 +62,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
     MishkaCmsCore.Settings.put("cms.offline", false)
 
-    %{admin: admin, other: other}
+    %{admin: admin, other: other, third: third}
   end
 
   defp on_host(host) do
@@ -222,6 +223,43 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       assert html =~ "cross-origin-probe",
              "a page could not be previewed from the admin's host — cross-site preview is broken"
+    end
+
+    # A PREVIEW OF SITE A IS NEVER SHOWN ON SITE B. The master site's address and the record's own
+    # serve it; another site's is refused like an unknown token, and its stylesheet with it.
+    test "but not over a third site's host", %{other: site} do
+      page = create_page!(site_id: site.id, template: ~s(<i class="third-probe">ok</i>))
+      token = page.preview_token
+      on_exit(fn -> DraftPreviewAssets.purge(page) end)
+
+      {:ok, _view, _html} = live(on_host("elsewhere.test"), "/_preview/page/#{token}")
+
+      assert_raise NotFoundError, fn -> live(on_host("third.test"), "/_preview/page/#{token}") end
+
+      :ok =
+        AssetsState.save(%{
+          id: token,
+          type: "css",
+          value: "/* preview */",
+          hash: "p",
+          updated_at: DateTime.utc_now()
+        })
+
+      assert ("third.test" |> on_host() |> get("/_preview/page/#{token}/css")).status == 404
+      assert "elsewhere.test" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200)
+      assert "localhost" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200)
+    end
+
+    test "while a global record is shown on any site's host" do
+      layout =
+        create_layout!(template: ~s(<main class="global-third-probe">{@inner_content}</main>))
+
+      on_exit(fn -> DraftPreviewAssets.purge(layout) end)
+
+      for host <- ["third.test", "localhost"] do
+        {:ok, _view, html} = live(on_host(host), "/_preview/layout/#{layout.preview_token}")
+        assert html =~ "global-third-probe", host
+      end
     end
 
     test "and an unknown token is not found", %{admin: _admin} do
@@ -613,15 +651,16 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
     end
 
     # THE HOST'S ADMIN IS NOT THE RECORD'S. The switch for every site reaches the view as one message
-    # for every site; the host is fine for this viewer, and the record's site is not.
+    # for every site; the host is fine for this viewer, and the record's site is not. The host is the
+    # master site's, the only address besides the record's own that serves its preview.
     test "the switch for every site closes it for an admin of the host who is not the site's", %{
-      other: other,
+      admin: admin,
       page: page
     } do
       {:ok, view, _html} =
-        "elsewhere.test"
+        "localhost"
         |> on_host()
-        |> as_viewer(user!(other.id, ["*"]))
+        |> as_viewer(user!(admin.id, ["*"]))
         |> live("/_preview/page/#{page.preview_token}")
 
       {:ok, _} = Settings.put("cms.offline", true)
@@ -759,6 +798,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       css = fn user ->
         build_conn()
+        |> Plug.Conn.assign(:current_site, closed)
         |> Plug.Conn.assign(:current_user, user)
         |> MishkaCmsWeb.DraftPreviewController.css(%{"token" => token})
       end
