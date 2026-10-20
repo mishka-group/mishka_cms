@@ -168,7 +168,14 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:mishka_cms_core),
       mishka_dep(:mishka_blog),
       mishka_dep(:mishka_document),
-      mishka_dep(:mishka_gervaz)
+      mishka_dep(:mishka_gervaz),
+
+      # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
+      # the ones the sites do not offer.
+      mishka_dep(:mishka_cms_auth_google),
+      mishka_dep(:mishka_cms_auth_github),
+      mishka_dep(:mishka_cms_auth_slack),
+      mishka_dep(:mishka_cms_auth_discord)
     ]
   end
 
