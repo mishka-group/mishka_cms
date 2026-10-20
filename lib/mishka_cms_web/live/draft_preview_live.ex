@@ -68,21 +68,27 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
   # The same `/_preview/:resource/:token` URL serves a DRAFT or the live ORIGINAL — both carry a
   # `preview_token`. We try the draft first, then the original.
   #
-  # THE TOKEN IS WHAT RESOLVES THE TENANT, not the Host header, which is why this route works on any
-  # host the admin is reachable at. That matters more than it sounds: a site's own domain may point
-  # at an entirely different machine from the one being edited, so previewing a record at its site's
-  # URL can show a stranger's server rather than the draft in front of you.
+  # THE TOKEN IS WHAT RESOLVES THE TENANT, not the Host header, which is why this route works on the
+  # admin's own address. That matters more than it sounds: a site's own domain may point at an
+  # entirely different machine from the one being edited, so previewing a record at its site's URL
+  # can show a stranger's server rather than the draft in front of you.
+  #
+  # THE HOST STILL DECIDES WHERE IT IS SHOWN: a record's own site's address and the master site's,
+  # and any site's for a global record (`DraftPreviewAssets.served_on?/2`). A preview of site A is
+  # never shown on site B; it is refused like an unknown token.
   #
   # AND THE RECORD'S SITE DECIDES WHO SEES IT, not the host's: an inactive site's record is a master's
   # to preview, an offline one's its admins' and the masters' — refused like an unknown token, and
   # closed if its site goes down while it is open. A plugin on `web:live:preview_unavailable` hears
-  # each refusal, with `%{site_id: site_id, state: state, resource: resource}`.
+  # each refusal, with `%{site_id: site_id, state: state, resource: resource}`, and `state` is
+  # `:other_site` for a preview asked for on another site's address.
   @drafts %{"page" => PageDraft, "layout" => LayoutDraft, "error_page" => ErrorPageDraft}
   @compiled [Page, PageDraft, Layout, LayoutDraft]
   @originals %{"page" => Page, "layout" => Layout, "error_page" => ErrorPage}
 
   def mount(%{"resource" => resource, "token" => token}, session, socket) do
     with {:ok, record, module} <- load_record(resource, token),
+         :ok <- on_its_address(record, resource, session),
          {:ok, socket} <- follow(socket, record, resource, session) do
       # A global layout (or its draft) has no site of its own — fall back to the site of the host
       # the admin is viewing from (`SiteLookupPlug` resolved it into the session), so the preview
@@ -107,6 +113,22 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
        |> assign(:language, language), layout: false}
     else
       _not_found_or_refused -> raise NotFoundError, message: "Preview not found"
+    end
+  end
+
+  defp on_its_address(record, resource, session) do
+    site_id = Map.get(record, :site_id)
+
+    if DraftPreviewAssets.served_on?(site_id, Map.get(session, "current_site")) do
+      :ok
+    else
+      MishkaInstaller.Event.Hook.call(
+        "web:live:preview_unavailable",
+        %{site_id: site_id, state: :other_site, resource: resource},
+        return: false
+      )
+
+      :refused
     end
   end
 
