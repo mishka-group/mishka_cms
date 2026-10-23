@@ -570,9 +570,9 @@ msgstr ""
 msgid "Retry, or drop a bundle into %{path} and reload."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1613
+#: lib/mishka_cms_web/live/install_live.ex:1829
 #, elixir-autogen, elixir-format
-msgid "SETUP WIZARD · v1.0"
+msgid "SETUP WIZARD · v%{version}"
 msgstr ""
 
 #: lib/mishka_cms_web/live/install_live.ex:1617

@@ -1825,7 +1825,9 @@ defmodule MishkaCmsWeb.InstallLive do
           <div class="inst-logo-tile"><img src="/images/mishka-logo.svg" alt="Mishka" /></div>
           <div>
             <h1>Mishka CMS</h1>
-            <div class="inst-brand-v">{gettext("SETUP WIZARD · v1.0")}</div>
+            <div class="inst-brand-v">
+              {gettext("SETUP WIZARD · v%{version}", version: MishkaCmsCore.Helpers.host_version())}
+            </div>
           </div>
         </div>
         <div class="inst-mtop">

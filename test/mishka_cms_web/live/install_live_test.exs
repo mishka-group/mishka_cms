@@ -231,6 +231,21 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#install-next")
     end
 
+    # THE VERSION IS THE APPLICATION'S, read when the page is drawn, not a literal in the template:
+    # the rail said `v1.0` on a build whose `mix.exs` says something else.
+    test "the rail names the version of the application, and writes none of its own", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(conn, "/install")
+
+      version = to_string(Application.spec(:mishka_cms, :vsn))
+
+      assert version =~ ~r/\A\d+\.\d+\.\d+/
+      assert has_element?(view, ".inst-brand-v", "SETUP WIZARD · v#{version}")
+      refute has_element?(view, ".inst-brand-v", "v1.0")
+      refute render(view) =~ "v1.0"
+    end
+
     test "a browser whose cookie still names a site from before the reset reaches the form", %{
       conn: conn
     } do
