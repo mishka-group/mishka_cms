@@ -841,13 +841,21 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#install-settings-submit")
 
       # ON UNLESS THE USER SAYS OTHERWISE. A first install with an empty site is a `/` that answers
-      # nothing, and the pages are four rows they can edit or delete.
+      # nothing, and the starter is a home page they can edit or delete.
       assert has_element?(view, "#install-starter-content input[type=checkbox][checked]")
+
+      # THE COPY PROMISES WHAT IS WRITTEN, which is one home page and no longer an about, a contact
+      # and a privacy page beside it.
+      assert has_element?(view, "#install-starter-content", "Add a starter home page")
+      assert has_element?(view, "#install-starter-content", "header and footer you can edit")
+      refute has_element?(view, "#install-starter-content", "about")
+      refute has_element?(view, "#install-starter-content", "contact")
+      refute has_element?(view, "#install-starter-content", "privacy")
     end
 
     # THE STEP IS REBUILT FROM DEFAULTS on the way forward, and the box is not one of them: a user
-    # who says no, steps back to look at the kit again and comes forward would install the four
-    # pages they had just turned down.
+    # who says no, steps back to look at the kit again and comes forward would install the home
+    # page they had just turned down.
     test "unticking the starter pages survives a trip back to the kit step", %{conn: conn} do
       view = to_settings(conn)
 
@@ -1167,6 +1175,16 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     test "installs the master + site and writes the chosen settings, then shows success", %{
       conn: conn
     } do
+      # THE STARTER STORES ITS LOGO in the master site's media folder: this test's own.
+      dir = Path.join(System.tmp_dir!(), "install_media_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      Application.put_env(:mishka_cms_core, :media_static_dir, dir)
+
+      on_exit(fn ->
+        Application.delete_env(:mishka_cms_core, :media_static_dir)
+        File.rm_rf(dir)
+      end)
+
       view = to_settings(conn)
 
       view
@@ -1206,8 +1224,8 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert Settings.get("mailer.from") == "hello@acme.test"
 
       # AND THE NEW SITE ANSWERS SOMETHING. The starter checkbox rides the same form, on by
-      # default, so a user who changed nothing gets a site with pages on it, beside the sign-in
-      # pages every site gets.
+      # default, so a user who changed nothing gets a site with a home page on it, beside the
+      # sign-in pages every site gets.
       pages =
         MishkaCmsCore.Runtime.Page
         |> Ash.Query.for_read(:read_any)
@@ -1218,8 +1236,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert pages
              |> Enum.filter(&(&1.section == "starter"))
              |> Enum.map(& &1.path)
-             |> Enum.sort() ==
-               ["/:lang", "/:lang/about", "/:lang/contact", "/:lang/privacy"]
+             |> Enum.sort() == ["/:lang"]
 
       assert Enum.count(pages, &(&1.section == "auth")) == 8
     end

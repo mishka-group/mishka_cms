@@ -17,7 +17,7 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
   alias MishkaCmsCore.Install
   alias MishkaCmsCore.Install.Bootstrap
   alias MishkaCmsCore.Install.StarterContent
-  alias MishkaCmsCore.Runtime.{Component, ErrorPage, Layout, Page, Stylesheet}
+  alias MishkaCmsCore.Runtime.{Component, ErrorPage, Layout, Media, Page, Stylesheet}
   alias MishkaCmsCore.Runtime.Workers.SiteRuntimeWorker
   alias MishkaCmsCore.Accounts.{Permission, User, UserPermission}
   alias MishkaCmsCore.Runtime.Languages
@@ -184,6 +184,20 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
   # THE STEP LIST IS THE INSTALLER'S PROGRESS LIST, drawn from `steps/0`, so a phase that is not in
   # it is a phase nobody watching the install is told about.
   describe "the starter content step" do
+    # THE LOGO IS A FILE, put in the master site's media folder: this test's own, not `priv/static`.
+    setup do
+      dir = Path.join(System.tmp_dir!(), "bootstrap_media_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      Application.put_env(:mishka_cms_core, :media_static_dir, dir)
+
+      on_exit(fn ->
+        Application.delete_env(:mishka_cms_core, :media_static_dir)
+        File.rm_rf(dir)
+      end)
+
+      :ok
+    end
+
     test "is one of the ordered phases, before the compile" do
       ids = Bootstrap.steps() |> Enum.map(&elem(&1, 0))
 
@@ -197,15 +211,18 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
     # WITH NO COMPONENTS AT ALL, which is the install this content exists to survive: the user may
     # deselect every one of them, and a starter page drawing `chelekom-card` would put the runtime's
     # red refusal box on the first page of a brand new site.
-    test "writes the pages, the layout, the components, the theme and an error page" do
+    test "writes the home page, the logo, the layout, the components, the theme and an error page" do
+      test_pid = self()
+
       assert {:ok, %{site: site}} =
                Bootstrap.run(
-                 Map.merge(@params, %{starter_content: true, component_selection: %{}})
+                 Map.merge(@params, %{starter_content: true, component_selection: %{}}),
+                 &send(test_pid, &1)
                )
 
-      paths = site |> starter_pages() |> Enum.map(& &1.path) |> Enum.sort()
-
-      assert paths == ["/:lang", "/:lang/about", "/:lang/contact", "/:lang/privacy"]
+      # ONE PAGE: about, contact and privacy are the dev seeds', not a first install's.
+      assert starter_pages(site) |> Enum.map(& &1.path) == ["/:lang"]
+      assert_received {:starter_content, :log, "1 page, 2 components"}
 
       assert names(Component, site) == ["site-footer", "site-header"]
       assert names(Layout, site) == ["auth", "site-main"]
@@ -219,12 +236,33 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       end
     end
 
+    # THE INSTALLED SITE IS THE MASTER, so the logo is a file of its own media library, and the
+    # header and the home page name the row's address.
+    test "puts the logo in the master site's media library, and the header draws it" do
+      assert {:ok, %{site: site}} =
+               Bootstrap.run(
+                 Map.merge(@params, %{starter_content: true, component_selection: %{}})
+               )
+
+      assert site.master
+      assert [logo] = rows(Media, site)
+      assert {logo.name, logo.type, logo.format} == {"mishka-logo", :images, "png"}
+      assert String.starts_with?(logo.relative_path, "/uploads/#{site.id}/media/")
+
+      header = rows(Component, site) |> Enum.find(&(&1.name == "site-header"))
+      assert Enum.find(header.attrs, &(&1.name == "logo")).opts["default"] == logo.relative_path
+
+      home = starter_pages(site) |> hd()
+      assert home.template =~ ~s(src="#{logo.relative_path}")
+    end
+
     test "writes nothing when the installer's checkbox is off" do
       assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :starter_content, false))
 
       assert starter_pages(site) == []
       assert names(Component, site) == []
       assert names(Layout, site) == ["auth"]
+      assert rows(Media, site) == []
     end
 
     # RUN AGAIN, IT ADDS NOTHING. The dev seeds run this on every reseed, and an admin may press an
@@ -233,11 +271,14 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :starter_content, true))
 
       before = {starter_pages(site) |> length(), names(Component, site), names(Layout, site)}
+      logo = rows(Media, site)
 
       StarterContent.seed!(site)
 
       assert {starter_pages(site) |> length(), names(Component, site), names(Layout, site)} ==
                before
+
+      assert rows(Media, site) == logo
     end
   end
 

@@ -159,17 +159,17 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
       assert Enum.map(own, & &1.name) |> Enum.sort() == ["site-footer", "site-header"],
              "#{site.name} has #{inspect(Enum.map(own, & &1.name))}"
 
-      # The site's own name, written in as the attribute's default. This is what makes the scoping
-      # visible on the page itself rather than only in a `site_id` column.
+      # The site's own name, written in as the header's attribute default. This is what makes the
+      # scoping visible on the page itself rather than only in a `site_id` column. The footer
+      # prints no name, which is the design's, so it has no such attribute.
       #
       # `.name` and `.opts["default"]`: Ash gives the map's own keys back as atoms and leaves the
       # nested `opts` as it was written, which is also how the kit's rows read.
-      for component <- own do
-        brand = Enum.find(component.attrs, &(&1.name == "brand"))
+      header = Enum.find(own, &(&1.name == "site-header"))
+      brand = Enum.find(header.attrs, &(&1.name == "brand"))
 
-        assert brand, "#{component.name} on #{site.name} lost its brand attribute"
-        assert brand.opts["default"] == site.name
-      end
+      assert brand, "site-header on #{site.name} lost its brand attribute"
+      assert brand.opts["default"] == site.name
 
       # AND NEITHER OF THEM NEEDS THE KIT. They are written by
       # `MishkaCmsCore.Install.StarterContent`, which a production install runs with whatever
@@ -344,8 +344,11 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
       refute html =~ "Slot Error", "#{name} on #{site.name}: #{html}"
 
-      assert html =~ site.name,
-             "#{name} on #{site.name} renders somebody else's name: #{html}"
+      # THE HEADER PRINTS THE SITE'S NAME; the footer prints none, which is the design's.
+      if name == "site-header" do
+        assert html =~ site.name,
+               "#{name} on #{site.name} renders somebody else's name: #{html}"
+      end
     end
   end
 
@@ -718,7 +721,16 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   test "every media row a dev seed writes has its file where the endpoint serves it" do
     core = seed_core()
 
-    rows = Enum.flat_map(core.sites, &Ash.read!(Media, tenant: &1.id, authorize?: false))
+    all_rows = Enum.flat_map(core.sites, &Ash.read!(Media, tenant: &1.id, authorize?: false))
+
+    # THE STARTER'S LOGO IS NOT PART OF THE SET: one file, in the master site's library alone, which
+    # every site's header draws (`MishkaCmsCore.Install.StarterContent`).
+    {logos, rows} = Enum.split_with(all_rows, &(&1.name == "mishka-logo"))
+    master = Enum.find(core.sites, & &1.master)
+
+    assert [logo] = logos
+    assert logo.site_id == master.id
+    assert resolves?(logo.relative_path)
 
     assert rows != []
 

@@ -588,9 +588,9 @@ defmodule MishkaCmsWeb.InstallLive do
               class="inst-cbox"
             />
             <span class="nm">
-              {gettext("Add starter pages")}
+              {gettext("Add a starter home page")}
               <span class="ex">
-                {gettext("— a home, about, contact and privacy page you can edit")}
+                {gettext("with a header and footer you can edit")}
               </span>
             </span>
           </label>

@@ -99,9 +99,9 @@ msgstr ""
 msgid "Add a package by URL"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:541
+#: lib/mishka_cms_web/live/install_live.ex:591
 #, elixir-autogen, elixir-format
-msgid "Add starter pages"
+msgid "Add a starter home page"
 msgstr ""
 
 #: lib/mishka_cms_web/live/install_live.ex:434
@@ -722,9 +722,9 @@ msgstr ""
 msgid "unversioned"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:543
+#: lib/mishka_cms_web/live/install_live.ex:593
 #, elixir-autogen, elixir-format
-msgid "— a home, about, contact and privacy page you can edit"
+msgid "with a header and footer you can edit"
 msgstr ""
 
 #: lib/mishka_cms_web/live/install_live.ex:1065
