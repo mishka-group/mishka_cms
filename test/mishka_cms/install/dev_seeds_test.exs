@@ -568,6 +568,29 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     end
   end
 
+  # DEV IS PRODUCTION: every dev site's pages are drawn in the column a stranger's install draws
+  # them in, not one the seeds hand the layout. A page drawing the design's column of its own — a
+  # blog's, a docs' — was drawn in two in dev and in one in production.
+  test "every dev site's site-main draws the production column and the section bar" do
+    core = seed_core()
+
+    column =
+      ~s(<main id="site-main" class="mx-auto w-full max-w-[1160px] flex-1 px-8 pb-24">{@inner_content}</main>)
+
+    for site <- core.sites do
+      [layout] =
+        Layout
+        |> Ash.Query.for_read(:read_any)
+        |> Ash.Query.filter(site_id == ^site.id and name == "site-main")
+        |> Ash.read!(authorize?: false, page: [limit: 1])
+        |> Map.fetch!(:results)
+
+      assert layout.template =~ column, "#{site.name} draws a column of its own"
+      refute layout.template =~ "py-10", site.name
+      assert layout.template =~ "MishkaCmsCore.Runtime.SiteLayout.section_bar", site.name
+    end
+  end
+
   # THE SIGN-IN PAGES EVERY SITE GETS, and their Persian words only where a site publishes in `fa`.
   test "every site gets the sign-in pages, and a site publishing in fa their Persian words" do
     core = seed_core()

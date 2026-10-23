@@ -34,6 +34,17 @@ defmodule MishkaCmsWeb.RuntimeLive do
   open while its site is offline, and loads the app's own LiveView client in place of the site's
   bundle, which an offline site serves to its admins only.
 
+  ## What a page hands its layout
+
+  `handle_params/3` resolves, after the page's language and `@query_params` and before the head,
+  what the page hands the site's `site-main` layout
+  (`MishkaCmsCore.Runtime.SiteLayout.assign_frame/1`):
+
+  - `@page_languages` — the languages the page is written in, each at its own address: the page's
+    own editions, or the translations of the record it shows, which the extension that owns the
+    record answers with. The header's language switcher and the head's `hreflang` links read it.
+  - `@page_section_bar` — the bar under the header, or `nil`.
+
   ## The head
 
   `handle_params/3` resolves the page's `<title>` and SEO head into `@page_seo` before every render,
@@ -47,6 +58,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
     its meta. A plugin may redirect it elsewhere instead.
   - `runtime:page:signed_in_only_redirected` — the same for a visitor who is not signed in on a
     signed-in-only page, before it is redirected to the sign-in page.
+  - `runtime:page:frame` — what the page hands its layout, in every `handle_params/3`: the
+    languages of the record a page shows and the bar under the header. The map a plugin is handed,
+    and what it may answer, are `MishkaCmsCore.Runtime.SiteLayout`'s.
   - `runtime:page:seo` — the page's head for the address asked, in every `handle_params/3`. A plugin
     is handed this map (`MishkaCmsCore.Runtime.Seo.given/2`) and returns it, changed — a page that
     serves many records (`/:lang/blog/:slug`) sets each record's own here. What it returns are
@@ -93,7 +107,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
   alias MishkaCmsCore.Accounts.Checks.AccessPermissions
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Runtime.Compilers.Helpers
-  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo, SiteAvailability}
+  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo, SiteAvailability, SiteLayout}
   alias MishkaCmsCore.Runtime.Plugs.{LanguagePlug, SiteLookupPlug}
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.PageState
@@ -397,6 +411,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> assign_page_language(captured)
                   |> assign(:current_path, joined_path)
                   |> assign(:query_params, query_params(params, captured))
+                  |> SiteLayout.assign_frame()
                   |> assign_page_seo(uri)
                   |> admit_record(page_module)
                   |> push_head(head_before)
@@ -848,7 +863,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
   defp assign_page_title(socket), do: assign(socket, :page_title, socket.assigns.page.title)
 
   # The page's `<title>` and head for this address, through the plugins on `Seo.event/0`. Run after
-  # `assign_page_language/2` and `:query_params`, whose editions and captures it reads.
+  # `assign_page_language/2`, `:query_params` and `SiteLayout.assign_frame/1`, whose languages and
+  # captures it reads.
   defp assign_page_seo(socket, %URI{path: path}) do
     %{page: page, private: private, page_languages: languages, query_params: params} =
       socket.assigns

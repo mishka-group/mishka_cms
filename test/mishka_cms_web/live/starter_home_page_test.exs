@@ -276,6 +276,162 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
     end
   end
 
+  # ONE COLUMN FOR EVERY PAGE, the layout's: the home page draws its sections into it, and the
+  # dotted welcome runs from one edge of the window to the other through the theme's utility.
+  describe "the width" do
+    test "the page is drawn in the layout's column, with no column of its own", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      assert [main] = Regex.run(~r/<main id="site-main"[^>]*>/, html)
+      assert main =~ ~s(class="mx-auto w-full max-w-[1160px] flex-1 px-8 pb-24")
+
+      [_before, page] = String.split(html, main, parts: 2)
+      [page, _after] = String.split(page, "</main>", parts: 2)
+
+      refute page =~ "max-w-[1160px]"
+      assert page =~ ~r/<section class="site-bleed /
+    end
+  end
+
+  # WHAT A PAGE HANDS THE LAYOUT, through `runtime:page:frame`: a plugin here stands in for an
+  # extension, answering for the home page with what `:persistent_term` holds for the test.
+  defmodule FrameProbe do
+    @moduledoc false
+    use MishkaInstaller.Event.Hook, event: "runtime:page:frame"
+
+    @impl true
+    def call(%{section: "starter", page: %{path: "/:lang"}} = frame) do
+      case :persistent_term.get({__MODULE__, :answer}, nil) do
+        nil -> {:reply, frame}
+        answer -> {:reply, :halt, Map.merge(frame, answer.(frame))}
+      end
+    end
+
+    def call(frame), do: {:reply, frame}
+  end
+
+  # An extension's interactive piece, as the docs' version picker is.
+  defmodule Picker do
+    @moduledoc false
+    use Phoenix.Component
+
+    attr :id, :string, required: true
+    attr :current, :string, default: nil
+
+    def version_select(assigns) do
+      ~H"""
+      <button id={@id} type="button" data-current={@current}>v{@current}</button>
+      """
+    end
+  end
+
+  defp answer!(answer) do
+    :persistent_term.put({FrameProbe, :answer}, answer)
+
+    {:ok, _} =
+      MishkaInstaller.Event.Event.write(%{
+        name: FrameProbe,
+        event: "runtime:page:frame",
+        extension: :mishka_installer,
+        status: :started
+      })
+
+    :ok = MishkaInstaller.Event.EventHandler.do_compile("runtime:page:frame", :start, false)
+
+    on_exit(fn ->
+      :persistent_term.erase({FrameProbe, :answer})
+      MishkaInstaller.Event.Event.unregister(:name, FrameProbe, false)
+      MishkaInstaller.Event.EventHandler.do_compile("runtime:page:frame", :start, false)
+    end)
+  end
+
+  describe "the section bar" do
+    test "is not drawn for a page that hands the layout none", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "site-section-bar"
+    end
+
+    test "is drawn under the header with the links and the component a page hands it", %{} do
+      answer!(fn %{language: language} ->
+        %{
+          section_bar: %{
+            title: "Blog",
+            title_path: "/blog",
+            links: [
+              %{label: "Posts", path: "/blog", current: true},
+              %{label: "Tags", path: "/blog/tags"}
+            ],
+            component: {Picker, :version_select},
+            assigns: %{id: "probe-version", current: language}
+          }
+        }
+      end)
+
+      {:ok, view, html} = live(on_site(), "/")
+
+      [_header, rest] = String.split(html, "</header>", parts: 2)
+      [bar, _page] = String.split(rest, ~s(<main id="site-main"), parts: 2)
+
+      assert bar =~ ~s(id="site-section-bar")
+      assert bar =~ ~r/<a [^>]*href="\/blog\/tags"[^>]*>\s*Tags\s*<\/a>/
+      assert bar =~ ~r/<a [^>]*aria-current="page"[^>]*>\s*Posts/
+      assert has_element?(view, ~s(#site-section-bar #probe-version[data-current="en"]))
+    end
+  end
+
+  describe "the languages a page hands the layout" do
+    setup %{site: site} do
+      {:ok, _} = Settings.put("site.languages", ["en", "ar", "fa"], site_id: site.id)
+      :ok
+    end
+
+    test "are the page's own editions when no extension answers for it", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      assert hreflangs(html) == ["en", "ar", "fa"]
+    end
+
+    # AN ENGLISH RECORD WITH AN ARABIC TRANSLATION AND NO PERSIAN ONE, each at its own address.
+    test "are the record's own when an extension answers for it, a missing one left out", %{} do
+      answer!(fn _frame ->
+        %{
+          translations: [
+            %{language: "en", path: "/", title: "Home"},
+            %{language: "ar", path: "/ar", title: "الرئيسية"}
+          ]
+        }
+      end)
+
+      {:ok, _view, html} = live(on_site(), "/")
+
+      [header, _rest] = String.split(html, "</header>", parts: 2)
+
+      assert hreflangs(header) == ["en", "ar"]
+      assert header =~ ~r/<a [^>]*href="\/ar"[^>]*hreflang="ar"[^>]*title="الرئيسية"/
+      refute header =~ ~s(hreflang="fa")
+
+      # THE HEAD SAYS THE SAME: an `hreflang` link per language the record is in.
+      [head, _body] = String.split(html, "</head>", parts: 2)
+      assert head =~ ~r/<link[^>]*hreflang="ar"/
+      refute head =~ ~r/<link[^>]*hreflang="fa"/
+    end
+
+    test "hide the switcher when the record is in one language", %{} do
+      answer!(fn _frame -> %{translations: [%{language: "en", path: "/"}]} end)
+
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "site-language-menu"
+    end
+  end
+
+  defp hreflangs(html) do
+    ~r/<a [^>]*role="menuitem"[^>]*hreflang="([^"]+)"/
+    |> Regex.scan(html, capture: :all_but_first)
+    |> List.flatten()
+  end
+
   describe "the version" do
     test "is the application's, read when the page is drawn", %{} do
       {:ok, _view, html} = live(on_site(), "/")
