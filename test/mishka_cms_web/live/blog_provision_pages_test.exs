@@ -52,6 +52,9 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   # themselves — it is not a sleep, and a block that never starts one is answered immediately.
   @async 5_000
 
+  # The category chip over the list that marks where the reader is.
+  @chip_marked ~s([data-role="blog-list-chip"][data-selected="true"])
+
   # A UNIQUE SITE NAME PER TEST, for the reason `MishkaBlog.LiveComponentsRenderTest` gives: a
   # component's module is named from a hash of its own name and its SITE's, and carries that site's
   # id — so a reused name renders the previous test's module against a site that test rolled back,
@@ -161,9 +164,13 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       |> LazyHTML.query(selector)
       |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
 
-  # A category and a tag under one slug, each with a published post so both are shown — what the
-  # sidebar's two lists are told apart by. The category comes back, for the test that files the
-  # article the reader is on under it.
+  # The same, with the whitespace inside each one closed up.
+  defp words(html, selector),
+    do: html |> texts(selector) |> Enum.map(&(&1 |> String.split() |> Enum.join(" ")))
+
+  # A category and a tag under one slug, each with a published post so both are shown — what a
+  # category's page and a tag's are told apart by. The category comes back, for the test that files
+  # the article the reader is on under it.
   defp both_named!(site, slug) do
     category = create_collection!(site_id: site.id, status: :active, name: "Cat", slug: slug)
     tag = [name: "Tag", slug: slug] |> tag(site.id) |> generate()
@@ -177,11 +184,22 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     category
   end
 
-  defp marked(html, role) do
+  # THE LANGUAGES A PAGE OFFERS, as the header's switcher lists them, the edition being read among
+  # them: the layout's is the only switcher a page has (`MishkaCmsCore.Runtime.SiteLayout`), so a
+  # test reading it draws the page on the site's layout (`seed_site_layout!/1`).
+  defp offered(html) do
     html
     |> doc()
-    |> LazyHTML.query(~s([data-role="blog-sidebar"] [data-role="#{role}"][data-selected="true"]))
-    |> Enum.count()
+    |> LazyHTML.query("#site-language-menu a[hreflang]")
+    |> Enum.map(&{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))})
+  end
+
+  # And the languages the head names in its `hreflang` links, which are built from the same list.
+  defp head_languages(html) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query(~s|link[rel="alternate"][hreflang]:not([hreflang="x-default"])|)
+    |> Enum.map(&{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))})
   end
 
   # Every `href` and `src` on the page whose path still holds a `:capture` segment. Split on `/`
@@ -282,10 +300,10 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     # The second assertion is what keeps the first honest: a component that dropped every link
     # rather than filling it draws no capture either, and would pass a check that only refuses one.
     test "leaves no capture in a URL it drew", %{url_mode: url_mode, site: site, conn: conn} do
-      # ONE POST IN TWO LANGUAGES, not two posts that share nothing. The translations row on the
-      # detail page is the only link on any of these pages built under a language that is NOT the
-      # page's own, which is what the capture in a base is kept for at all — and a post with no
-      # edition beside it draws that row empty, leaving the whole reason outside the guard.
+      # ONE POST IN TWO LANGUAGES, not two posts that share nothing, ON THE SITE'S LAYOUT. The
+      # header's language switcher is the only link on any of these pages built under a language
+      # that is NOT the page's own — and a post with no edition beside it draws no switcher at all,
+      # leaving that link outside the guard.
       english = publish!(site, "Post en")
 
       persian =
@@ -316,6 +334,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
           {language, %{post: post, category: category, tag: tag}}
         end
 
+      seed_site_layout!(site)
       provision!(site)
 
       for {language, %{post: post, category: category, tag: tag}} <- published,
@@ -340,8 +359,8 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
                "#{url} drew no link into its own language's blog, so the check above asserts nothing"
       end
 
-      # AND THE ROW THE CAPTURE EXISTS FOR WAS REALLY DRAWN. An empty translations row holds no
-      # capture either, so without this the detail page's own reason for keeping one is asserted by
+      # AND THE LINK UNDER ANOTHER LANGUAGE WAS REALLY DRAWN. A page with no switcher holds no
+      # capture either, so without this the one link built under another language is asserted by
       # nothing above it.
       for {url, translated} <- [
             {english(url_mode, "/blog/#{english.slug}"), "/fa/blog/#{persian.slug}"},
@@ -352,10 +371,10 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
         assert [translated] ==
                  view
                  |> render_async(@async)
-                 |> doc()
-                 |> LazyHTML.query(~s([data-role="blog-detail-translation"]))
-                 |> Enum.flat_map(&LazyHTML.attribute(&1, "href")),
-               "#{url} offered no other edition, so no base reached a link under another language"
+                 |> offered()
+                 |> Enum.map(&elem(&1, 1))
+                 |> List.delete(url),
+               "#{url} offered no other edition, so no link under another language was checked"
       end
     end
 
@@ -395,23 +414,19 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     end
 
     # THE SWITCHER IS BUILT FROM `@page_languages`, so it swaps the `lang` capture inside the page's
-    # own pattern rather than the first segment of whatever URL this happens to be.
+    # own pattern rather than the first segment of whatever URL this happens to be. It is the
+    # header's, the layout's only one.
     test "offers the same page in the site's other language", %{
       url_mode: url_mode,
       site: site,
       conn: conn
     } do
+      seed_site_layout!(site)
       provision!(site)
 
       {:ok, _view, html} = live(conn, english(url_mode, "/blog"))
 
-      assert [{"en", english(url_mode, "/blog")}, {"fa", "/fa/blog"}] ==
-               html
-               |> doc()
-               |> LazyHTML.query("a[hreflang]")
-               |> Enum.map(
-                 &{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))}
-               )
+      assert [{"en", english(url_mode, "/blog")}, {"fa", "/fa/blog"}] == offered(html)
     end
 
     # A PAGER ON A PATTERN PAGE MUST NOT WRITE THE PATTERN. `@page.path` is `/:lang/blog`, so a page
@@ -504,7 +519,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     # publishes in, and a slug belongs to one edition — so without the page telling the component
     # which language it is being read in, the English article also answers at /fa/blog/<its slug>,
     # inside the Persian shell this page draws around it: `<html lang="fa" dir="rtl">`, a Persian
-    # sidebar, a Persian language chip marked current. Nothing about that URL is true.
+    # bar, Persian marked current in the header's switcher. Nothing about that URL is true.
     test "is not the place an edition in another language answers", %{site: site, conn: conn} do
       english = publish!(site, "English post")
       provision!(site)
@@ -563,24 +578,34 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
           language_group_id: english.language_group_id
         )
 
+      lonely = publish!(site, "Only in English")
+
+      seed_site_layout!(site)
       provision!(site)
 
-      {:ok, view, _html} = live(conn, english(url_mode, "/blog/#{english.slug}"))
+      english_url = english(url_mode, "/blog/#{english.slug}")
+      persian_url = "/fa/blog/#{persian.slug}"
 
-      assert [{"fa", "/fa/blog/" <> persian.slug}] ==
-               view
-               |> render_async(@async)
-               |> doc()
-               |> LazyHTML.query(~s([data-role="blog-detail-translation"]))
-               |> Enum.map(
-                 &{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))}
-               )
+      {:ok, view, html} = live(conn, english_url)
 
-      {:ok, translated, _html} = live(conn, "/fa/blog/#{persian.slug}")
+      assert [{"en", english_url}, {"fa", persian_url}] == offered(render_async(view, @async))
+
+      # THE HEAD NAMES THE SAME TWO, each at the absolute address of its own edition.
+      assert [{"en", english_href}, {"fa", persian_href}] = head_languages(html)
+      assert String.ends_with?(english_href, english_url)
+      assert String.ends_with?(persian_href, persian_url)
+
+      {:ok, translated, _html} = live(conn, persian_url)
 
       assert texts(render_async(translated, @async), ~s([data-role="blog-detail-title"])) == [
                "نوشته فارسی"
              ]
+
+      # A POST WITH NO EDITION BESIDE IT offers no other language, so the header draws no switcher.
+      {:ok, alone, _html} = live(conn, english(url_mode, "/blog/#{lonely.slug}"))
+
+      assert offered(render_async(alone, @async)) == [],
+             "a post with no Persian edition was offered in Persian"
     end
   end
 
@@ -619,12 +644,14 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   end
 
   # ONE CAPTURE, FOUR MEANINGS. `:slug` is a category on one of these pages, a tag on another and a
-  # post on a third, and the sidebar's category list and tag cloud both read it under the same
-  # `selected_param` to mark where the reader is. A sidebar handed the capture on every page marks
-  # whatever happens to share that slug — and a blog with a category and a tag both called "Elixir"
-  # is the ordinary case.
-  describe "the sidebar" do
-    test "marks the category the reader is on, and not the tag that shares its slug", %{
+  # post on a third, and a block that marks where the reader is reads it under one name. A page that
+  # handed the capture to every block would mark whatever happens to share that slug — and a blog
+  # with a category and a tag both called "Elixir" is the ordinary case.
+  #
+  # The design draws no sidebar on the blog's pages (it is only a snippet now), so the place the
+  # reader is in is marked by the list's category chips and its tag chip.
+  describe "the place the reader is in" do
+    test "is the category they are on, and not the tag that shares its slug", %{
       url_mode: url_mode,
       site: site,
       conn: conn
@@ -635,11 +662,12 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       {:ok, view, _html} = live(conn, english(url_mode, "/blog/category/elixir"))
       html = render_async(view, @async)
 
-      assert marked(html, "blog-category") == 1
-      assert marked(html, "blog-tag") == 0, "the sidebar marked a tag the reader is not on"
+      assert texts(html, @chip_marked) == ["Cat"]
+      assert texts(html, ~s([data-role="blog-list-tag-chip"])) == [], "the page marked a tag"
+      assert texts(html, ~s(#blog-posts [data-role="blog-list-title"])) == ["Filed under elixir"]
     end
 
-    test "and the tag the reader is on, and not the category that shares its slug", %{
+    test "and the tag they are on, and not the category that shares its slug", %{
       url_mode: url_mode,
       site: site,
       conn: conn
@@ -650,21 +678,18 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       {:ok, view, _html} = live(conn, english(url_mode, "/blog/tag/elixir"))
       html = render_async(view, @async)
 
-      assert marked(html, "blog-tag") == 1
+      assert words(html, ~s([data-role="blog-list-tag-clear"])) == ["#Tag ×"]
 
-      assert marked(html, "blog-category") == 0,
-             "the sidebar marked a category the reader is not on"
+      assert texts(html, @chip_marked) == ["All"],
+             "the page marked a category the reader is not on"
+
+      assert texts(html, ~s(#blog-posts [data-role="blog-list-title"])) == ["Tagged elixir"]
     end
 
     # THE ARTICLE THE READER ALREADY HAS OPEN is the one link in "what else there is to read" that
-    # cannot be useful — in BOTH of the blocks offering it, the recent list and the posts hung under
-    # each category — and on a post page the capture is a post's slug, which is neither a category's
-    # nor a tag's.
-    #
-    # THE OPEN POST TAKES THE SLUG THE CATEGORY AND THE TAG SHARE, which is the only way the last two
-    # assertions can fail: the capture a sidebar handed `params` on this page would mark by is this
-    # post's slug, and a generated one collides with nothing.
-    test "keeps the post the reader has open out of what else there is to read", %{
+    # cannot be useful. It takes the slug the category and the tag share: on a post page the capture
+    # is a post's slug, which is neither a category's nor a tag's.
+    test "keeps the post they have open out of what else there is to read", %{
       url_mode: url_mode,
       site: site,
       conn: conn
@@ -678,25 +703,14 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
       {:ok, view, _html} = live(conn, english(url_mode, "/blog/elixir"))
       html = render_async(view, @async)
 
-      recent =
-        html
-        |> doc()
-        |> LazyHTML.query(~s(#blog-sidebar-recent [data-role="blog-list-title"]))
-        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+      next = texts(html, ~s(#blog-post-related [data-role="blog-list-title"]))
 
-      refute "Open" in recent, "the sidebar offered the reader the post they are already reading"
-      assert "Another" in recent
+      refute "Open" in next, "the page offered the reader the post they are already reading"
 
-      under_categories =
-        texts(html, ~s(#blog-sidebar-categories [data-role="blog-category-post"]))
+      assert hd(next) == "Filed under elixir",
+             "the post filed under the open one's category was not offered first"
 
-      refute "Open" in under_categories,
-             "the category this article is filed under offered the article back"
-
-      assert "Filed under elixir" in under_categories
-
-      assert marked(html, "blog-category") == 0
-      assert marked(html, "blog-tag") == 0
+      assert "Another" in next
     end
   end
 

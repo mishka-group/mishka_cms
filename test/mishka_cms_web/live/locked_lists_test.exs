@@ -188,7 +188,8 @@ defmodule MishkaCmsWeb.LockedListsTest do
   end
 
   # Each category on the English categories page with the count beside it, for a visitor holding
-  # `permissions`.
+  # `permissions`. The card draws the count as the design does, "1 posts"; the number is what is
+  # read.
   defp categories(site, permissions, url_mode) do
     names =
       seen(
@@ -205,6 +206,7 @@ defmodule MishkaCmsWeb.LockedListsTest do
         english(url_mode, "/blog/categories"),
         ~s([data-role="blog-category-count"])
       )
+      |> Enum.map(&(&1 |> String.split() |> hd()))
 
     Enum.zip_with(names, counts, &"#{&1} #{&2}")
   end

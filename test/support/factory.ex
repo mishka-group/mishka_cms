@@ -123,6 +123,54 @@ defmodule MishkaCms.Test.Factory do
     report
   end
 
+  @doc """
+  Gives `site` the layout every page of a site is drawn in, `site-main`, with the header and the
+  footer it draws (`StarterContent.seed!/2`), and puts the layout in the routing table the way a
+  boot does. Call it before an extension provisions its pages, so they hang on it as on a real
+  install: the header's language switcher is the only one a page has
+  (`MishkaCmsCore.Runtime.SiteLayout`). The logo goes in a folder of the test's own. When the test
+  exits, the routing table forgets the layout and its compiled modules are unloaded. Returns
+  `seed!/2`'s report.
+  """
+  def seed_site_layout!(%{name: site_name} = site) do
+    dir = Path.join(System.tmp_dir!(), "site_layout_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    Application.put_env(:mishka_cms_core, :media_static_dir, dir)
+
+    report = StarterContent.seed!(site)
+    layout = Ash.get!(Layout, report.layout_id, action: :read_any, authorize?: false)
+
+    :ok =
+      WebRunTimeMetaDataState.save(%{
+        id: layout.id,
+        site: site_name,
+        path: layout.path,
+        title: layout.name,
+        created_at: DateTime.utc_now(),
+        section: "Layout",
+        priority: 0
+      })
+
+    ExUnit.Callbacks.on_exit(fn ->
+      WebRunTimeMetaDataState.delete(layout.id)
+
+      for {name, section} <- [
+            {layout.id, "Layout"},
+            {"site-header", "Component"},
+            {"site-footer", "Component"}
+          ] do
+        module = Helpers.module_name(name, site_name, section)
+        :code.purge(module)
+        :code.delete(module)
+      end
+
+      Application.delete_env(:mishka_cms_core, :media_static_dir)
+      File.rm_rf(dir)
+    end)
+
+    report
+  end
+
   # Blog and document records, for the tests here that span extensions.
 
   def create_blog_post!(overrides \\ []) do
