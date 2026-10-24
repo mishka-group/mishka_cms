@@ -188,8 +188,8 @@ defmodule MishkaCmsWeb.LockedListsTest do
   end
 
   # Each category on the English categories page with the count beside it, for a visitor holding
-  # `permissions`. The card draws the count as the design does, "1 posts"; the number is what is
-  # read.
+  # `permissions`. The card draws the count with its word, "1 post" or "3 posts"; the number is
+  # what is read.
   defp categories(site, permissions, url_mode) do
     names =
       seen(
