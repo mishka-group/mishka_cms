@@ -12,7 +12,8 @@ defmodule MishkaCmsWeb.BlogPageSourceSecurityTest do
   Each rule is asked of a guest and of a reader holding the lock, through the router, the runtime
   LiveView and the site's layout: a locked edition of an open post, a post page locked on the site,
   a post locked by the category it is filed under, a locked post whose own edition a guest is
-  refused, and a draft edition.
+  refused, a draft edition, and a locked post in an open category, which the page of categories
+  counts and lists under its card in one read for every category.
 
   `async: false` — the install flag, `SiteState`, the routing table and the settings cache are
   process-global.
@@ -198,6 +199,77 @@ defmodule MishkaCmsWeb.BlogPageSourceSecurityTest do
       assert_missing(on_site(site), "/fa/blog/pish-nevis", "Not written yet")
       assert_missing(signed_in(site, @lock), "/fa/blog/pish-nevis", "Not written yet")
     end
+  end
+
+  # THE COUNT BESIDE A CATEGORY AND THE POSTS UNDER IT are read for every category at once — the
+  # count as an aggregate of the categories' read, the posts in one read beside it — and both are
+  # of what the visitor may open: the category's own page says the same number and lists the same
+  # posts.
+  describe "a locked post in an open category" do
+    setup %{site: site} do
+      guides =
+        create_collection!(
+          site_id: site.id,
+          name: "Guides",
+          slug: "guides",
+          status: :active,
+          language: "en",
+          permissions: []
+        )
+
+      for {slug, title, permissions} <- [
+            {"open-guide", "Open guide", []},
+            {"members-guide", "Members guide", @lock}
+          ] do
+        post = post!(site, slug, title, "en", permissions: permissions)
+
+        Ash.create!(MishkaBlog.PostCollection, %{post_id: post.id, collection_id: guides.id},
+          authorize?: false
+        )
+      end
+
+      :ok
+    end
+
+    test "is neither counted nor listed for a guest, on the categories' page or its own", %{
+      site: site
+    } do
+      categories = page(on_site(site), "/blog/categories")
+
+      assert roles(categories, "blog-category-name") == ["Guides"]
+      assert roles(categories, "blog-category-count") == ["1 post"]
+      assert roles(categories, "blog-category-post") == ["Open guide"]
+      refute categories =~ "Members guide"
+
+      own = page(on_site(site), "/blog/category/guides")
+
+      assert roles(own, "blog-search-count") == ["1 post"]
+      assert roles(own, "blog-list-title") == ["Open guide"]
+      refute own =~ "Members guide"
+    end
+
+    test "is counted and listed for a reader holding its lock", %{site: site} do
+      conn = signed_in(site, @lock)
+      categories = page(conn, "/blog/categories")
+
+      assert roles(categories, "blog-category-count") == ["2 posts"]
+      assert Enum.sort(roles(categories, "blog-category-post")) == ["Members guide", "Open guide"]
+
+      own = page(conn, "/blog/category/guides")
+      assert roles(own, "blog-search-count") == ["2 posts"]
+      assert Enum.sort(roles(own, "blog-list-title")) == ["Members guide", "Open guide"]
+    end
+  end
+
+  # The words at each element of `role` in the page a reader got, the live render's — the HTTP
+  # render and the mount draw the same rows — each on one line.
+  defp roles(html, role) do
+    html
+    |> String.split("</html>")
+    |> List.last()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(~s([data-role="#{role}"]))
+    |> Enum.map(&(&1 |> LazyHTML.text() |> String.split() |> Enum.join(" ")))
   end
 
   # THE PAGE AS A READER GETS IT: the HTTP render and the connected mount after it.

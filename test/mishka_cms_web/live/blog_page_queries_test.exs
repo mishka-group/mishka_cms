@@ -13,10 +13,12 @@ defmodule MishkaCmsWeb.BlogPageQueriesTest do
   Each test counts the queries the repo runs during one request, through its telemetry events, for
   the HTTP render and again for the connected mount, which renders the page anew: no two of them
   read the same table with the same filter and the same values, and there are no more of them than
-  the page needs. The counts, as a guest on the site `records!/1` seeds (before the page's rows were
-  shared → now): the front page 13 → 9, a post 23 → 11, a category 12 → 7, a tag 12 → 7, a blogger
-  9 → 6, a team 9 → 6, and the categories, tags and people pages 3, 2 and 4, which read nothing
-  twice and are unchanged.
+  the page needs. The counts, as a guest on the site `records!/1` seeds — in two languages, with a
+  locked category, so a card's lock is worked out from the categories: the front page 8, a post 12,
+  a category 8, a tag 8, a blogger 6, a team 6, and the categories, tags and people pages 3, 2 and 4.
+  Each is at or under what the release before read on the sample data: the front page 12, a post 26,
+  a category and a tag 12, the categories page 2 (with no posts under its cards; its 3 now are the
+  categories with their counts and one read of the newest posts under every one of them).
 
   Here rather than in the blog's suite because only this application has the router, the runtime
   LiveView and the hooks a request runs.
@@ -51,15 +53,25 @@ defmodule MishkaCmsWeb.BlogPageQueriesTest do
 
   require Ash.Query
 
-  # WHAT EACH PAGE NEEDS, AND NO MORE. A post: the site's own editions of the page (core), the post
-  # with its rating and its count of comments and, loaded with it, its categories, its authors and
-  # their teams, its tags and its other editions; the address of the authors' page for the head;
-  # the conversation; and the next reads with their categories.
+  # WHAT EACH PAGE NEEDS, AND NO MORE. Every page starts with the site's own editions of the page
+  # (core).
+  #
+  #   * A post: the post with its rating and its count of comments and, loaded with it, its
+  #     categories, its tags, its authors and their teams, its other editions, and its lock, worked
+  #     out from the categories (two); the address of the authors' page for the head; the
+  #     conversation; and the next reads, in one statement with the category each card names.
+  #   * The front page: the count of its posts and which ones its strip draws; then the strip's
+  #     cards and the first page of its list in one read, each with its first category, then their
+  #     people and their lock (two), loaded once for both; and the row of categories by the list.
+  #   * A category and a tag: the row with its count and its other editions, then the first page of
+  #     its list as the front page reads its own, and the row of categories.
+  #   * The page of categories: the categories with their counts, and the newest posts under every
+  #     one of them in one read — the same however many categories there are.
   @budgets %{
-    home: 9,
-    post: 11,
-    category: 7,
-    tag: 7,
+    home: 8,
+    post: 12,
+    category: 8,
+    tag: 8,
     categories: 3,
     tags: 2,
     people: 4,
@@ -141,6 +153,28 @@ defmodule MishkaCmsWeb.BlogPageQueriesTest do
     end
   end
 
+  # ONE READ FOR THE POSTS UNDER EVERY CATEGORY, NOT ONE PER CATEGORY. The page of categories draws
+  # each with its count and its newest posts; three more categories, each with a post, cost it no
+  # query more.
+  test "the page of categories reads as much for five categories as for two", %{site: site} do
+    path = "/blog/categories"
+    _built = get(on_site(site), path)
+
+    {conn, before} = queries(fn -> get(on_site(site), path) end)
+    assert conn.status == 200
+
+    for name <- ~w(Alpha Beta Gamma) do
+      file!(post!(site, "In #{name}", "en", []), category!(site, name, []))
+    end
+
+    {conn, after_more} = queries(fn -> get(on_site(site), path) end)
+    assert conn.status == 200
+    assert conn.resp_body =~ "In Gamma"
+
+    assert length(after_more) == length(before),
+           "#{length(before)} queries for the categories before, #{length(after_more)} after three more"
+  end
+
   defp address_of(:home, _records), do: "/blog"
   defp address_of(:post, records), do: "/blog/#{records.post.slug}"
   defp address_of(:category, records), do: "/blog/category/#{records.category.slug}"
@@ -205,7 +239,9 @@ defmodule MishkaCmsWeb.BlogPageQueriesTest do
   end
 
   # A category and a post in two languages each, two featured posts among five of the category, a
-  # tag in two languages on two of them, and their blogger in a team.
+  # tag in two languages on two of them, and their blogger in a team; beside them a second category
+  # with a post of its own, and a locked one holding a post of its own and one of the five — so a
+  # card's lock is worked out from the categories, as on a site that locks any.
   defp records!(site) do
     category =
       create_collection!(
@@ -215,6 +251,9 @@ defmodule MishkaCmsWeb.BlogPageQueriesTest do
         slug: "news",
         language: "en"
       )
+
+    guides = category!(site, "Guides", [])
+    members = category!(site, "Members", ["members:read"])
 
     create_collection!(
       site_id: site.id,
@@ -233,6 +272,10 @@ defmodule MishkaCmsWeb.BlogPageQueriesTest do
     for filed <- [post, second | others] do
       [post_id: filed.id, collection_id: category.id] |> post_collection() |> generate()
     end
+
+    file!(post!(site, "A guide", "en", []), guides)
+    file!(post!(site, "Behind the lock", "en", []), members)
+    file!(List.last(others), members)
 
     tag = [name: "elixir", slug: "elixir", language: "en"] |> tag(site.id) |> generate()
 
@@ -257,6 +300,20 @@ defmodule MishkaCmsWeb.BlogPageQueriesTest do
 
     %{post: post, category: category, tag: tag, blogger: blogger, team: team}
   end
+
+  defp category!(site, name, permissions) do
+    create_collection!(
+      site_id: site.id,
+      status: :active,
+      name: name,
+      slug: String.downcase(name),
+      language: "en",
+      permissions: permissions
+    )
+  end
+
+  defp file!(post, category),
+    do: [post_id: post.id, collection_id: category.id] |> post_collection() |> generate()
 
   defp post!(site, title, language, overrides) do
     create_blog_post!(

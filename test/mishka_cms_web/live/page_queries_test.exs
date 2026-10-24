@@ -12,7 +12,7 @@ defmodule MishkaCmsWeb.PageQueriesTest do
   the HTTP render and again for the connected mount, which renders the page anew: no two of them
   read the same table with the same filter and the same values, and there are no more of them than
   the page needs. The counts, as a guest on the site `records!/1` seeds (before the page's rows were
-  shared → now): a page of a document 27 → 8, a document's front page 20 → 7, the library 6 → 6
+  shared → now): a page of a document 27 → 8, a document's front page 20 → 7, the library 6 → 4
   and the home page 1 → 1. The blog's pages are `MishkaCmsWeb.BlogPageQueriesTest`'s.
 
   Here rather than in an extension's suite because only this application has the router, the
@@ -40,8 +40,11 @@ defmodule MishkaCmsWeb.PageQueriesTest do
   # read, the pages of every version of it — the version shown, and the others the version menu
   # offers — and of the version each other edition is on, which the frame finds the same page in;
   # and the page with its text and, loaded with it, its notes. A front page reads the summaries of
-  # the pages its overview starts with in place of a page and its notes.
-  @budgets %{page: 8, front: 7, library: 6, home: 1}
+  # the pages its overview starts with in place of a page and its notes. The library counts its
+  # documents, reads a page of them with, in the same statement, the version each card names and
+  # the languages of its other editions, and the pages of those versions in one read — the release
+  # before read 4 without the version and the pages.
+  @budgets %{page: 8, front: 7, library: 4, home: 1}
 
   setup do
     SiteState.clear()
