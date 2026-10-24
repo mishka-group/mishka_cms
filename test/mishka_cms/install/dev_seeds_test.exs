@@ -12,12 +12,14 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   use MishkaCms.DataCase, async: false
   use Oban.Testing, repo: MishkaCms.Repo
 
+  import MishkaCms.Test.Factory, only: [create_site!: 1]
   import Phoenix.LiveViewTest, only: [rendered_to_string: 1]
 
   alias MishkaCmsCore.Accounts.{Permission, User}
   alias MishkaCmsCore.Dev.Generator
   alias MishkaCmsCore.Dev.SeedMedia
   alias MishkaCmsCore.Dev.Seeds
+  alias MishkaCmsCore.Install.StarterContent
   alias MishkaCmsCore.Runtime.Compilers.JavaScriptCompiler
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
   alias MishkaCmsCore.Runtime.JsHook
@@ -28,7 +30,19 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   alias MishkaCmsCore.Runtime.PageBuilder.PageForms
   alias MishkaCmsCore.Runtime.Compilers.LiveViewCompiler
   alias MishkaCmsCore.Runtime.Languages
-  alias MishkaCmsCore.Runtime.{Component, Layout, Media, Page, PageDraft, Site, Stylesheet}
+
+  alias MishkaCmsCore.Runtime.{
+    Component,
+    Layout,
+    Media,
+    Page,
+    PageDraft,
+    PageProvision,
+    Site,
+    SiteLayout,
+    Stylesheet
+  }
+
   alias MishkaCmsCore.Runtime.Workers.SiteRuntimeWorker
   alias MishkaCmsCore.Settings
 
@@ -207,7 +221,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     by_id = Map.new(sites, &{&1.id, &1.name})
 
     # WHO registers it, not merely that somebody does. A flat set of every name on the node said yes
-    # to the Home page naming `LocalhostConsoleLogger` on all three sites — the very bug the comment
+    # to the showcase page naming `LocalhostConsoleLogger` on all three sites — the very bug the comment
     # above describes — because the localhost site really did register it. A visitor is only ever on
     # ONE site, and the only name that helps them is one their own site registers.
     registered =
@@ -591,6 +605,101 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     end
   end
 
+  # DEV IS PRODUCTION AT `/`. A developer's first click on a dev site lands on the page a stranger's
+  # first install opens on, not on a home the seeds wrote for the occasion: the template, the name
+  # and the stamps are the ones `StarterContent.seed!/2` writes on a site given nothing else, and
+  # the dev seeds' own pages sit beside it.
+  test "every dev site's / is exactly the home page a production install writes" do
+    core = seed_core()
+
+    reference_name = "reference#{System.unique_integer([:positive])}"
+    reference = create_site!(name: reference_name, host: "#{reference_name}.test", active: true)
+    StarterContent.seed!(reference)
+
+    assert [production] = reference |> seeded_pages() |> Enum.filter(&(&1.path == "/:lang"))
+
+    for site <- core.sites do
+      assert [home] = site |> seeded_pages() |> Enum.filter(&(&1.path == "/:lang")),
+             "#{site.name} does not hold exactly one home"
+
+      assert home.template == production.template, "#{site.name}'s / is not production's"
+      assert home.name == production.name, site.name
+      assert home.title == production.title, site.name
+      assert home.description == production.description, site.name
+      assert home.section == production.section, site.name
+      assert home.extra == production.extra, site.name
+
+      assert PageProvision.provisioned_by(home) == "mishka_cms_core", site.name
+      assert PageProvision.serves_all_languages?(home), site.name
+      assert home.layout_id == SiteLayout.layout_id(site.id), site.name
+    end
+  end
+
+  # WHAT USED TO BE THE HOME IS A PAGE OF ITS OWN, at `/showcase`: the same demo, on the layout every
+  # page of the site shares, and in the languages its site publishes in.
+  @showcases %{
+    "localhost" => {"localhost-showcase", "LocalhostConsoleLogger", ["en", "fa"]},
+    "site-a" => {"site-a-showcase", "SiteAConsoleLogger", ["en", "fr"]},
+    "site-b" => {"site-b-showcase", "SiteBConsoleLogger", ["en"]}
+  }
+
+  test "every dev site keeps its demo at /showcase, on the site's one layout" do
+    core = seed_core()
+
+    for site <- core.sites do
+      {id, hook, languages} = Map.fetch!(@showcases, site.name)
+      pages = seeded_pages(site)
+
+      assert [showcase] = Enum.filter(pages, &(&1.path == "/:lang/showcase")),
+             "#{site.name} has no /showcase"
+
+      assert showcase.name == "showcase", site.name
+      assert showcase.section == "main", site.name
+      assert showcase.active, site.name
+      assert showcase.layout_id == SiteLayout.layout_id(site.id), site.name
+      assert showcase.template =~ ~s(id="#{id}"), site.name
+      assert showcase.template =~ ~s(phx-hook="#{hook}"), site.name
+
+      # ONE ROW PER LANGUAGE, each its own text: the language switcher offers only what is written.
+      group = Enum.filter(pages, &(&1.language_group_id == showcase.language_group_id))
+      assert group |> Enum.map(& &1.language) |> Enum.sort() == languages, site.name
+
+      for sibling <- group do
+        assert sibling.template =~ ~s(id="#{id}"), "#{site.name} #{sibling.language}"
+        assert sibling.active, "#{site.name} #{sibling.language}"
+      end
+    end
+  end
+
+  # THE HEADER REACHES IT, beside the demos the site already linked to. Every link the dev header
+  # carries is read out of the layout and has to land on a page the site really holds, so a demo can
+  # not be left without a way in.
+  test "every dev site's header links to /showcase, and every link in it lands on a page" do
+    core = seed_core()
+
+    for site <- core.sites do
+      template = site |> site_main() |> Map.fetch!(:template)
+
+      links =
+        ~r/navigate=\{site_path\("(\/:lang[^"]*)", lang\(assigns\)\)\}/
+        |> Regex.scan(template, capture: :all_but_first)
+        |> List.flatten()
+
+      assert "/:lang/showcase" in links, "#{site.name}'s header does not link to the showcase"
+      assert template =~ ">Showcase<", site.name
+
+      # About and Contact, then the showcase and the site's own demos.
+      assert Enum.take(links, 2) == ["/:lang/about", "/:lang/contact"], site.name
+      assert length(links) >= 4, "#{site.name}'s header lost its demo links: #{inspect(links)}"
+
+      paths = site |> seeded_pages() |> Enum.map(& &1.path)
+
+      for link <- links do
+        assert link in paths, "#{site.name}'s header links to #{link}, which it does not hold"
+      end
+    end
+  end
+
   # THE SIGN-IN PAGES EVERY SITE GETS, and their Persian words only where a site publishes in `fa`.
   test "every site gets the sign-in pages, and a site publishing in fa their Persian words" do
     core = seed_core()
@@ -667,6 +776,15 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     Seeds.run([])
 
     assert [^draft] = drafts(site)
+  end
+
+  defp site_main(site) do
+    Layout
+    |> Ash.Query.for_read(:read_any)
+    |> Ash.Query.filter(site_id == ^site.id and name == "site-main")
+    |> Ash.read!(authorize?: false, page: [limit: 1])
+    |> Map.fetch!(:results)
+    |> hd()
   end
 
   defp drafts(site) do
