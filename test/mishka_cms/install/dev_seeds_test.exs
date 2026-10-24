@@ -671,31 +671,64 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     end
   end
 
-  # THE HEADER REACHES IT, beside the demos the site already linked to. Every link the dev header
-  # carries is read out of the layout and has to land on a page the site really holds, so a demo can
-  # not be left without a way in.
-  test "every dev site's header links to /showcase, and every link in it lands on a page" do
+  # THE HEADER REACHES IT, in the one `Dev` dropdown every dev link sits in, so what stands beside the
+  # dropdown is a production install's own header. Every link in it is read out of the layout and
+  # has to land on a page the site really holds, so a demo can not be left without a way in and a
+  # link can not go to a page that is not there.
+  #
+  # THE SAME LINKS ARE ON THE PAGE TWICE, the dropdown's menu from `lg` up and the phone panel's
+  # labelled list below it (`StarterContent`'s grouped links), and both are read here.
+  #
+  # BLOG AND DOCS ARE THE EXTENSIONS' PAGES, which `run([])` does not write; they are written here the
+  # way the extensions' own dev seeds write them (`Provision.ensure!/1`). `site-a` has them too: it
+  # prefixes every language, so its `/blog` is a redirect to `/en/blog`, not a missing page.
+  @dev_links %{
+    "localhost" => ~w(about contact showcase pricing gallery messages blog docs),
+    "site-a" => ~w(about contact showcase services team blog docs),
+    "site-b" => ~w(about contact showcase faq status changelog blog docs)
+  }
+
+  @nav_link ~r/navigate=\{site_path\("(\/:lang[^"]*)", lang\(assigns\)\)\}/
+
+  test "every dev site's header holds its links in one Dev dropdown, and each lands on a page" do
     core = seed_core()
 
     for site <- core.sites do
+      MishkaBlog.Provision.ensure!(site)
+      MishkaDocument.Provision.ensure!(site)
+
       template = site |> site_main() |> Map.fetch!(:template)
-
-      links =
-        ~r/navigate=\{site_path\("(\/:lang[^"]*)", lang\(assigns\)\)\}/
-        |> Regex.scan(template, capture: :all_but_first)
-        |> List.flatten()
-
-      assert "/:lang/showcase" in links, "#{site.name}'s header does not link to the showcase"
-      assert template =~ ">Showcase<", site.name
-
-      # About and Contact, then the showcase and the site's own demos.
-      assert Enum.take(links, 2) == ["/:lang/about", "/:lang/contact"], site.name
-      assert length(links) >= 4, "#{site.name}'s header lost its demo links: #{inspect(links)}"
-
       paths = site |> seeded_pages() |> Enum.map(& &1.path)
 
-      for link <- links do
+      nav_links = fn text ->
+        @nav_link |> Regex.scan(text, capture: :all_but_first) |> List.flatten()
+      end
+
+      # THE DROPDOWN'S MENU AND THE PHONE PANEL'S LIST: the two blocks of links the group is written as.
+      [menu] = Regex.run(~r/id="site-nav-dev-menu".*?<\/div>/s, template)
+      [panel] = Regex.run(~r/role="group".*?<\/div>/s, template)
+
+      expected = Enum.map(Map.fetch!(@dev_links, site.name), &("/:lang/" <> &1))
+      assert nav_links.(menu) == expected, "#{site.name}'s Dev dropdown"
+      assert nav_links.(panel) == expected, "#{site.name}'s Dev list in the phone panel"
+
+      # THE DROPDOWN IS ONE BUTTON NAMED Dev, AND NOTHING ELSE IS BEFORE DOCS AND GITHUB.
+      assert template =~ ~s(id="site-nav-dev-button"), site.name
+      assert template =~ ~r/<span>Dev<\/span>/, site.name
+      assert [_one] = Regex.scan(~r/id="site-nav-[a-z0-9-]+-button"/, template), site.name
+
+      assert template |> String.replace([menu, panel], "") |> nav_links.() == [],
+             "#{site.name}'s header has a link outside the Dev group"
+
+      assert "/:lang/showcase" in expected
+      assert Enum.take(expected, 2) == ["/:lang/about", "/:lang/contact"], site.name
+
+      for link <- expected do
         assert link in paths, "#{site.name}'s header links to #{link}, which it does not hold"
+      end
+
+      for label <- ~w(About Contact Showcase Blog Docs) do
+        assert template =~ ">#{label}</.link>", "#{site.name} has no #{label}"
       end
     end
   end

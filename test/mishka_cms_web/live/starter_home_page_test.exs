@@ -30,7 +30,7 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
 
   require Ash.Query
 
-  setup do
+  setup context do
     dir = Path.join(System.tmp_dir!(), "starter_home_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     Application.put_env(:mishka_cms_core, :media_static_dir, dir)
@@ -53,7 +53,7 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
     WebRunTimeMetaDataState.delete_by_site(site.name)
 
     # THE BRAND THE USER TYPED, as the installer hands it in.
-    report = StarterContent.seed!(site, brand: "Acme Docs")
+    report = StarterContent.seed!(site, brand: "Acme Docs", nav: Map.get(context, :nav, []))
 
     layout = Ash.get!(Layout, report.layout_id, action: :read_any, authorize?: false)
 
@@ -229,6 +229,55 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
       assert [console] = Regex.run(~r/<a [^>]*id="site-admin-console"[^>]*>/, html)
       assert console =~ ~s(href="/admin/dashboard")
       assert html =~ ~s(href="/admin/dashboard/settings?tab=preferences")
+    end
+  end
+
+  # A GROUP OF LINKS IS WRITTEN INTO THE LAYOUT, so it is the real compiler that has to take it: the
+  # dropdown's `Phoenix.LiveView.JS` commands, its ids and the phone panel's list. The dev sites'
+  # header is this, with their own links.
+  describe "the header's group of links" do
+    @group [
+      %{label: "Dev", children: [{"About", "/about"}, {"Pricing", "/pricing"}]}
+    ]
+
+    @tag nav: @group
+    test "is a dropdown on the bar and a labelled list in the phone panel, drawn by the layout",
+         %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "failed to render"
+      [header, _rest] = String.split(html, "</header>", parts: 2)
+
+      assert header =~ ~s(id="site-nav-dev-button")
+      assert header =~ ~s(aria-haspopup="menu")
+      assert header =~ ~r/<span>\s*Dev\s*<\/span>/
+      assert header =~ ~r/id="site-nav-dev-menu"[^>]*class="[^"]*\bhidden\b/
+
+      # THE LINKS ARE THE SITE'S OWN ADDRESSES, in the dropdown and in the phone panel's list.
+      assert [_, menu] = Regex.run(~r/id="site-nav-dev-menu"(.*?)<\/div>/s, header)
+
+      assert Regex.scan(~r/href="([^"]*)"/, menu, capture: :all_but_first) == [
+               ["/about"],
+               ["/pricing"]
+             ]
+
+      assert [_, panel] = Regex.run(~r/role="group"(.*?)<\/div>/s, header)
+      assert panel =~ ~s(href="/about")
+      assert panel =~ ~s(href="/pricing")
+      assert header =~ ~s(aria-labelledby="site-nav-dev-label")
+
+      # THE COMMANDS THE CLIENT READS, as the language switcher's are: a JSON list in the attribute.
+      assert header =~
+               ~r/phx-click-away="\[\[&quot;hide&quot;,\{&quot;to&quot;:&quot;#site-nav-dev-menu&quot;\}\]/
+
+      assert header =~ "site-nav-dev-button"
+    end
+
+    test "is not there when the site passes none, which is every production install", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "site-nav-"
+      refute html =~ ~s(role="group")
     end
   end
 
