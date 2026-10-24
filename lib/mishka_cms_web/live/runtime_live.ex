@@ -34,10 +34,20 @@ defmodule MishkaCmsWeb.RuntimeLive do
   open while its site is offline, and loads the app's own LiveView client in place of the site's
   bundle, which an offline site serves to its admins only.
 
+  ## What a page is read from
+
+  `handle_params/3` reads, after the page's language, `@query_params` and the visitor and before the
+  frame and the head, the rows the page shows (`MishkaCmsCore.Runtime.PageSource.assign_source/1`):
+
+  - `@page_source` — what the extension that owns the page's record read for this address, as the
+    visitor, or `nil`. The plugins of the frame and of the head are handed it as `source`, and the
+    page's template hands it to its blocks as `page_source={assigns[:page_source]}`, so each row is
+    read once per address rather than once by each of them.
+
   ## What a page hands its layout
 
-  `handle_params/3` resolves, after the page's language and `@query_params` and before the head,
-  what the page hands the site's `site-main` layout
+  `handle_params/3` resolves, after the page's language, `@query_params` and `@page_source` and
+  before the head, what the page hands the site's `site-main` layout
   (`MishkaCmsCore.Runtime.SiteLayout.assign_frame/1`):
 
   - `@page_languages` — the languages the page is written in, each at its own address: the page's
@@ -58,6 +68,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
     its meta. A plugin may redirect it elsewhere instead.
   - `runtime:page:signed_in_only_redirected` — the same for a visitor who is not signed in on a
     signed-in-only page, before it is redirected to the sign-in page.
+  - `runtime:page:source` — the rows a page shows, read once in every `handle_params/3` before the
+    frame and the head. The map a plugin is handed, and what it may answer, are
+    `MishkaCmsCore.Runtime.PageSource`'s.
   - `runtime:page:frame` — what the page hands its layout, in every `handle_params/3`: the
     languages of the record a page shows and the bar under the header. The map a plugin is handed,
     and what it may answer, are `MishkaCmsCore.Runtime.SiteLayout`'s.
@@ -97,6 +110,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
       * `record` — the kind of record the page shows, `"blog:post"`, from its `extra`
         (`MishkaCmsCore.Runtime.Seo.record_of/1`); `nil` for none. Read only. A plugin answers for
         its own kinds, which it names on `runtime:page:records`.
+      * `source` — `@page_source`, the rows the page's plugin on `runtime:page:source` read for this
+        address as the visitor, or `nil`. Read only. A plugin takes its record from there rather
+        than reading it again.
 
     A key returned with the wrong type keeps the given value
     (`MishkaCmsCore.Runtime.Seo.accept/2`). Every default tag is built from the answer, so a plugin
@@ -107,7 +123,17 @@ defmodule MishkaCmsWeb.RuntimeLive do
   alias MishkaCmsCore.Accounts.Checks.AccessPermissions
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Runtime.Compilers.Helpers
-  alias MishkaCmsCore.Runtime.{Languages, Page, PageEditions, Seo, SiteAvailability, SiteLayout}
+
+  alias MishkaCmsCore.Runtime.{
+    Languages,
+    Page,
+    PageEditions,
+    PageSource,
+    Seo,
+    SiteAvailability,
+    SiteLayout
+  }
+
   alias MishkaCmsCore.Runtime.Plugs.{LanguagePlug, SiteLookupPlug}
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.PageState
@@ -411,6 +437,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> assign_page_language(captured)
                   |> assign(:current_path, joined_path)
                   |> assign(:query_params, query_params(params, captured))
+                  |> PageSource.assign_source()
                   |> SiteLayout.assign_frame()
                   |> assign_page_seo(uri)
                   |> admit_record(page_module)
@@ -863,8 +890,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
   defp assign_page_title(socket), do: assign(socket, :page_title, socket.assigns.page.title)
 
   # The page's `<title>` and head for this address, through the plugins on `Seo.event/0`. Run after
-  # `assign_page_language/2`, `:query_params` and `SiteLayout.assign_frame/1`, whose languages and
-  # captures it reads.
+  # `assign_page_language/2`, `:query_params`, `PageSource.assign_source/1` and
+  # `SiteLayout.assign_frame/1`, whose captures, rows and languages it reads.
   defp assign_page_seo(socket, %URI{path: path}) do
     %{page: page, private: private, page_languages: languages, query_params: params} =
       socket.assigns
@@ -881,7 +908,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
         languages: languages,
         restricted?: Seo.noindex?(acl_permissions(socket.assigns[:acl]), socket.assigns[:extra]),
         layers: [layout_seo_tags(private), stored_seo(page, :meta_tags)],
-        card: true
+        card: true,
+        source: socket.assigns[:page_source]
       )
 
     assign(socket, page_seo: seo, page_title: seo.title)
