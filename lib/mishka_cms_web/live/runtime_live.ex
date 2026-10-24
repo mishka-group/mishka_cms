@@ -799,11 +799,10 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # the page was translated. See `MishkaCmsCore.Runtime.PageEditions`.
   #
   # ONLY IN `handle_params/3`, which runs after `mount/3` on the HTTP render and on the connect alike,
-  # so a mount's own would be overwritten before anything drew it. And the editions are read ONCE PER
-  # PAGE, kept under `:page_editions` beside the module they were read for: a `<.link patch>` to the
-  # same page — a pager, a tab — changes its captures, which `alternates/3` builds the URLs from,
-  # but not which editions it has. Every page is in a group, if only its own, so without this every
-  # patch on every page cost a query.
+  # so a mount's own would be overwritten before anything drew it. The editions come from the site
+  # state's index (`MishkaCmsCore.Runtime.States.SiteState.page_editions/2`), which every write of a
+  # page keeps, so they are read on every params change at no query, and an open page sees an
+  # edition added or archived on its next patch.
   #
   # THE PAGE'S `extra` GOES WITH IT: whether a pattern page answers every language or only its own is
   # marked there, and an alternate the resolver would refuse is a link to a 404.
@@ -811,22 +810,15 @@ defmodule MishkaCmsWeb.RuntimeLive do
     %{page: page, page_module: page_module, private: %{site_id: site_id}} = socket.assigns
 
     editions =
-      case socket.assigns[:page_editions] do
-        {^page_module, editions} ->
-          editions
-
-        _another_page ->
-          page
-          |> Map.put(:extra, page_module.__page_information__(:extra))
-          |> PageEditions.editions(site_id)
-      end
+      page
+      |> Map.put(:extra, page_module.__page_information__(:extra))
+      |> PageEditions.editions(site_id)
 
     language = PageEditions.language(page, captured, site_id)
 
     socket
     |> speaking(language, site_id)
     |> assign(:page, Map.put(page, :language, language))
-    |> assign(:page_editions, {page_module, editions})
     |> assign(:page_languages, PageEditions.alternates(editions, captured, site_id))
   end
 
