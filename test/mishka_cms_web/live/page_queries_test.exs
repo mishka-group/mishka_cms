@@ -12,8 +12,15 @@ defmodule MishkaCmsWeb.PageQueriesTest do
   the HTTP render and again for the connected mount, which renders the page anew: no two of them
   read the same table with the same filter and the same values, and there are no more of them than
   the page needs. The counts, as a guest on the site `records!/1` seeds (before the page's rows were
-  shared → now): a page of a document 27 → 8, a document's front page 20 → 7, the library 6 → 4
-  and the home page 1 → 1. The blog's pages are `MishkaCmsWeb.BlogPageQueriesTest`'s.
+  shared → now): a page of a document 27 → 8, a document's front page 20 → 7, the library 6 → 4.
+  The blog's pages are `MishkaCmsWeb.BlogPageQueriesTest`'s.
+
+  A page of the site's own — the home page, and a page translated into Persian — asks the database
+  nothing at all once it is compiled (1 → 0 each, before its editions were kept in `SiteState`):
+  its data is in its module, and the other languages it is in are read from
+  `MishkaCmsCore.Runtime.States.SiteState.page_editions/2`, which every write of a page keeps — so
+  an edition added or removed is offered, or no longer, on the very next request, without a restart
+  and without the page being compiled again.
 
   Here rather than in an extension's suite because only this application has the router, the
   runtime LiveView and the hooks a request runs.
@@ -43,8 +50,9 @@ defmodule MishkaCmsWeb.PageQueriesTest do
   # the pages its overview starts with in place of a page and its notes. The library counts its
   # documents, reads a page of them with, in the same statement, the version each card names and
   # the languages of its other editions, and the pages of those versions in one read — the release
-  # before read 4 without the version and the pages.
-  @budgets %{page: 8, front: 7, library: 4, home: 1}
+  # before read 4 without the version and the pages. The home page and a translated page read
+  # nothing: their editions are in `SiteState`.
+  @budgets %{page: 8, front: 7, library: 4, home: 0, translated: 0}
 
   setup do
     SiteState.clear()
@@ -72,12 +80,13 @@ defmodule MishkaCmsWeb.PageQueriesTest do
       SiteState.clear()
     end)
 
-    seed_site_layout!(site)
+    %{layout_id: layout_id} = seed_site_layout!(site)
     records!(site)
+    {about, fa} = translated!(site, layout_id)
     MishkaDocument.Provision.ensure!(site)
     register_routes!(site)
 
-    %{site: site}
+    %{site: site, layout_id: layout_id, about: about, fa: fa}
   end
 
   for {page, path, label} <- [
@@ -85,7 +94,8 @@ defmodule MishkaCmsWeb.PageQueriesTest do
          "a page of a document, its contents, its notes and its bar"},
         {:front, "/docs/guide", "a document's front page and its overview"},
         {:library, "/docs", "the library"},
-        {:home, "/", "the home page"}
+        {:home, "/", "the home page"},
+        {:translated, "/about", "a page translated into Persian"}
       ] do
     test "#{label} reads each of its rows once", %{site: site} do
       path = unquote(path)
@@ -116,6 +126,38 @@ defmodule MishkaCmsWeb.PageQueriesTest do
     end
   end
 
+  # THE HEADER'S SWITCHER AND THE HEAD'S HREFLANG LINKS FOLLOW A TRANSLATION ADDED OR TAKEN AWAY on
+  # the next request: the page reads its group from `SiteState` on every render, which the write
+  # itself updated, so no restart and no compile of the page stand between them — and the page still
+  # reads nothing of `pages`, which its compile would.
+  test "a page offers a translation from the next request, and none once it goes", %{
+    site: site,
+    layout_id: layout_id,
+    about: about,
+    fa: fa
+  } do
+    _built = get(on_site(site), "/about")
+
+    assert offered(site, "/about") == {[{"en", "/about"}, {"fa", "/fa/about"}], ["en", "fa"]}
+
+    fa
+    |> Ash.Changeset.for_destroy(:destroy, %{}, tenant: site.id)
+    |> Ash.destroy!(authorize?: false)
+
+    assert offered(site, "/about") == {[], []},
+           "/about still offered the Persian edition that was archived"
+
+    edition!(site, layout_id,
+      name: "about-fa-again",
+      path: "/fa/darbare",
+      language: "fa",
+      language_group_id: about.id
+    )
+
+    assert offered(site, "/about") == {[{"en", "/about"}, {"fa", "/fa/darbare"}], ["en", "fa"]},
+           "/about did not offer the Persian edition written after it was compiled"
+  end
+
   # A LIVE PATCH TO ANOTHER PAGE OF THE SAME DOCUMENT reads that page, its text and its notes, and
   # nothing of the document, its versions, its editions or the version's pages again.
   test "a patch to another page of the document reads only that page", %{site: site} do
@@ -143,6 +185,29 @@ defmodule MishkaCmsWeb.PageQueriesTest do
              Enum.map_join(patched, "\n", fn {s, sql, _v} ->
                "  [#{s}] #{String.slice(sql, 0, 120)}"
              end)
+  end
+
+  # What one request for `path` offers in other languages: the header switcher's links, and the
+  # languages of the head's `hreflang` links, `x-default` aside. Asserted along the way: the request
+  # read no row of `pages`.
+  defp offered(site, path) do
+    {conn, ran} = queries(fn -> get(on_site(site), path) end)
+    doc = conn |> html_response(200) |> LazyHTML.from_document()
+
+    assert Enum.filter(ran, &(elem(&1, 0) == "pages")) == [],
+           "#{path} read pages: #{inspect(ran)}"
+
+    menu =
+      doc
+      |> LazyHTML.query("#site-language-menu a[hreflang]")
+      |> Enum.map(&{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))})
+
+    head =
+      doc
+      |> LazyHTML.query(~s|head link[rel="alternate"]:not([hreflang="x-default"])|)
+      |> Enum.map(&hd(LazyHTML.attribute(&1, "hreflang")))
+
+    {menu, head}
   end
 
   # THE QUERIES THAT READ THE SAME TABLE WITH THE SAME FILTER AND THE SAME VALUES as another of the
@@ -262,6 +327,28 @@ defmodule MishkaCmsWeb.PageQueriesTest do
       content: "<h2>Part</h2><p>#{title}.</p>",
       content_review_status: :approved,
       technical_review_status: :approved
+    )
+  end
+
+  # A page of the site's own in English and in Persian, two rows of one language group under the
+  # site's layout — the header's switcher is the layout's.
+  defp translated!(site, layout_id) do
+    about = edition!(site, layout_id, name: "about", path: "/about")
+
+    fa =
+      edition!(site, layout_id,
+        name: "about-fa",
+        path: "/fa/about",
+        language: "fa",
+        language_group_id: about.id
+      )
+
+    {about, fa}
+  end
+
+  defp edition!(site, layout_id, attrs) do
+    create_page!(
+      [site_id: site.id, layout_id: layout_id, template: "<p>{@page.language}</p>"] ++ attrs
     )
   end
 

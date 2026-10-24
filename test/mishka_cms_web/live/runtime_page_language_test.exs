@@ -338,22 +338,23 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
     end
   end
 
-  # EVERY PAGE IS IN A GROUP, if only its own, so the editions read runs for every page there is. It
-  # runs in `handle_params/3` alone — the HTTP render and the connect each mount and then run that —
-  # and a patch to the same page reuses what the page already read.
+  # EVERY PAGE IS IN A GROUP, if only its own, so a query for its editions would run for every page
+  # there is. `MishkaCmsCore.Runtime.PageEditions.editions/2` reads them from `SiteState` instead,
+  # which every write of a page keeps: the HTTP render, the connect and a patch ask the database for
+  # none of them.
   describe "reading a page's editions" do
-    test "happens once per render of a page, and not for a patch to it", %{site: site, n: n} do
+    test "is no query, for the render of a page or a patch to it", %{site: site, n: n} do
       page = published!(site, path: "/counted-#{n}")
       reads = count_edition_reads()
 
       conn = get(on_site(), page.path)
-      assert reads.() == 1, "the HTTP render read the page's editions more than once"
+      assert reads.() == 0, "the HTTP render read the page's editions from the database"
 
       {:ok, view, _html} = live(conn)
-      assert reads.() == 1, "the connect read the page's editions more than once"
+      assert reads.() == 0, "the connect read the page's editions from the database"
 
       render_patch(view, page.path <> "?tab=2")
-      assert reads.() == 0, "a patch to the same page read its editions again"
+      assert reads.() == 0, "a patch to the same page read its editions from the database"
     end
   end
 
