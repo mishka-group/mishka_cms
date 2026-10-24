@@ -11,6 +11,15 @@ on:
 
 env:
   MIX_ENV: test
+  # TEMPORARY: OTP 29.0.5, not the 29.1.x of .tool-versions, in every job and every cache key
+  # below. From OTP 29.0.6 on, :httpc stops at 10240 bytes of response headers by default, and the
+  # redirect GitHub answers a release download with now carries about 10.8 KB of them, so precompiled
+  # NIFs and binaries downloaded through :httpc (elixir_make, cc_precompiler, rustler_precompiled,
+  # tailwind) fail with {:header_too_long, {:max, 10240}}. Move back to the latest OTP, with
+  # `version-file: .tool-versions` and .tool-versions in the cache keys again, once a fixed OTP
+  # release or fixed libraries are out.
+  OTP_VERSION: "29.0.5"
+  ELIXIR_VERSION: "1.20.4-otp-29"
 
 jobs:
   # Compiled once; the jobs below start from this build.
@@ -54,10 +63,10 @@ jobs:
           token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
           path: __extensions/mishka_document
 
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          version-file: .tool-versions
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
 
       - uses: actions/cache@v6
@@ -65,8 +74,8 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
-          restore-keys: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-
+          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-
 
       - run: mix deps.get
 
@@ -110,10 +119,10 @@ jobs:
           token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
           path: __extensions/mishka_document
 
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          version-file: .tool-versions
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
 
       - uses: actions/cache/restore@v6
@@ -121,7 +130,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
+          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # The formatter takes the DSL's paren-free calls (`table "pages"`, `reference :site, ...`)
@@ -187,10 +196,10 @@ jobs:
           token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
           path: __extensions/mishka_document
 
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          version-file: .tool-versions
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
 
       - uses: actions/cache/restore@v6
@@ -198,7 +207,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
+          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # The Oban tables: the migration `mix dev_reset` writes with `oban.install`, an igniter task
@@ -232,7 +241,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.4"
       - run: bun install --frozen-lockfile && bun run test
         working-directory: assets
 

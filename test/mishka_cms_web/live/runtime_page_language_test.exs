@@ -13,8 +13,9 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
     * `<html lang dir>` is the response's language — the captured one on a pattern page — and `rtl`
       for a language written right to left;
     * the head carries a `<link rel="alternate" hreflang>` at the absolute address of each language
-      the page answers in, and an `x-default` at the site's primary language's, while a template
-      reads the same list as `@page_languages`, with `@page.language` beside it;
+      the page answers in, in the order the site lists its languages, and an `x-default` at the
+      site's primary language's, while a template reads the same list as `@page_languages`, with
+      `@page.language` beside it (`MishkaCmsCore.Runtime.SiteLayout`);
     * a `lang` capture answers only the site's languages, in whichever segment of the pattern it
       sits, so `/xyz/about` is not a page written in `xyz`;
     * the query string cannot hand a template a language the path was refused.
@@ -148,7 +149,7 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
       published!(site, path: "/docs-#{n}/:lang", extra: @every_language)
 
       doc = LazyHTML.from_document(get_page("/docs-#{n}/fa"))
-      expected = for language <- ~w(ar en fa), do: {language, "/docs-#{n}/#{language}"}
+      expected = for language <- ~w(en fa ar), do: {language, "/docs-#{n}/#{language}"}
 
       assert alternates(doc) == absolute(expected)
       assert x_default(doc) == ["#{base()}/docs-#{n}/en"]
@@ -198,9 +199,9 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
 
       assert alternates(doc) ==
                absolute([
-                 {"ar", "/ar/guide-#{n}"},
                  {"en", "/guide-#{n}"},
-                 {"fa", "/fa/rahnama-#{n}"}
+                 {"fa", "/fa/rahnama-#{n}"},
+                 {"ar", "/ar/guide-#{n}"}
                ])
     end
   end
@@ -258,17 +259,17 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
 
         assert alternates(doc) ==
                  absolute([
-                   {"ar", "/ar/home-#{n}"},
                    {"en", "/home-#{n}"},
-                   {"fa", "/fa/home-#{n}"}
+                   {"fa", "/fa/home-#{n}"},
+                   {"ar", "/ar/home-#{n}"}
                  ])
 
         assert x_default(doc) == [base() <> "/home-#{n}"]
 
         assert editions(doc) == [
-                 {"ar", "/ar/home-#{n}"},
                  {"en", "/home-#{n}"},
-                 {"fa", "/fa/home-#{n}"}
+                 {"fa", "/fa/home-#{n}"},
+                 {"ar", "/ar/home-#{n}"}
                ]
       end
     end
@@ -280,9 +281,9 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
 
       assert alternates(doc) ==
                absolute([
-                 {"ar", "/ar/home-#{n}"},
                  {"en", "/en/home-#{n}"},
-                 {"fa", "/fa/home-#{n}"}
+                 {"fa", "/fa/home-#{n}"},
+                 {"ar", "/ar/home-#{n}"}
                ])
 
       assert x_default(doc) == [base() <> "/en/home-#{n}"]

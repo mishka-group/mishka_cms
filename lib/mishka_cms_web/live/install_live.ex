@@ -578,19 +578,16 @@ defmodule MishkaCmsWeb.InstallLive do
             hint={Settings.text(definition.description)}
           />
 
-          <label id="install-starter-content" class="inst-smp-row">
-            <input type="hidden" name="settings[starter_content]" value="false" />
-            <input
-              type="checkbox"
-              name="settings[starter_content]"
-              value="true"
-              checked={@settings_form[:starter_content].value != "false"}
-              class="inst-cbox"
-            />
+          <%!-- NOT A CHOICE: every page of the site, an extension's included, is drawn in the starter's
+                header and footer (`MishkaCmsCore.Runtime.SiteLayout`). Ticked and disabled, so it
+                says what the install does and submits nothing: `MishkaCmsCore.Install.Bootstrap`
+                writes it whatever arrives. --%>
+          <label id="install-starter-content" class="inst-smp-row is-fixed">
+            <input type="checkbox" checked disabled aria-disabled="true" class="inst-cbox" />
             <span class="nm">
               {gettext("Add a starter home page")}
               <span class="ex">
-                {gettext("with a header and footer you can edit")}
+                {gettext("always added, with the header and footer every page is drawn in")}
               </span>
             </span>
           </label>
@@ -1677,6 +1674,8 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-smp{border:1.5px solid var(--line);border-radius:14px;background:#fff;padding:8px 6px}
       .inst-smp-row{display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer;border-radius:10px}
       .inst-smp-row:hover{background:var(--bg-2)}
+      .inst-smp-row.is-fixed{cursor:default}
+      .inst-smp-row.is-fixed:hover{background:none}
       .inst-smp-row .nm{font-weight:600;font-size:14.5px}
       .inst-smp-row .ex{font-size:12.5px;color:var(--faint);margin-left:2px;font-weight:400}
       .inst-smp-note{border-top:1px solid var(--line-2);margin:6px 0 0;padding:14px 16px 8px;
@@ -2625,17 +2624,11 @@ defmodule MishkaCmsWeb.InstallLive do
         socket.assigns.config_axes
       )
 
-    # THE CHECKBOX IS NOT A SETTING. It rides the same form because that is the screen it belongs
-    # on, and `Bootstrap` takes it as a parameter of its own — `apply_settings/1` would drop an
-    # unregistered key silently and the step would never run.
-    {starter, settings} = Map.pop(settings, "starter_content", "true")
-
     {answers, settings} = Map.pop(settings, "extensions", %{})
 
     params =
       socket.assigns.config
       |> bootstrap_params(selection, settings)
-      |> Map.put(:starter_content, starter == "true")
       |> Map.put(:extensions, MapSet.to_list(socket.assigns.extensions_chosen))
       |> Map.put(:extension_answers, extension_answers(answers))
       |> Map.put(:languages, socket.assigns.languages)
@@ -2810,16 +2803,11 @@ defmodule MishkaCmsWeb.InstallLive do
       (is_nil(kit) or Map.get(entry, :kit) == kit)
   end
 
-  defp to_settings_step(%{assigns: %{settings_form: form}} = socket) do
+  defp to_settings_step(socket) do
     values =
       Map.new(install_settings(), fn definition ->
         {definition.key, install_default(definition, socket.assigns.config)}
       end)
-
-    # THE STARTER-PAGES BOX IS NOT A SETTING DEFINITION, so nothing above rebuilds it: a user who
-    # unticks it, steps back to the kit and comes forward again would find it ticked and install
-    # the pages they said no to.
-    values = Map.put(values, "starter_content", form.params["starter_content"] || "true")
 
     socket
     |> assign(step: :settings, settings_submitted?: false)

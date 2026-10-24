@@ -30,7 +30,7 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
 
   require Ash.Query
 
-  setup do
+  setup context do
     dir = Path.join(System.tmp_dir!(), "starter_home_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     Application.put_env(:mishka_cms_core, :media_static_dir, dir)
@@ -53,7 +53,7 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
     WebRunTimeMetaDataState.delete_by_site(site.name)
 
     # THE BRAND THE USER TYPED, as the installer hands it in.
-    report = StarterContent.seed!(site, brand: "Acme Docs")
+    report = StarterContent.seed!(site, brand: "Acme Docs", nav: Map.get(context, :nav, []))
 
     layout = Ash.get!(Layout, report.layout_id, action: :read_any, authorize?: false)
 
@@ -232,6 +232,55 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
     end
   end
 
+  # A GROUP OF LINKS IS WRITTEN INTO THE LAYOUT, so it is the real compiler that has to take it: the
+  # dropdown's `Phoenix.LiveView.JS` commands, its ids and the phone panel's list. The dev sites'
+  # header is this, with their own links.
+  describe "the header's group of links" do
+    @group [
+      %{label: "Dev", children: [{"About", "/about"}, {"Pricing", "/pricing"}]}
+    ]
+
+    @tag nav: @group
+    test "is a dropdown on the bar and a labelled list in the phone panel, drawn by the layout",
+         %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "failed to render"
+      [header, _rest] = String.split(html, "</header>", parts: 2)
+
+      assert header =~ ~s(id="site-nav-dev-button")
+      assert header =~ ~s(aria-haspopup="menu")
+      assert header =~ ~r/<span>\s*Dev\s*<\/span>/
+      assert header =~ ~r/id="site-nav-dev-menu"[^>]*class="[^"]*\bhidden\b/
+
+      # THE LINKS ARE THE SITE'S OWN ADDRESSES, in the dropdown and in the phone panel's list.
+      assert [_, menu] = Regex.run(~r/id="site-nav-dev-menu"(.*?)<\/div>/s, header)
+
+      assert Regex.scan(~r/href="([^"]*)"/, menu, capture: :all_but_first) == [
+               ["/about"],
+               ["/pricing"]
+             ]
+
+      assert [_, panel] = Regex.run(~r/role="group"(.*?)<\/div>/s, header)
+      assert panel =~ ~s(href="/about")
+      assert panel =~ ~s(href="/pricing")
+      assert header =~ ~s(aria-labelledby="site-nav-dev-label")
+
+      # THE COMMANDS THE CLIENT READS, as the language switcher's are: a JSON list in the attribute.
+      assert header =~
+               ~r/phx-click-away="\[\[&quot;hide&quot;,\{&quot;to&quot;:&quot;#site-nav-dev-menu&quot;\}\]/
+
+      assert header =~ "site-nav-dev-button"
+    end
+
+    test "is not there when the site passes none, which is every production install", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "site-nav-"
+      refute html =~ ~s(role="group")
+    end
+  end
+
   describe "the header's language switcher" do
     test "is not there while the site publishes in one language", %{} do
       {:ok, _view, html} = live(on_site(), "/")
@@ -262,6 +311,52 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
       assert persian =~ ~s(hreflang="fa")
     end
 
+    # A LANGUAGE CHANGE IS A LIVE NAVIGATION: the switcher's links are `navigate` links, so the click
+    # is answered with a live redirect inside the open socket (a page load would be a plain
+    # `redirect`), into the same `live_session`. The root layout drew `<html lang dir>` once, for the
+    # page the HTTP response was for, so the layout of each page the socket lands on names its own
+    # language and direction in an element whose `phx-mounted` sets them on the document.
+    test "changes language in the open socket, and each page names its language and direction",
+         %{site: site} do
+      {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
+
+      {:ok, view, html} = live(on_site(), "/")
+
+      assert html_tag(html) =~ ~s(lang="en")
+      assert html_tag(html) =~ ~s(dir="ltr")
+      assert lang_dir(view) == {"en", "ltr"}
+
+      result = view |> element(~s(#site-language-menu a[hreflang="fa"])) |> render_click()
+      assert {:error, {:live_redirect, %{to: "/fa", kind: :push}}} = result
+
+      {:ok, persian, _html} = follow_redirect(result, on_site())
+
+      assert lang_dir(persian) == {"fa", "rtl"}
+      assert has_element?(persian, "#site-lang-fa")
+      refute has_element?(persian, "#site-lang-en")
+
+      # AND BACK, the same way, to the page that says English and left to right.
+      result = persian |> element(~s(#site-language-menu a[hreflang="en"])) |> render_click()
+      assert {:error, {:live_redirect, %{to: "/"}}} = result
+
+      {:ok, english, _html} = follow_redirect(result, on_site())
+
+      assert lang_dir(english) == {"en", "ltr"}
+      assert has_element?(english, "#site-lang-en")
+    end
+
+    # THE FIRST LOAD STILL SAYS IT IN THE DOCUMENT, which is what a crawler and a browser without a
+    # socket read; the element only repeats it.
+    test "a full load of a Persian page is `<html lang=\"fa\" dir=\"rtl\">`", %{site: site} do
+      {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
+
+      {:ok, view, html} = live(on_site(), "/fa")
+
+      assert html_tag(html) =~ ~s(lang="fa")
+      assert html_tag(html) =~ ~s(dir="rtl")
+      assert lang_dir(view) == {"fa", "rtl"}
+    end
+
     test "is in the navbar and not the footer", %{site: site} do
       {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
 
@@ -274,6 +369,208 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
       refute footer =~ "hreflang"
       refute footer =~ "site-language"
     end
+  end
+
+  # ONE COLUMN FOR EVERY PAGE, the layout's: the home page draws its sections into it, and the
+  # dotted welcome runs from one edge of the window to the other through the theme's utility.
+  describe "the width" do
+    test "the page is drawn in the layout's column, with no column of its own", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      assert [main] = Regex.run(~r/<main id="site-main"[^>]*>/, html)
+      assert main =~ ~s(class="mx-auto w-full max-w-[1160px] flex-1 px-8 pb-24")
+
+      [_before, page] = String.split(html, main, parts: 2)
+      [page, _after] = String.split(page, "</main>", parts: 2)
+
+      refute page =~ "max-w-[1160px]"
+      assert page =~ ~r/<section class="site-bleed /
+    end
+  end
+
+  # WHAT A PAGE HANDS THE LAYOUT, through `runtime:page:frame`: a plugin here stands in for an
+  # extension, answering for the home page with what `:persistent_term` holds for the test.
+  defmodule FrameProbe do
+    @moduledoc false
+    use MishkaInstaller.Event.Hook, event: "runtime:page:frame"
+
+    @impl true
+    def call(%{section: "starter", page: %{path: "/:lang"}} = frame) do
+      case :persistent_term.get({__MODULE__, :answer}, nil) do
+        nil -> {:reply, frame}
+        answer -> {:reply, :halt, Map.merge(frame, answer.(frame))}
+      end
+    end
+
+    def call(frame), do: {:reply, frame}
+  end
+
+  # An extension's interactive piece, as the docs' version picker is.
+  defmodule Picker do
+    @moduledoc false
+    use Phoenix.Component
+
+    attr :id, :string, required: true
+    attr :current, :string, default: nil
+
+    def version_select(assigns) do
+      ~H"""
+      <button id={@id} type="button" data-current={@current}>v{@current}</button>
+      """
+    end
+  end
+
+  defp answer!(answer) do
+    :persistent_term.put({FrameProbe, :answer}, answer)
+
+    {:ok, _} =
+      MishkaInstaller.Event.Event.write(%{
+        name: FrameProbe,
+        event: "runtime:page:frame",
+        extension: :mishka_installer,
+        status: :started
+      })
+
+    :ok = MishkaInstaller.Event.EventHandler.do_compile("runtime:page:frame", :start, false)
+
+    on_exit(fn ->
+      :persistent_term.erase({FrameProbe, :answer})
+      MishkaInstaller.Event.Event.unregister(:name, FrameProbe, false)
+      MishkaInstaller.Event.EventHandler.do_compile("runtime:page:frame", :start, false)
+    end)
+  end
+
+  describe "the section bar" do
+    test "is not drawn for a page that hands the layout none", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "site-section-bar"
+    end
+
+    test "is drawn under the header with the links and the component a page hands it", %{} do
+      answer!(fn %{language: language} ->
+        %{
+          section_bar: %{
+            title: "Blog",
+            title_path: "/blog",
+            links: [
+              %{label: "Posts", path: "/blog", current: true},
+              %{label: "Tags", path: "/blog/tags"}
+            ],
+            component: {Picker, :version_select},
+            assigns: %{id: "probe-version", current: language}
+          }
+        }
+      end)
+
+      {:ok, view, html} = live(on_site(), "/")
+
+      [_header, rest] = String.split(html, "</header>", parts: 2)
+      [bar, _page] = String.split(rest, ~s(<main id="site-main"), parts: 2)
+
+      assert bar =~ ~s(id="site-section-bar")
+      assert bar =~ ~r/<a [^>]*href="\/blog\/tags"[^>]*>\s*Tags\s*<\/a>/
+      assert bar =~ ~r/<a [^>]*aria-current="page"[^>]*>\s*Posts/
+      assert has_element?(view, ~s(#site-section-bar #probe-version[data-current="en"]))
+    end
+  end
+
+  describe "the languages a page hands the layout" do
+    setup %{site: site} do
+      {:ok, _} = Settings.put("site.languages", ["en", "ar", "fa"], site_id: site.id)
+      :ok
+    end
+
+    test "are the page's own editions when no extension answers for it", %{} do
+      {:ok, _view, html} = live(on_site(), "/")
+
+      assert hreflangs(html) == ["en", "ar", "fa"]
+    end
+
+    # AN ENGLISH RECORD WITH AN ARABIC TRANSLATION AND NO PERSIAN ONE, each at its own address.
+    test "are the record's own when an extension answers for it, a missing one left out", %{} do
+      answer!(fn _frame ->
+        %{
+          translations: [
+            %{language: "en", path: "/", title: "Home"},
+            %{language: "ar", path: "/ar", title: "الرئيسية"}
+          ]
+        }
+      end)
+
+      {:ok, _view, html} = live(on_site(), "/")
+
+      [header, _rest] = String.split(html, "</header>", parts: 2)
+
+      assert hreflangs(header) == ["en", "ar"]
+      assert [ar] = Regex.run(~r/<a [^>]*hreflang="ar"[^>]*>/, header)
+      assert ar =~ ~s(href="/ar")
+      assert ar =~ ~s(title="الرئيسية")
+      refute header =~ ~s(hreflang="fa")
+
+      # THE HEAD SAYS THE SAME: an `hreflang` link per language the record is in.
+      [head, _body] = String.split(html, "</head>", parts: 2)
+      assert head =~ ~r/<link[^>]*hreflang="ar"/
+      refute head =~ ~r/<link[^>]*hreflang="fa"/
+    end
+
+    # A PATH ON THE SITE IS LIVE, AN ADDRESS ON THE WEB IS ANOTHER SITE: only a plain link gets a
+    # visitor there.
+    test "link a path on the site live, and an address on the web with a plain href", %{} do
+      answer!(fn _frame ->
+        %{
+          translations: [
+            %{language: "en", path: "/"},
+            %{language: "fa", path: "/fa"},
+            %{language: "ar", path: "https://ar.example.test/"}
+          ]
+        }
+      end)
+
+      {:ok, _view, html} = live(on_site(), "/")
+
+      [header, _rest] = String.split(html, "</header>", parts: 2)
+
+      assert [fa] = Regex.run(~r/<a [^>]*hreflang="fa"[^>]*>/, header)
+      assert fa =~ ~s(href="/fa")
+      assert fa =~ ~s(data-phx-link="redirect")
+
+      assert [ar] = Regex.run(~r/<a [^>]*hreflang="ar"[^>]*>/, header)
+      assert ar =~ ~s(href="https://ar.example.test/")
+      refute ar =~ "data-phx-link"
+    end
+
+    test "hide the switcher when the record is in one language", %{} do
+      answer!(fn _frame -> %{translations: [%{language: "en", path: "/"}]} end)
+
+      {:ok, _view, html} = live(on_site(), "/")
+
+      refute html =~ "site-language-menu"
+    end
+  end
+
+  # THE OPENING TAG OF THE DOCUMENT, which only a response's root layout draws.
+  defp html_tag(html), do: hd(Regex.run(~r/<html[^>]*>/, html))
+
+  # WHAT THE PAGE'S LAYOUT SETS ON THE DOCUMENT when it mounts: the `lang` and the `dir` its
+  # `phx-mounted` element writes, read from the commands the client is handed.
+  defp lang_dir(view) do
+    [marker] = Regex.run(~r/<span [^>]*id="site-lang-[^"]*"[^>]*>/, render(view))
+    [_, json] = Regex.run(~r/phx-mounted="([^"]*)"/, marker)
+
+    set =
+      json
+      |> String.replace("&quot;", ~s("))
+      |> Jason.decode!()
+      |> Map.new(fn ["set_attr", %{"attr" => [name, value], "to" => "html"}] -> {name, value} end)
+
+    {set["lang"], set["dir"]}
+  end
+
+  defp hreflangs(html) do
+    ~r/<a [^>]*role="menuitem"[^>]*hreflang="([^"]+)"/
+    |> Regex.scan(html, capture: :all_but_first)
+    |> List.flatten()
   end
 
   describe "the version" do

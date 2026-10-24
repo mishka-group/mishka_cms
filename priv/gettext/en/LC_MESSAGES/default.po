@@ -99,7 +99,7 @@ msgstr ""
 msgid "Add a package by URL"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:591
+#: lib/mishka_cms_web/live/install_live.ex:588
 #, elixir-autogen, elixir-format
 msgid "Add a starter home page"
 msgstr ""
@@ -686,6 +686,11 @@ msgstr ""
 msgid "Your site %{host} is ready — sign in as the master admin to continue."
 msgstr ""
 
+#: lib/mishka_cms_web/live/install_live.ex:590
+#, elixir-autogen, elixir-format
+msgid "always added, with the header and footer every page is drawn in"
+msgstr ""
+
 #: lib/mishka_cms_web/live/install_live.ex:1085
 #, elixir-autogen, elixir-format
 msgid "always included"
@@ -720,11 +725,6 @@ msgstr ""
 #: lib/mishka_cms_web/live/install_live.ex:2245
 #, elixir-autogen, elixir-format
 msgid "unversioned"
-msgstr ""
-
-#: lib/mishka_cms_web/live/install_live.ex:593
-#, elixir-autogen, elixir-format
-msgid "with a header and footer you can edit"
 msgstr ""
 
 #: lib/mishka_cms_web/live/install_live.ex:1065

@@ -33,9 +33,20 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
     host: "Example.com"
   }
 
+  # EVERY RUN WRITES THE STARTER, and its logo is a file of the master site's media library: this
+  # test's own folder, not `priv/static`.
   setup do
     :persistent_term.erase(:mishka_installed)
-    on_exit(fn -> :persistent_term.erase(:mishka_installed) end)
+    dir = Path.join(System.tmp_dir!(), "bootstrap_media_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    Application.put_env(:mishka_cms_core, :media_static_dir, dir)
+
+    on_exit(fn ->
+      :persistent_term.erase(:mishka_installed)
+      Application.delete_env(:mishka_cms_core, :media_static_dir)
+      File.rm_rf(dir)
+    end)
+
     :ok
   end
 
@@ -184,20 +195,6 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
   # THE STEP LIST IS THE INSTALLER'S PROGRESS LIST, drawn from `steps/0`, so a phase that is not in
   # it is a phase nobody watching the install is told about.
   describe "the starter content step" do
-    # THE LOGO IS A FILE, put in the master site's media folder: this test's own, not `priv/static`.
-    setup do
-      dir = Path.join(System.tmp_dir!(), "bootstrap_media_#{System.unique_integer([:positive])}")
-      File.mkdir_p!(dir)
-      Application.put_env(:mishka_cms_core, :media_static_dir, dir)
-
-      on_exit(fn ->
-        Application.delete_env(:mishka_cms_core, :media_static_dir)
-        File.rm_rf(dir)
-      end)
-
-      :ok
-    end
-
     test "is one of the ordered phases, before the compile" do
       ids = Bootstrap.steps() |> Enum.map(&elem(&1, 0))
 
@@ -216,7 +213,7 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
 
       assert {:ok, %{site: site}} =
                Bootstrap.run(
-                 Map.merge(@params, %{starter_content: true, component_selection: %{}}),
+                 Map.put(@params, :component_selection, %{}),
                  &send(test_pid, &1)
                )
 
@@ -240,9 +237,7 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
     # header and the home page name the row's address.
     test "puts the logo in the master site's media library, and the header draws it" do
       assert {:ok, %{site: site}} =
-               Bootstrap.run(
-                 Map.merge(@params, %{starter_content: true, component_selection: %{}})
-               )
+               Bootstrap.run(Map.put(@params, :component_selection, %{}))
 
       assert site.master
       assert [logo] = rows(Media, site)
@@ -256,19 +251,17 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       assert home.template =~ ~s(src="#{logo.relative_path}")
     end
 
-    test "writes nothing when the installer's checkbox is off" do
-      assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :starter_content, false))
+    test "hangs the home page on the layout every page of the site is drawn in" do
+      assert {:ok, %{site: site}} = Bootstrap.run(@params)
 
-      assert starter_pages(site) == []
-      assert names(Component, site) == []
-      assert names(Layout, site) == ["auth"]
-      assert rows(Media, site) == []
+      [home] = starter_pages(site)
+      assert home.layout_id == MishkaCmsCore.Runtime.SiteLayout.layout_id(site.id)
     end
 
     # RUN AGAIN, IT ADDS NOTHING. The dev seeds run this on every reseed, and an admin may press an
     # install step twice.
     test "a second run adds no second copy of anything" do
-      assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :starter_content, true))
+      assert {:ok, %{site: site}} = Bootstrap.run(@params)
 
       before = {starter_pages(site) |> length(), names(Component, site), names(Layout, site)}
       logo = rows(Media, site)
@@ -400,13 +393,12 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
                Enum.find_index(ids, &(&1 == :compile))
     end
 
-    test "writes the sign-in layout and pages when the starter checkbox is off, and says so" do
+    test "writes the sign-in layout and pages, and says so" do
       test_pid = self()
 
-      assert {:ok, %{site: site}} =
-               Bootstrap.run(Map.put(@params, :starter_content, false), &send(test_pid, &1))
+      assert {:ok, %{site: site}} = Bootstrap.run(@params, &send(test_pid, &1))
 
-      assert names(Layout, site) == ["auth"]
+      assert names(Layout, site) == ["auth", "site-main"]
       assert length(auth_pages(site)) == 8
       assert_received {:auth_pages, :log, "8 sign-in pages, 0 translated words"}
       assert_received {:auth_pages, :done, nil}
@@ -417,7 +409,7 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       Application.put_env(:mishka_cms_core, :env_test?, false)
       on_exit(fn -> Application.put_env(:mishka_cms_core, :env_test?, true) end)
 
-      assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :starter_content, false))
+      assert {:ok, %{site: site}} = Bootstrap.run(@params)
 
       refute_enqueued(
         worker: SiteRuntimeWorker,

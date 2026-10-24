@@ -155,6 +155,16 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
       |> LazyHTML.query(selector)
       |> Enum.flat_map(&LazyHTML.attribute(&1, name))
 
+  # THE LANGUAGES A PAGE OFFERS, as the header's switcher lists them, the edition being read among
+  # them: the layout's is the only switcher a page has (`MishkaCmsCore.Runtime.SiteLayout`), so a
+  # test reading it draws the page on the site's layout (`seed_site_layout!/1`).
+  defp offered(html) do
+    html
+    |> doc()
+    |> LazyHTML.query("#site-language-menu a[hreflang]")
+    |> Enum.map(&{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))})
+  end
+
   # Every `href` and `src` on the page whose path still holds a `:capture` segment. Split on `/`
   # first, so a scheme keeps its colon — `https://x` and `mailto:a@b` hold no capture — and only a
   # segment that BEGINS with one is a name the runtime was supposed to fill in.
@@ -409,25 +419,21 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
              "a document on the index did not link to its own page under this language"
     end
 
-    # THE NAV IS BUILT FROM `@page_languages`, so it swaps the `lang` capture inside the page's own
-    # pattern rather than the first segment of whatever URL this happens to be — and on THIS page
-    # every other capture is absent, which is why the index is the one that carries it.
+    # THE SWITCHER IS BUILT FROM `@page_languages`, so it swaps the `lang` capture inside the page's
+    # own pattern rather than the first segment of whatever URL this happens to be — and on THIS page
+    # every other capture is absent, which is why the index keeps the layout's default. It is the
+    # header's, the layout's only one.
     test "offers itself in the site's other language", %{
       url_mode: url_mode,
       site: site,
       conn: conn
     } do
+      seed_site_layout!(site)
       provision!(site)
 
       {:ok, _view, html} = live(conn, english(url_mode, "/docs"))
 
-      assert [{"en", english(url_mode, "/docs")}, {"fa", "/fa/docs"}] ==
-               html
-               |> doc()
-               |> LazyHTML.query("a[hreflang]")
-               |> Enum.map(
-                 &{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))}
-               )
+      assert [{"en", english(url_mode, "/docs")}, {"fa", "/fa/docs"}] == offered(html)
     end
 
     # A PAGER ON A PATTERN PAGE MUST NOT WRITE THE PATTERN. `@page.path` is `/:lang/docs`, so a page
@@ -547,8 +553,9 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
 
     # AND THE SWITCH THAT TAKES A READER THERE POINTS AT THE RIGHT ONE. `@page_languages` would swap
     # the language and keep `mishka-cms` — the English edition's slug — under Persian, which is a
-    # URL its own page answers as not published. This is why the document pages carry `doc-switcher`
-    # instead: it maps the document AND the page being read through `language_group_id`.
+    # URL its own page answers as not published. This is why the docs answer for their pages'
+    # languages (`MishkaDocument.Plugins.PageFrame`), and the header's switcher lists what it maps:
+    # the document AND the page being read, through `language_group_id`.
     test "offer the translation at the URL that answers it", %{
       url_mode: url_mode,
       site: site,
@@ -576,20 +583,20 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
         language_group_id: installation.language_group_id
       )
 
+      seed_site_layout!(site)
       provision!(site)
 
-      {:ok, view, _html} = live(conn, english(url_mode, "/docs/mishka-cms/installation"))
+      english_page = english(url_mode, "/docs/mishka-cms/installation")
+      {:ok, view, _html} = live(conn, english_page)
 
-      offered =
-        attributes(render_async(view, @async), ~s([data-role="doc-switcher-language"]), "href")
-
-      assert "/fa/docs/mishka-cms-fa/nasb" in offered
+      assert [{"en", english_page}, {"fa", "/fa/docs/mishka-cms-fa/nasb"}] ==
+               offered(render_async(view, @async))
 
       {:ok, translated, _html} = live(conn, "/fa/docs/mishka-cms-fa/nasb")
+      html = render_async(translated, @async)
 
-      assert texts(render_async(translated, @async), ~s([data-role="doc-section-title"])) == [
-               "نصب"
-             ]
+      assert texts(html, ~s([data-role="doc-section-title"])) == ["نصب"]
+      assert [{"en", english_page}, {"fa", "/fa/docs/mishka-cms-fa/nasb"}] == offered(html)
     end
   end
 

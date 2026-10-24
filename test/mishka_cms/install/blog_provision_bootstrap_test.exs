@@ -45,16 +45,30 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   # REGISTERED BY HAND: the applications start their plugins before this suite's Mnesia registry is
   # up, so nothing an extension ships is registered by the time a test runs. `register/0` is the
   # plugin's own and is an upsert, so it is safe however often it runs.
+  #
+  # EVERY INSTALL WRITES THE STARTER, whose logo is a file of the master site's media library: this
+  # test's own folder, not `priv/static`.
   setup do
     :persistent_term.erase(:mishka_installed)
+    dir = Path.join(System.tmp_dir!(), "provision_media_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    Application.put_env(:mishka_cms_core, :media_static_dir, dir)
 
     {:ok, _registered} = Installer.register()
     :ok = EventHandler.do_compile(@event, :start, false)
 
-    on_exit(fn -> :persistent_term.erase(:mishka_installed) end)
+    on_exit(fn ->
+      :persistent_term.erase(:mishka_installed)
+      Application.delete_env(:mishka_cms_core, :media_static_dir)
+      File.rm_rf(dir)
+    end)
 
     :ok
   end
+
+  # THE HEADER AND THE FOOTER EVERY SITE IS DRAWN IN, which the installer writes whatever else it is
+  # asked: `MishkaCmsCore.Install.StarterContent`.
+  @starter ["site-footer", "site-header"]
 
   defp stored_names(provision) do
     names = Enum.map(provision.manifest().permissions, &elem(&1, 0))
@@ -73,6 +87,7 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
     |> Ash.Query.select([:name])
     |> Ash.read!(page: [limit: 100])
     |> then(&Enum.map(&1.results, fn component -> component.name end))
+    |> Enum.sort()
   end
 
   test "the first site gets the blog when the operator ticked it" do
@@ -81,18 +96,19 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
     installed = components(site)
 
     assert "blog-post-list" in installed
-    assert Enum.sort(installed) == Enum.sort(Provision.component_names())
+    assert installed -- @starter == Enum.sort(Provision.component_names())
 
     assert stored_names(Provision) ==
              Provision.manifest().permissions |> Enum.map(&elem(&1, 0)) |> Enum.sort()
   end
 
-  # TICKING NOTHING IS AN ANSWER. An operator who wants a bare CMS gets one, and the extension's own
-  # menu is where they change their mind — see `MishkaCmsCore.Install.Extensions`.
+  # TICKING NOTHING IS AN ANSWER. An operator who wants a bare CMS gets one, the starter's frame and
+  # nothing of the extension, and the extension's own menu is where they change their mind — see
+  # `MishkaCmsCore.Install.Extensions`.
   test "and gets none of it when they did not" do
     assert {:ok, %{site: site}} = Bootstrap.run(@params)
 
-    assert components(site) == []
+    assert components(site) == @starter
     assert stored_names(Provision) == []
   end
 
@@ -101,7 +117,7 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   test "an unknown key does not stop the install" do
     assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :extensions, ["mishka_nothing"]))
 
-    assert components(site) == []
+    assert components(site) == @starter
     assert MishkaCmsCore.Install.installed?()
   end
 end
