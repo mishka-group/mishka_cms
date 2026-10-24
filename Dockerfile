@@ -21,7 +21,7 @@
 #
 #   - https://hub.docker.com/r/hexpm/elixir/tags?name=1.20.4-erlang-29.1.1  build image
 #   - https://hub.docker.com/_/debian/tags?name=trixie-20260918-slim        release image
-#   - https://hub.docker.com/r/oven/bun/tags?name=1.4.2                     bun binary
+#   - https://hub.docker.com/r/oven/bun/tags?name=1.4.4                     bun binary
 #
 # The newest Elixir and Erlang/OTP releases, on the newest snapshot of Debian's current stable
 # (trixie) hexpm builds them for — the same pair as .tool-versions, which developers and CI run;
@@ -30,7 +30,7 @@
 ARG ELIXIR_VERSION=1.20.4
 ARG OTP_VERSION=29.1.2
 ARG DEBIAN_VERSION=trixie-20261005-slim
-ARG BUN_VERSION=1.4.3
+ARG BUN_VERSION=1.4.4
 
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
