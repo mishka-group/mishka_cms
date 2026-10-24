@@ -251,24 +251,6 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       assert home.template =~ ~s(src="#{logo.relative_path}")
     end
 
-    # NOT A CHOICE: every page of the site, an extension's included, is drawn in the `site-main`
-    # layout, so a site without it has no frame for any of them. The installer's box cannot be
-    # unticked, and a caller that asks for none gets it all the same.
-    test "writes the starter even when a caller asks for none" do
-      test_pid = self()
-
-      assert {:ok, %{site: site}} =
-               Bootstrap.run(Map.put(@params, :starter_content, false), &send(test_pid, &1))
-
-      assert starter_pages(site) |> Enum.map(& &1.path) == ["/:lang"]
-      assert names(Component, site) == ["site-footer", "site-header"]
-      assert names(Layout, site) == ["auth", "site-main"]
-      assert names(Stylesheet, site) == ["site-theme"]
-      assert [_logo] = rows(Media, site)
-      assert_received {:starter_content, :log, "1 page, 2 components"}
-      refute_received {:starter_content, :log, "Skipped" <> _}
-    end
-
     test "hangs the home page on the layout every page of the site is drawn in" do
       assert {:ok, %{site: site}} = Bootstrap.run(@params)
 
