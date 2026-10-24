@@ -19,14 +19,18 @@
 # Builder and runner images come from Docker Hub. Debian rather than Alpine, to avoid the DNS
 # resolution problems musl has in production.
 #
-#   - https://hub.docker.com/r/hexpm/elixir/tags?name=1.20.4-erlang-29.1.1  build image
-#   - https://hub.docker.com/_/debian/tags?name=trixie-20260918-slim        release image
+#   - https://hub.docker.com/r/hexpm/elixir/tags?name=1.20.4-erlang-29.1.2  build image
+#   - https://hub.docker.com/_/debian/tags?name=trixie-20261005-slim        release image
 #   - https://hub.docker.com/r/oven/bun/tags?name=1.4.4                     bun binary
 #
 # The newest Elixir and Erlang/OTP releases, on the newest snapshot of Debian's current stable
 # (trixie) hexpm builds them for — the same pair as .tool-versions, which developers and CI run;
 # change both together. DEBIAN_VERSION MUST be the same snapshot for both stages: the NIFs compiled
 # in the builder (bcrypt_elixir, picosat_elixir, lazy_html) link against its glibc and libssl.
+#
+# OTP stays on the newest patch release although its :httpc cannot download from GitHub (the
+# TEMPORARY step below works around that): the release ships the builder's ERTS, and 29.0.6 to 29.1.2
+# fix security issues in erts, ssl, public_key, asn1 and stdlib that a running server is exposed to.
 ARG ELIXIR_VERSION=1.20.4
 ARG OTP_VERSION=29.1.2
 ARG DEBIAN_VERSION=trixie-20261005-slim
@@ -40,9 +44,9 @@ FROM ${BUN_IMAGE} AS bun
 
 FROM ${BUILDER_IMAGE} AS builder
 
-# A C toolchain for the NIFs, git for the git dependencies.
+# A C toolchain for the NIFs, git for the git dependencies, curl for the TEMPORARY downloads below.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential git ca-certificates \
+    && apt-get install -y --no-install-recommends build-essential git ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 # bun, because `mix assets.setup` runs `bun install` in assets/ (mix.exs). Copied from the official
@@ -67,11 +71,115 @@ RUN --mount=type=secret,id=GITHUB_TOKEN,required=false \
         GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$(cat /run/secrets/GITHUB_TOKEN)" | base64 -w0)"; \
     fi \
     && mix deps.get --only $MIX_ENV
+
+# TEMPORARY, UNTIL :httpc CAN DOWNLOAD FROM GITHUB AGAIN. OTP 29.0.6 and later (29.1.2 too) make
+# Erlang's :httpc stop at 10240 bytes of response headers, and the redirect GitHub answers a release
+# download with now carries about 10.8 KB of them (9.2 KB of it one content-security-policy header).
+# A library that downloads through :httpc without raising `max_header_size` then fails with
+# {:header_too_long, {:max, 10240}}: here the precompiled NIFs of vix (elixir_make), ex_brotli and
+# igniter_js (rustler_precompiled), and the Tailwind binary below (tailwind before 0.5.2). This
+# script fetches the NIFs with curl into the folder each library looks in first; the library then
+# finds the file, checks it against the checksum file of its package and does not download.
+#
+# BEFORE REVERTING, build without this step: it works again once GitHub's headers are back under
+# 10240 bytes, or elixir_make, rustler_precompiled and tailwind pass `max_header_size` to :httpc.
+# Then remove this step, the two ENV lines, the Tailwind step below and `curl` from the builder.
+ENV ELIXIR_MAKE_CACHE_DIR=/opt/precompiled/elixir_make \
+    RUSTLER_PRECOMPILED_GLOBAL_CACHE_PATH=/opt/precompiled/rustler_precompiled
+
+COPY <<'EOF' /opt/prefetch_nifs.exs
+arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
+
+[nif_major, nif_minor] =
+  :erlang.system_info(:nif_version)
+  |> to_string()
+  |> String.split(".")
+  |> Enum.map(&String.to_integer/1)
+
+# {package, prefix of its GitHub release tag, platform as its file names spell it, cache folder}
+packages = [
+  {"vix", "v", "#{arch}-linux-gnu", System.fetch_env!("ELIXIR_MAKE_CACHE_DIR")},
+  {"ex_brotli", "", "#{arch}-unknown-linux-gnu",
+   System.fetch_env!("RUSTLER_PRECOMPILED_GLOBAL_CACHE_PATH")},
+  {"igniter_js", "v", "#{arch}-unknown-linux-gnu",
+   System.fetch_env!("RUSTLER_PRECOMPILED_GLOBAL_CACHE_PATH")}
+]
+
+for {package, tag_prefix, platform, cache_dir} <- packages do
+  [checksum_file] = Path.wildcard("deps/#{package}/checksum*.exs")
+  {checksums, _binding} = Code.eval_file(checksum_file)
+  {:ok, metadata} = :file.consult(~c"deps/#{package}/hex_metadata.config")
+  {"version", version} = List.keyfind(metadata, "version", 0)
+  {"links", links} = List.keyfind(metadata, "links", 0)
+  {"GitHub", repository} = List.keyfind(links, "GitHub", 0)
+
+  # The file the library will ask for: the newest NIF version for this platform that is not newer
+  # than this OTP's, which is how elixir_make and rustler_precompiled choose too.
+  {_minor, file} =
+    Enum.max(
+      for {file, _checksum} <- checksums,
+          String.contains?(file, platform),
+          [major, minor] <- [Regex.run(~r/-nif-(\d+)\.(\d+)-/, file, capture: :all_but_first)],
+          String.to_integer(major) == nif_major and String.to_integer(minor) <= nif_minor do
+        {String.to_integer(minor), file}
+      end
+    )
+
+  File.mkdir_p!(cache_dir)
+  path = Path.join(cache_dir, file)
+  url = "#{repository}/releases/download/#{tag_prefix}#{version}/#{file}"
+
+  {_output, 0} =
+    System.cmd(
+      "curl",
+      ["--fail", "--silent", "--show-error", "--location", "--retry", "3", "--output", path, url],
+      into: IO.stream()
+    )
+
+  "sha256:" <> expected = Map.fetch!(checksums, file)
+  actual = :crypto.hash(:sha256, File.read!(path)) |> Base.encode16(case: :lower)
+
+  if actual != expected do
+    raise "#{file}: sha256 #{actual}, but the package's checksum file says #{expected}"
+  end
+
+  IO.puts("fetched #{url}")
+end
+EOF
+
+RUN elixir /opt/prefetch_nifs.exs
+
 RUN mkdir config
 
 # Compile-time config before deps.compile, so a config change recompiles the dependencies.
 COPY config/config.exs config/${MIX_ENV}.exs config/
 RUN mix deps.compile
+
+# TEMPORARY, the same cause as the NIFs above: the Tailwind binary, downloaded with curl to the path
+# `mix tailwind.install --if-missing` (in assets.setup below) checks, so it finds the file and does
+# not download. The version, target and path are Tailwind's own, from config/config.exs. Mix warns
+# that :mishka_cms is not available: the app is not compiled yet, and this step does not need it.
+RUN <<'EOF'
+mix run --no-compile --no-start --no-deps-check -e '
+  url =
+    Tailwind.default_base_url()
+    |> String.replace("$version", Tailwind.configured_version())
+    |> String.replace("$target", Tailwind.configured_target())
+
+  path = Tailwind.bin_path()
+  File.mkdir_p!(Path.dirname(path))
+
+  {_output, 0} =
+    System.cmd(
+      "curl",
+      ["--fail", "--silent", "--show-error", "--location", "--retry", "3", "--output", path, url],
+      into: IO.stream()
+    )
+
+  File.chmod!(path, 0o755)
+  IO.puts("fetched #{url}")
+'
+EOF
 
 # The JS dependencies and the two asset binaries. package.json and bun.lock first, so a change under
 # assets/js does not reinstall node_modules. `assets.setup` is bun install --frozen-lockfile, then
