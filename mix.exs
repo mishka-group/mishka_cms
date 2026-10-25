@@ -178,18 +178,14 @@ defmodule MishkaCms.MixProject do
     ]
   end
 
-  # A package is the checkout under `__extensions/<name>` when there is one (`MISHKA_DEPS=github`
-  # skips them). Otherwise it comes from what the second argument names: `:github` is
-  # `mishka-group/<name>` on master, at the revision mix.lock pins; a version is its Hex release.
-  defp mishka_dep(name, source) do
-    local? =
-      File.dir?(Path.expand("__extensions/#{name}", __DIR__)) and
-        System.get_env("MISHKA_DEPS") != "github"
-
-    case {local?, source} do
-      {true, _source} -> {name, path: "__extensions/#{name}", override: true}
-      {false, :github} -> {name, github: "mishka-group/#{name}", branch: "master", override: true}
-      {false, version} when is_binary(version) -> {name, version}
+  # A package is the checkout under `__extensions/<name>` when there is one (`MISHKA_DEPS=hex` skips
+  # them). Otherwise it is its Hex release, at the version the second argument names.
+  defp mishka_dep(name, version) do
+    if File.dir?(Path.expand("__extensions/#{name}", __DIR__)) and
+         System.get_env("MISHKA_DEPS") != "hex" do
+      {name, path: "__extensions/#{name}", override: true}
+    else
+      {name, version}
     end
   end
 
