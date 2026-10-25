@@ -66,3 +66,6 @@ __extensions/.keep
 /assets/package-lock.json
 /assets/yarn.lock
 /assets/pnpm-lock.yaml
+
+# The secrets of examples/docker/demo-docker-compose.yml.
+/examples/docker/.env

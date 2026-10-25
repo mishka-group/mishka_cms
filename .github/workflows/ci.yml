@@ -1,11 +1,11 @@
 name: CI
 
-# Every pull request, and every push to master. A tag that starts with `v` runs it too, for the image
-# job below. The Actions tab can start it by hand as well.
+# Every pull request, and every push to master. The Actions tab can start it by hand as well. A tag
+# does not run it: the commit a tag points at already ran here on master, and release.yml takes the
+# tag from there.
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -138,23 +138,10 @@ jobs:
           key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
-      # The Oban tables: the migration `mix dev_reset` writes with `oban.install`, an igniter task
-      # that the test environment does not have.
-      - run: |
-          mkdir -p priv/repo/migrations
-          cat > priv/repo/migrations/20000101000000_add_oban.exs <<'MIGRATION'
-          defmodule MishkaCms.Repo.Migrations.AddOban do
-            use Ecto.Migration
-
-            def up, do: Oban.Migration.up()
-
-            def down, do: Oban.Migration.down(version: 1)
-          end
-          MIGRATION
-
-      # The migrations are generated, not in git: generate them before the test alias's `ash.setup`
-      # migrates the test database.
-      - run: mix ash.codegen ci
+      # The migrations are generated, not in git (they belong to the copy that loads the extensions):
+      # the Oban tables and the resources', before the test alias's `ash.setup` migrates the test
+      # database. The same script generates them for the image job below and for the release.
+      - run: .github/scripts/generate_migrations.sh ci
 
       # --warnings-as-errors also fails on warnings in the test files, which a plain run can print
       # while a test captures stderr, where nobody sees them — each in the partition that compiles it.
@@ -180,24 +167,54 @@ jobs:
       - run: bun install --frozen-lockfile && bun run test
         working-directory: assets
 
-  # The image builds from a clean checkout. It carries no migrations (they are generated, not in
-  # git), so this checks the build, not a deploy.
+  # The image, end to end, from a clean checkout: generate the migrations (they are not in git),
+  # build it, and boot it the way a deploy does. The smoke test migrates an empty PostgreSQL, waits for
+  # the HEALTHCHECK and asks the server what it answers before the CMS is installed, so a build that
+  # starts but cannot migrate or serve fails here and not in a deploy. The Dockerfile's own guard
+  # checks that the migrations generated here are the ones the resources describe.
+  #
+  # amd64 only: release.yml builds and tests both architectures, natively, and publishes the image.
   #
   # Not on a pull request: it is the slowest job, and a pull request that passes the tests builds the
-  # same image once it is merged. It runs on a push to master, on a tag and when started by hand.
+  # same image once it is merged. It runs on a push to master and when started by hand.
   docker:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' &&
-      (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')))
+      (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     needs: [test, assets]
     steps:
       - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      # Generated once, here, and sent to Docker with the rest of the checkout: the image takes the
+      # migrations and the snapshots from the build context, as it does for anybody's own copy.
+      - run: .github/scripts/generate_migrations.sh ci
+
       - uses: docker/setup-buildx-action@v4
+
+      # `load: true` puts the image in the local Docker, for the smoke test. Nothing is pushed.
       - uses: docker/build-push-action@v7
         with:
           context: .
-          push: false
+          load: true
+          tags: mishka-cms:ci
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - run: .github/scripts/smoke_test.sh mishka-cms:ci

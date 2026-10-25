@@ -1,0 +1,518 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release
+
+# A tag `v<version>` on master publishes a DEMO image of Mishka CMS to the GitHub Container
+# Registry, ghcr.io/mishka-group/mishka_cms-demo, and a GitHub release. It is a demo and not THE image
+# of the project: the database migrations follow the extensions a copy loads (`ash_domains` in
+# config/config.exs), so every copy generates and commits its own, and an image can only be built
+# for one set of extensions. This one is built with the default ones, with migrations generated for
+# this release only, so a new version of it needs a fresh database. The plain `mishka_cms` name stays
+# free for an image that can be upgraded. The description of the image says all this, and so does the
+# release.
+#
+# Three ways in:
+#   - A tag `v*` is pushed: publish it.
+#   - Started by hand (workflow_dispatch) with `tag`: publish that EXISTING tag. This is how a tag
+#     that was cut before this workflow existed gets its image (v0.0.1), and how a failed release is
+#     tried again. The tag's source is built; this workflow, its scripts included, is the one on the
+#     branch the run was started from (master), because an old tag does not have them.
+#   - A pull request that touches the release path: a DRY RUN. Everything is built and tested,
+#     nothing is pushed or released: no login to the registry, no push, no attestation, no release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The existing tag to publish, for example v0.0.1"
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/**
+      - Dockerfile
+      - .dockerignore
+      - rel/**
+
+# One release of a tag at a time, however it was started (a push and a dispatch of the same tag share
+# a group), and one that is running is never cancelled: half a release is a registry with tags that
+# point at nothing. A pull request's dry run is only worth its newest push.
+concurrency:
+  group: release-${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Nothing may write by default. The jobs that push, attest or release say so for themselves.
+permissions:
+  contents: read
+
+env:
+  # TEMPORARY: OTP 29.0.5, the pin of ci.yml. See the comment on OTP_VERSION there; both files move
+  # back to the latest OTP together. It is the OTP of the job that generates the migrations: the
+  # image is built with the OTP of the Dockerfile.
+  OTP_VERSION: "29.0.5"
+  ELIXIR_VERSION: "1.20.4-otp-29"
+  # setup-beam tries these in order, so one slow builds.hex.pm cannot fail the run.
+  HEXPM_MIRRORS: |
+    https://builds.hex.pm
+    https://cdn.jsdelivr.net/hex
+  IMAGE: ghcr.io/mishka-group/mishka_cms-demo
+
+jobs:
+  # Decides what is being released and whether it is published, before anything is built.
+  #
+  # The tag is read with git rather than checked out, because this job's checkout is the commit of the
+  # WORKFLOW (the scripts below come from it), and for a dispatch of an old tag that is not the tag.
+  # Every other job builds `sha`, the commit the tag points at.
+  version:
+    name: Resolve the tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      sha: ${{ steps.v.outputs.sha }}
+      ref: ${{ steps.v.outputs.ref }}
+      publish: ${{ steps.v.outputs.publish }}
+      latest: ${{ steps.v.outputs.latest }}
+      packages: ${{ steps.v.outputs.packages }}
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
+      annotations: ${{ steps.meta.outputs.annotations }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read the tag, check it, and read what it pins
+        id: v
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          case "$EVENT_NAME" in
+            push) tag="$REF_NAME" ;;
+            workflow_dispatch) tag="$TAG_INPUT" ;;
+            *) tag="" ;;
+          esac
+
+          if [ -n "$tag" ]; then
+            publish=true
+            if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::'$tag' is not a version tag (v1.2.3, or v1.2.3-rc.1)"
+              exit 1
+            fi
+            if ! sha="$(git rev-parse --verify --quiet "refs/tags/$tag^{commit}")"; then
+              echo "::error::there is no tag $tag in this repository"
+              exit 1
+            fi
+          else
+            publish=false
+            sha="$GITHUB_SHA"
+          fi
+
+          version="$(git show "$sha:mix.exs" | sed -n 's/^  @version "\(.*\)"$/\1/p' | head -n 1)"
+          if [ -z "$version" ]; then
+            echo "::error file=mix.exs::could not read @version from mix.exs at $sha"
+            exit 1
+          fi
+
+          if [ "$publish" = true ]; then
+            if [ "$tag" != "v$version" ]; then
+              echo "::error file=mix.exs::tag $tag does not match mix.exs @version $version at that tag (expected v$version)"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$sha" origin/master; then
+              echo "::error::tag $tag points at a commit that is not on master"
+              exit 1
+            fi
+          else
+            # A dry run has no tag; it works out what the tag would be.
+            tag="v$version"
+          fi
+
+          # `latest` moves only to the newest stable version, so publishing an old tag again does not
+          # point `latest` backwards, and a pre-release never takes it.
+          latest=false
+          if [[ "$version" != *-* ]]; then
+            newest="$({ git tag --list 'v*'; echo "$tag"; } | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+            if [ "$newest" = "$tag" ]; then latest=true; fi
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "sha=$sha"
+            echo "publish=$publish"
+            echo "latest=$latest"
+            # A dry run builds the checkout it has (the merge of the pull request); a release builds
+            # the commit of the tag.
+            echo "ref=$([ "$publish" = true ] && echo "$sha" || true)"
+            # The packages mix.lock pins at this tag, as table rows for the release notes.
+            echo "packages<<PACKAGES"
+            git show "$sha:mix.lock" \
+              | sed -n 's/^  "\(mishka_[a-z_]*\)": {:hex, :[a-z_]*, "\([^"]*\)".*/| [\1](https:\/\/hex.pm\/packages\/\1\/\2) | \2 |/p'
+            echo "PACKAGES"
+          } >> "$GITHUB_OUTPUT"
+
+      # Tags, labels and annotations of the image, worked out once here and used by the jobs below.
+      # `value` is the resolved tag and not the ref of the run, which in a dispatch is a branch. A
+      # pre-release gets its full version and nothing else; `latest` is set by hand, not by `auto`,
+      # for the reason above.
+      #
+      # The description is the one GHCR shows on the package page (the annotation of the index) and
+      # what `docker inspect` shows (the label): this image is for trying Mishka CMS.
+      - name: Tags, labels and annotations
+        id: meta
+        uses: docker/metadata-action@v6
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.v.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.v.outputs.tag }}
+            type=raw,value=latest,enable=${{ steps.v.outputs.latest }}
+          labels: |
+            org.opencontainers.image.title=Mishka CMS demo
+            org.opencontainers.image.description=A demo of Mishka CMS for trying it out, not for production. A new version needs a fresh database. A real install is your own copy of the repository with your own migrations.
+            org.opencontainers.image.url=https://mishka.tools/cms
+            org.opencontainers.image.documentation=https://github.com/mishka-group/mishka_cms#-deploy
+            org.opencontainers.image.source=https://github.com/mishka-group/mishka_cms
+            org.opencontainers.image.vendor=Mishka Group
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.revision=${{ steps.v.outputs.sha }}
+          annotations: |
+            org.opencontainers.image.title=Mishka CMS demo
+            org.opencontainers.image.description=A demo of Mishka CMS for trying it out, not for production. A new version needs a fresh database. A real install is your own copy of the repository with your own migrations.
+            org.opencontainers.image.url=https://mishka.tools/cms
+            org.opencontainers.image.documentation=https://github.com/mishka-group/mishka_cms#-deploy
+            org.opencontainers.image.source=https://github.com/mishka-group/mishka_cms
+            org.opencontainers.image.vendor=Mishka Group
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.revision=${{ steps.v.outputs.sha }}
+
+      # The scripts of this workflow, for the jobs that build the tag: an old tag does not have them.
+      # Hidden files are included because the path is inside .github, a hidden folder.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scripts
+          path: .github/scripts
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Summary
+        env:
+          PUBLISH: ${{ steps.v.outputs.publish }}
+          TAG: ${{ steps.v.outputs.tag }}
+          SHA: ${{ steps.v.outputs.sha }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Release $TAG"
+            echo
+            echo "Commit \`$SHA\`. $([ "$PUBLISH" = true ] && echo 'Published.' || echo 'Dry run: built and tested, nothing pushed or released.')"
+            echo
+            echo "The image would be tagged:"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # THE MIGRATIONS ARE GENERATED ONCE, HERE, and both architectures build with these files. The file
+  # names carry the time of generation, so two generations would give the amd64 and the arm64 image
+  # different migration versions, and the index would hold two images that disagree about the
+  # database. They follow the default extensions of the tag's config/config.exs.
+  #
+  # OTP and mirrors as in ci.yml: `deps.get` and the compile download precompiled NIFs through
+  # :httpc, which fails on a newer OTP (see OTP_VERSION). Generating them needs no database.
+  migrations:
+    name: Generate the migrations
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: scripts
+          path: ${{ runner.temp }}/scripts
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      # The build of the CI run of this commit, when there is one, and the newest build for this
+      # mix.lock otherwise (a tag has the CI run of the master it was cut from). Read only: a cache
+      # that is missing costs a longer compile, and the release saves none of its own.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ needs.version.outputs.sha }}
+          restore-keys: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-
+
+      - run: mix deps.get
+
+      - run: bash "$RUNNER_TEMP/scripts/generate_migrations.sh" demo
+
+      # The migrations and the snapshots they were generated from: the Dockerfile's guard checks that
+      # the two agree with the resources before it builds the release.
+      - name: Pack them
+        run: tar -czf migrations.tgz priv/repo/migrations/*.exs priv/resource_snapshots
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: migrations
+          path: migrations.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  # NATIVE RUNNERS, no QEMU: the image compiles Elixir, and an emulated build is far too slow. Each
+  # architecture builds the image, TESTS it, and only then, on a release, pushes it by digest; the
+  # index that joins the two is made in the next job.
+  image:
+    name: Image (${{ matrix.platform }})
+    needs: [version, migrations]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # Both architectures report in a dry run, however the other goes.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: scripts
+          path: ${{ runner.temp }}/scripts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: migrations
+          path: ${{ runner.temp }}/migrations
+
+      - name: Put the migrations in the build context
+        run: |
+          tar -xzf "$RUNNER_TEMP/migrations/migrations.tgz"
+          ls priv/repo/migrations priv/resource_snapshots
+
+      - uses: docker/setup-buildx-action@v4
+
+      # The image, loaded into the local Docker to be tested. The cache is per architecture, and the
+      # second build below finds everything in it.
+      - name: Build, to test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: mishka-cms-demo:smoke
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.slug }}
+
+      # Nothing leaves this job until this passes: migrate an empty PostgreSQL, boot, wait for the
+      # HEALTHCHECK, ask what the server answers.
+      - name: Smoke test
+        run: bash "$RUNNER_TEMP/scripts/smoke_test.sh" mishka-cms-demo:smoke
+
+      - name: Log in to the registry
+        if: needs.version.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The same build again, a cache hit, with the provenance and the SBOM added. A release pushes
+      # it BY DIGEST, with no tag: the tags are the index's. A dry run writes the same image to a
+      # file instead, so the labels, annotations, provenance and SBOM are all built and checked.
+      - name: Build, to publish
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ needs.version.outputs.labels }}
+          annotations: ${{ needs.version.outputs.annotations }}
+          outputs: ${{ needs.version.outputs.publish == 'true' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || format('type=oci,dest={0}/image-{1}.tar', runner.temp, matrix.slug) }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.slug }}
+
+      - name: Keep the digest
+        if: needs.version.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload the digest
+        if: needs.version.outputs.publish == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.slug }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+      # What a dry run built, for whoever reads it: the image and its attestations.
+      - name: What would be pushed
+        if: needs.version.outputs.publish != 'true'
+        env:
+          TAR: ${{ runner.temp }}/image-${{ matrix.slug }}.tar
+        run: |
+          set -euo pipefail
+          index="$(tar -xOf "$TAR" index.json | jq -r '.manifests[0].digest')"
+          tar -xOf "$TAR" "blobs/sha256/${index#sha256:}" \
+            | jq '{mediaType, annotations, manifests: [.manifests[] | {platform, annotations, size}]}'
+
+  # The index: one name that gives each machine its own image. Made from the digests the two builds
+  # pushed, so what it points at is what was tested.
+  manifest:
+    name: Multi-arch index
+    needs: [version, image]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.index.outputs.digest }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The tags come from the resolved tag (see the version job), and the annotations of the INDEX
+      # are what GHCR shows as the description of the package.
+      - name: Create the index and tag it
+        id: index
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ needs.version.outputs.tags }}
+          ANNOTATIONS: ${{ needs.version.outputs.annotations }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then args+=(--tag "$tag"); fi
+          done <<< "$TAGS"
+          while IFS= read -r annotation; do
+            case "$annotation" in index:*) args+=(--annotation "$annotation") ;; esac
+          done <<< "$ANNOTATIONS"
+
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          if [ "${#sources[@]}" -ne 2 ]; then
+            echo "::error::expected the digests of 2 architectures, found ${#sources[@]}"
+            exit 1
+          fi
+
+          docker buildx imagetools create "${args[@]}" "${sources[@]}"
+
+          digest="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r '.digest')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+          # Both architectures must be in it.
+          platforms="$(docker buildx imagetools inspect --raw "$IMAGE@$digest" \
+            | jq -r '[.manifests[].platform | select(.os == "linux") | .architecture] | sort | join(",")')"
+          if [ "$platforms" != "amd64,arm64" ]; then
+            echo "::error::the index holds linux/$platforms, expected amd64 and arm64"
+            exit 1
+          fi
+
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+          echo "### Image index" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE@$digest\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # SLSA build provenance for the index, signed and pushed to the registry next to it. `actions/attest`
+      # makes provenance when it is given no other predicate. The per-architecture images carry the
+      # BuildKit provenance and SBOM from the builds above; this one binds the index to this workflow
+      # run, and is what `gh attestation verify` checks.
+      - uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          push-to-registry: true
+
+  release:
+    name: GitHub release
+    needs: [version, manifest]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: scripts
+          path: ${{ runner.temp }}/scripts
+
+      - name: Write the release notes
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          DIGEST: ${{ needs.manifest.outputs.digest }}
+          PACKAGES: ${{ needs.version.outputs.packages }}
+        run: bash "$RUNNER_TEMP/scripts/release_notes.sh" > "$RUNNER_TEMP/notes.md"
+
+      # The notes above, then the changes GitHub lists for the tag. A version with a `-` (0.1.0-rc.1)
+      # is a pre-release, and never becomes "Latest".
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          body_path: ${{ runner.temp }}/notes.md
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
+          make_latest: ${{ needs.version.outputs.latest }}

@@ -48,8 +48,9 @@ erl_crash.dump
 # mix.lock pins, the same as any other build of the project does.
 /__extensions/
 
-# Host runtime state and generated assets. priv/repo/migrations stays: the root migrations are
-# generated, not in git, and the image takes the building machine's (see the Dockerfile).
+# Host runtime state and generated assets. priv/repo/migrations and priv/resource_snapshots STAY:
+# the migrations are the copy's own (generated with `mix ash.codegen`, then committed), and the
+# build's guard needs both the migrations and the snapshots they came from (see the Dockerfile).
 /.mnesia/
 /mishka_data/
 /priv/static/temp/

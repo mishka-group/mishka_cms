@@ -170,9 +170,11 @@ EOF
 COPY assets/package.json assets/bun.lock assets/
 RUN mix assets.setup
 
-# priv carries the root migrations. They are not in git (they are generated, as the extensions'
-# are): the image takes the ones generated on the machine that builds it (`mix ash.codegen`, or
-# `mix dev_reset`), so a build from a clean checkout has none and `bin/migrate` has nothing to run.
+# priv carries the migrations (priv/repo/migrations) and the snapshots they were generated from
+# (priv/resource_snapshots). They are YOURS: they follow the extensions your copy loads (`ash_domains`
+# in config/config.exs), so this repository does not keep them in git. You generate them with
+# `mix ash.codegen <name>` and commit them to your copy, and the image takes what is committed. The
+# guard before `mix release` below fails the build when they are missing or out of date.
 COPY priv priv
 COPY lib lib
 COPY assets assets
@@ -193,6 +195,48 @@ RUN mix compile
 # admin.css and public.css, built by `mix admin_css` inside assets.deploy above. AFTER compile,
 # copy_js_assets and assets.deploy: it needs the app, the staged JS and the Tailwind binary.
 RUN mix compile_static_css
+
+# THE MIGRATIONS GUARD. Without a migration `bin/migrate` has nothing to run and the server starts
+# on an empty database, so a build with none fails here instead of at the first request. `mix
+# ash.codegen --check` fails when the resources (the extensions this build loads, and any change
+# to them) describe a schema that the committed migrations and snapshots do not: after a package
+# upgrade, say. Neither needs a database. It runs before runtime.exs is copied, which is what keeps
+# the build from needing DATABASE_URL.
+RUN <<'EOF'
+set -eu
+found=0
+# The glob skips .formatter.exs, which is not a migration, and stays as written when nothing matches.
+for migration in priv/repo/migrations/*.exs; do
+  if [ -e "$migration" ]; then found=1; fi
+done
+if [ "$found" -eq 0 ]; then
+  cat >&2 <<'MESSAGE'
+
+ERROR: priv/repo/migrations holds no migration, so this image would start on an empty database.
+
+The migrations belong to your copy of Mishka CMS, because they follow the extensions it loads
+(ash_domains in config/config.exs). Generate them and commit them, then build again:
+
+    mix ash.codegen <name>
+    git add priv/repo/migrations priv/resource_snapshots
+
+MESSAGE
+  exit 1
+fi
+if ! mix ash.codegen --check; then
+  cat >&2 <<'MESSAGE'
+
+ERROR: the resources have changed since the migrations in priv/repo/migrations were generated.
+
+Generate the new migration and commit it with its snapshots, then build again:
+
+    mix ash.codegen <name>
+    git add priv/repo/migrations priv/resource_snapshots
+
+MESSAGE
+  exit 1
+fi
+EOF
 
 # Changes to config/runtime.exs don't require recompiling the code.
 COPY config/runtime.exs config/
