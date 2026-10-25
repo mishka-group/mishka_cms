@@ -165,8 +165,8 @@ defmodule MishkaCms.MixProject do
 
       # Extensions
       mishka_dep(:mishka_cms_core, "~> 0.0.1"),
-      mishka_dep(:mishka_blog, :github),
-      mishka_dep(:mishka_document, :github),
+      mishka_dep(:mishka_blog, "~> 0.0.1"),
+      mishka_dep(:mishka_document, "~> 0.0.1"),
       mishka_dep(:mishka_gervaz, "~> 0.0.2"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
