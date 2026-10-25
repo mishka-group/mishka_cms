@@ -14,9 +14,9 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   Nothing short of running the installer proves the two meet: the plugin is written against an
   event name and the step fires a string, so a rename on either side is silent.
 
-  Here rather than in either project's own suite. `__extensions/mishka_cms_core` has no
+  Here rather than in either project's own suite. `mishka_cms_core` has no
   `mishka_blog` dependency, so the installer cannot see the plugin there;
-  `__extensions/mishka_blog` has no installer. This application has both.
+  `mishka_blog` has no installer. This application has both.
   """
   use MishkaCms.DataCase, async: false
 
