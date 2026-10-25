@@ -28,6 +28,8 @@ defmodule MishkaCmsWeb.BlogPageSourceSecurityTest do
 
   alias MishkaCmsCore.Accounts.Permission
   alias MishkaCmsCore.ErrorsExceptions.NotFoundError
+  alias MishkaCmsCore.Runtime.Compilers.Helpers
+  alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.Page
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
@@ -108,11 +110,28 @@ defmodule MishkaCmsWeb.BlogPageSourceSecurityTest do
     setup %{site: site} do
       post!(site, "on-a-locked-page", "Kept by its page", "en")
 
-      Page
-      |> Ash.Query.for_read(:read_any, %{}, authorize?: false)
-      |> Ash.Query.filter(site_id == ^site.id and path == "/:lang/blog/:slug")
-      |> Ash.read_one!(authorize?: false)
-      |> Ash.update!(%{permissions: @lock}, action: :master_update, authorize?: false)
+      page =
+        Page
+        |> Ash.Query.for_read(:read_any, %{}, authorize?: false)
+        |> Ash.Query.filter(site_id == ^site.id and path == "/:lang/blog/:slug")
+        |> Ash.read_one!(authorize?: false)
+
+      # THE PAGE'S MODULE CARRIES THE LOCK, and it is built when the page is first asked for, then
+      # again by the compile a save queues, which no test runs: Oban is manual here. So the lock is
+      # compiled in by hand, as that compile would, and compiled out again before the rollback takes
+      # the row back. Left to whichever test asks first, the module was locked for every test after
+      # this one on some seeds, and open under this one on the others.
+      locked = Ash.update!(page, %{permissions: @lock}, action: :master_update, authorize?: false)
+      recompile!(site, locked)
+
+      on_exit(fn ->
+        locked
+        |> Ash.update!(%{permissions: page.permissions},
+          action: :master_update,
+          authorize?: false
+        )
+        |> then(&recompile!(site, &1))
+      end)
 
       register_routes!(site)
       :ok
@@ -348,6 +367,16 @@ defmodule MishkaCmsWeb.BlogPageSourceSecurityTest do
           priority: 0
         })
     end)
+  end
+
+  # What the compile a saved page queues does once it runs.
+  defp recompile!(site, page) do
+    {:ok, _module} =
+      page.id
+      |> Helpers.module_name(site.name, "Page")
+      |> ModuleCompilerHandler.compile_or_return_module(page.path, site.name, site.id, :update)
+
+    :ok
   end
 
   defp signed_in(site, permissions) do
