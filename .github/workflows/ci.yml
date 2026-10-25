@@ -92,10 +92,12 @@ jobs:
       # from the dependencies in .formatter.exs's import_deps, so it runs once they are fetched.
       - run: mix format --check-formatted
 
-  # FOUR MACHINES, A QUARTER OF THE TEST FILES EACH. Most of the suite is `async: false` — it shares
+  # SIX MACHINES, A SIXTH OF THE TEST FILES EACH. Most of the suite is `async: false` — it shares
   # the runtime's global state — and runs one module at a time, so more cores do not make it faster
   # and more machines do. Mix deals the test files out by `--partitions`, and each partition has its
-  # own Postgres and its own database (`config/test.exs` names it after MIX_TEST_PARTITION).
+  # own Postgres and its own database (`config/test.exs` names it after MIX_TEST_PARTITION, for
+  # whatever number there is). The matrix and `--partitions` below must name the same number; nothing
+  # else depends on it: the build cache key is the same for every partition.
   test:
     needs: build
     runs-on: ubuntu-latest
@@ -103,7 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        partition: [1, 2, 3, 4]
+        partition: [1, 2, 3, 4, 5, 6]
 
     services:
       postgres:
@@ -156,7 +158,7 @@ jobs:
 
       # --warnings-as-errors also fails on warnings in the test files, which a plain run can print
       # while a test captures stderr, where nobody sees them — each in the partition that compiles it.
-      - run: mix test --warnings-as-errors --partitions 4
+      - run: mix test --warnings-as-errors --partitions 6
         env:
           POSTGRES_HOST: localhost
           DB_HOST: localhost
