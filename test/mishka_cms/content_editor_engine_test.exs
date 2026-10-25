@@ -9,22 +9,25 @@ defmodule MishkaCms.ContentEditorEngineTest do
   admin cannot load a site's bundle, so `assets/vendor/editor.js` is a copy of that hook's
   `content`, and `assets/package.json` installs exactly the packages the hook lists.
 
-  These fail the day the kit moves and the copy does not. To refresh it: write the hook's `content`
-  from `mishka_cms_core/priv/cms_ui_kits/chelekom_headless.json` into `assets/vendor/editor.js`
-  unchanged, set `assets/package.json`'s `overrides` to the hook's `npm` list (and its `@tiptap/*`
+  The kit is read from `test/fixtures/chelekom_headless.json`, a copy of Chelekom's release file.
+  Nothing ships the bundle (a server downloads it), so the one in a mishka_cms_core checkout's
+  `priv/cms_ui_kits/` is not in the Hex package, and CI has no checkout to read it from.
+
+  These fail the day the kit moves and the vendored copy does not. To refresh it: put the new
+  `chelekom_headless.json` over `test/fixtures/chelekom_headless.json`, write the hook's `content`
+  into `assets/vendor/editor.js` unchanged, set `assets/package.json`'s `overrides` to the hook's `npm` list (and its `@tiptap/*`
   dependencies to the same versions), run `bun install` in `assets/`, and rebuild with
   `mix esbuild mishka_cms`.
   """
   use ExUnit.Case, async: true
 
   @assets Path.expand("../../assets", __DIR__)
+  @kit Path.expand("../fixtures/chelekom_headless.json", __DIR__)
   @refresh "Refresh the copy as this module's doc says: the kit's `chelekom-headless-editor` hook " <>
              "is the source of truth for the engine and its packages."
 
   defp hook do
-    :mishka_cms_core
-    |> :code.priv_dir()
-    |> Path.join("cms_ui_kits/chelekom_headless.json")
+    @kit
     |> File.read!()
     |> Jason.decode!()
     |> Map.fetch!("js_hooks")

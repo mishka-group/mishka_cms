@@ -46,11 +46,8 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     }
   ]
 
-  # Chelekom's real styled bundle. Nothing ships one; mishka_cms_core keeps a copy for its tests.
-  @chelekom Path.join(
-              Mix.Project.deps_paths()[:mishka_cms_core],
-              "test/fixtures/cms_ui_kits/chelekom.json"
-            )
+  # Chelekom's real styled bundle. Nothing ships one; this project keeps a copy for its tests.
+  @chelekom Path.expand("../../fixtures/cms_ui_kits/chelekom.json", __DIR__)
 
   setup do
     :persistent_term.put(:mishka_installed, false)

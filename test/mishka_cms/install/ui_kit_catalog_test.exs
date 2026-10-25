@@ -6,16 +6,14 @@ defmodule MishkaCmsCore.Install.UiKitCatalogTest do
   @moduledoc """
   Pure tests against the REAL `chelekom.json` (136 components) — the dependency-closure /
   required-lock logic that the picker is built on. No DB, no mocks; loads the actual bundle once,
-  from the copy mishka_cms_core keeps for its tests (nothing ships one: a server downloads it).
+  from the copy in this project's `test/fixtures/cms_ui_kits/` (nothing ships one: a server
+  downloads it).
   """
   use ExUnit.Case, async: true
 
   alias MishkaCmsCore.Install.UiKitCatalog
 
-  @chelekom Path.join(
-              Mix.Project.deps_paths()[:mishka_cms_core],
-              "test/fixtures/cms_ui_kits/chelekom.json"
-            )
+  @chelekom Path.expand("../../fixtures/cms_ui_kits/chelekom.json", __DIR__)
 
   setup_all do
     bundle = @chelekom |> File.read!() |> Jason.decode!()
