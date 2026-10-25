@@ -13,6 +13,9 @@ defmodule MishkaCmsWeb.InstallLiveTest do
   """
   use MishkaCmsWeb.ConnCase, async: false
 
+  # Over thirty seconds on its own: left out of a pull request, see test/test_helper.exs.
+  @moduletag :slow
+
   import Phoenix.LiveViewTest
 
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler

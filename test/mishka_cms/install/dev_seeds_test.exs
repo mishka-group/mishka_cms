@@ -18,6 +18,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   """
   use MishkaCms.DataCase, async: false
 
+  # Over thirty seconds on its own: left out of a pull request, see test/test_helper.exs.
+  @moduletag :slow
+
   import MishkaCms.Test.Factory, only: [create_site!: 1]
   import Phoenix.LiveViewTest, only: [rendered_to_string: 1]
 
@@ -1050,6 +1053,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallFreshTest do
   """
   use MishkaCms.DataCase, async: false
   use Oban.Testing, repo: MishkaCms.Repo
+
+  # Over thirty seconds on its own: left out of a pull request, see test/test_helper.exs.
+  @moduletag :slow
 
   alias MishkaCmsCore.Dev.Seeds
   alias MishkaCmsCore.Runtime.Workers.SiteRuntimeWorker

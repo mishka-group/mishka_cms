@@ -158,7 +158,14 @@ jobs:
 
       # --warnings-as-errors also fails on warnings in the test files, which a plain run can print
       # while a test captures stderr, where nobody sees them — each in the partition that compiles it.
-      - run: mix test --warnings-as-errors --partitions 6
+      #
+      # THE SLOWEST FILES ARE TAGGED `:slow` AND LEFT OUT OF A PULL REQUEST (`test/test_helper.exs`
+      # excludes them by default): each takes over thirty seconds on its own, compiling a whole site,
+      # its pages and its components or running the dev seeds, and together they were most of the
+      # time a pull request waited. They run on a push to master, on a tag and when started by hand,
+      # i.e. whenever the event is not a pull request, so what a pull request skips is run once it
+      # is merged.
+      - run: mix test --warnings-as-errors --partitions 6 ${{ github.event_name != 'pull_request' && '--include slow' || '' }}
         env:
           POSTGRES_HOST: localhost
           DB_HOST: localhost
