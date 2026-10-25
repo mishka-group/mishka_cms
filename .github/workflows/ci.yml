@@ -20,6 +20,11 @@ env:
   # release or fixed libraries are out.
   OTP_VERSION: "29.0.5"
   ELIXIR_VERSION: "1.20.4-otp-29"
+  # setup-beam installs Hex from builds.hex.pm, and one slow response there failed a whole run
+  # ("Could not mix hex from any hex.pm mirror"). It tries these in order.
+  HEXPM_MIRRORS: |
+    https://builds.hex.pm
+    https://cdn.jsdelivr.net/hex
 
 jobs:
   # Compiled once; the jobs below start from this build.
@@ -31,43 +36,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Only this repository. The Mishka packages come from Hex at the versions mix.lock pins, as
+      # they do for any user of Mishka CMS, and mix.exs would use an __extensions/ checkout over Hex
+      # if it found one, so none is ever checked out here.
       - uses: actions/checkout@v7
-
-      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
-      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
-      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
 
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
           elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - uses: actions/cache@v6
         with:
@@ -89,41 +68,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
-      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
-      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
-
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
           elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - uses: actions/cache/restore@v6
         with:
@@ -166,41 +116,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
-      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
-      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
-
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
           elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - uses: actions/cache/restore@v6
         with:
@@ -252,30 +173,6 @@ jobs:
     needs: [test, assets]
     steps:
       - uses: actions/checkout@v7
-      # The build context needs the packages under __extensions/, as the test job does.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
