@@ -16,8 +16,9 @@ defmodule MishkaCms.RefusalMessagesTest do
     punctuation. Without it an admin reads "Parent Section Section cannot be its own parent".
   - A sentence refusal is written out, not built with `"\#{…}"`, so a translation can match it: one
     sentence for each case, or a `%{key}` placeholder the error's `vars` fill.
-  - A refusal the core writes as a fixed text is a msgid of
-    `__extensions/mishka_cms_core/priv/gettext/errors.pot`, so a translator is given it.
+  - A refusal the core writes as a fixed text is a msgid of the core's
+    `priv/gettext/errors.pot`, so a translator is given it. That file ships in the core package
+    from 0.0.2; the 0.0.1 release on Hex has no `priv/gettext`, so that test needs a newer core.
 
   The sources are read, not the compiled resources: most refusals are inside anonymous functions
   and validation modules no introspection reaches. This lives here because only this project has
@@ -25,8 +26,9 @@ defmodule MishkaCms.RefusalMessagesTest do
   """
   use ExUnit.Case, async: true
 
-  @extensions Path.expand("../../__extensions", __DIR__)
-  @pot Path.join(@extensions, "mishka_cms_core/priv/gettext/errors.pot")
+  alias MishkaCms.Test.Packages
+
+  @packages [:mishka_cms_core, :mishka_blog, :mishka_document]
 
   @contexts [
     :validate,
@@ -43,8 +45,8 @@ defmodule MishkaCms.RefusalMessagesTest do
 
   test "a refusal that starts with a capital letter ends a sentence" do
     missing =
-      for extension <- ["mishka_cms_core", "mishka_blog", "mishka_document"],
-          {file, line, text} <- refusals(extension),
+      for package <- @packages,
+          {file, line, text} <- refusals(package),
           capitalized?(opening(text)),
           not Regex.match?(@sentence_end, ending(text)),
           uniq: true,
@@ -55,8 +57,8 @@ defmodule MishkaCms.RefusalMessagesTest do
 
   test "a sentence refusal is not built with interpolation" do
     built =
-      for extension <- ["mishka_cms_core", "mishka_blog", "mishka_document"],
-          {file, line, {:interpolated, _first, _last} = text} <- refusals(extension),
+      for package <- @packages,
+          {file, line, {:interpolated, _first, _last} = text} <- refusals(package),
           capitalized?(opening(text)),
           uniq: true,
           do: "#{file}:#{line}"
@@ -65,20 +67,22 @@ defmodule MishkaCms.RefusalMessagesTest do
   end
 
   test "every refusal the core writes is a msgid of its errors domain" do
+    pot = Packages.file!(:mishka_cms_core, "priv/gettext/errors.pot")
+
     msgids =
-      @pot
+      pot
       |> Expo.PO.parse_file!()
       |> Map.fetch!(:messages)
       |> MapSet.new(&IO.iodata_to_binary(&1.msgid))
 
     missing =
-      for {file, line, text} <- refusals("mishka_cms_core"),
+      for {file, line, text} <- refusals(:mishka_cms_core),
           is_binary(text) and not MapSet.member?(msgids, text),
           uniq: true,
           do: "#{file}:#{line} #{inspect(text)}"
 
     assert missing == [],
-           "refusals missing from #{Path.relative_to_cwd(@pot)}; wrap each in " <>
+           "refusals missing from #{Path.relative_to_cwd(pot)}; wrap each in " <>
              "dgettext_noop(\"errors\", …) and run mix gettext.extract --merge:\n" <>
              list(missing)
   end
@@ -98,14 +102,12 @@ defmodule MishkaCms.RefusalMessagesTest do
     end
   end
 
-  defp refusals(extension) do
-    root = Path.join(@extensions, extension)
-
-    for file <- Path.wildcard(Path.join(root, "lib/**/*.ex")),
+  defp refusals(package) do
+    for {label, file} <- Packages.sources(package, "lib/**/*.ex"),
         source = File.read!(file),
         value <- source |> Code.string_to_quoted!() |> collect() |> Enum.reverse(),
         text <- texts(value) do
-      {Path.relative_to(file, @extensions), line_of(source, text), text}
+      {label, line_of(source, text), text}
     end
   end
 

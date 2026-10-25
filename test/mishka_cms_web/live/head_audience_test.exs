@@ -28,13 +28,16 @@ defmodule MishkaCmsWeb.HeadAudienceTest do
   """
   use ExUnit.Case, async: true
 
+  alias MishkaCms.Test.Packages
+
   # The assign that makes a page's head different from the rest of the admin's. `admin_css`,
   # `admin_fonts`, `code_editor` and `standalone_assets` are not in this list on purpose: `Nav` sets
   # all four for every admin LiveView, so no navigation can arrive without them.
   @head_assign ":live_tailwind"
 
-  # Each project's `lib` only, never an extension's `_build` or `deps`.
-  @roots ["lib", "__extensions/*/lib"]
+  # This project's `lib` and every Mishka package's, wherever Mix put it: `__extensions/<name>/lib`
+  # for a local checkout, `deps/<name>/lib` from Hex. A package's `lib` only, never its `_build` or `deps`.
+  @packages [:mishka_cms | Packages.all()]
 
   describe "a live_session is a group of pages that share a head" do
     test "every LiveView that asks for the JIT is routed away from the ones that do not" do
@@ -84,9 +87,9 @@ defmodule MishkaCmsWeb.HeadAudienceTest do
 
   # Every module whose source assigns the JIT, found rather than listed.
   defp jit_modules do
-    @roots
-    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*.ex")))
-    |> Enum.reject(&String.contains?(&1, "/deps/"))
+    @packages
+    |> Enum.flat_map(&Packages.sources(&1, "lib/**/*.ex"))
+    |> Enum.map(&elem(&1, 1))
     |> Enum.filter(&(File.read!(&1) =~ ~r/assign\(\s*#{@head_assign}\s*,\s*true/))
     |> Enum.map(&module_of/1)
     |> Enum.reject(&is_nil/1)

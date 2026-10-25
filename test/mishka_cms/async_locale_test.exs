@@ -17,22 +17,18 @@ defmodule MishkaCms.AsyncLocaleTest do
   """
   use ExUnit.Case, async: true
 
-  @root Path.expand("../..", __DIR__)
-  @sources [
-    "lib",
-    "__extensions/mishka_cms_core/lib",
-    "__extensions/mishka_blog/lib",
-    "__extensions/mishka_document/lib"
-  ]
+  alias MishkaCms.Test.Packages
+
+  @packages [:mishka_cms, :mishka_cms_core, :mishka_blog, :mishka_document]
 
   @phoenix [:start_async, :assign_async]
 
   test "no page starts async work through Phoenix's own start_async or assign_async" do
     calls =
-      for source <- @sources,
-          file <- Path.wildcard(Path.join([@root, source, "**/*.ex"])),
+      for package <- @packages,
+          {label, file} <- Packages.sources(package, "lib/**/*.ex"),
           line <- phoenix_calls(Code.string_to_quoted!(File.read!(file))),
-          do: "#{Path.relative_to(file, @root)}:#{line}"
+          do: "#{label}:#{line}"
 
     assert calls == [],
            "use MishkaGervaz.Messages.start_async/4 or assign_async/4 instead:\n" <>

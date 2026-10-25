@@ -52,13 +52,20 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
   """
   use ExUnit.Case, async: true
 
-  # Everything whose classes end up in `admin.css` or `public.css`. A site's OWN templates live in
-  # the database and are compiled per site at runtime, so they are not scanned here. Each project's
-  # `lib` only: walking an extension's `_build` and `deps` read hundreds of megabytes to discard them.
-  @roots ["lib", "__extensions/*/lib"]
+  alias MishkaCms.Test.Packages
 
-  # path => why interpolation is allowed there. Every entry needs a matching `@source inline(...)`
-  # in `Mix.Tasks.AdminCss`, and the second test fails if the file stops interpolating.
+  # Everything whose classes end up in `admin.css` or `public.css`. A site's OWN templates live in
+  # the database and are compiled per site at runtime, so they are not scanned here. This project's
+  # `lib` and every Mishka package's, wherever Mix put it (`__extensions/<name>` for a local
+  # checkout, `deps/<name>` from Hex): a package's `lib` only, because walking its `_build` and
+  # `deps` read hundreds of megabytes to discard them.
+  @packages [:mishka_cms | Packages.all()]
+
+  # label => why interpolation is allowed there. A label is the file's path in this project
+  # (`lib/mishka_cms_web/...`) or in a package with its name in front
+  # (`mishka_cms_core/lib/...`); see `MishkaCms.Test.Packages.sources/2`. Every entry needs a
+  # matching `@source inline(...)` in `Mix.Tasks.AdminCss`, and the second test fails if the file
+  # stops interpolating.
   @allowed %{}
 
   # Files whose class strings become a DATABASE TEMPLATE rather than rendered markup. The
@@ -66,7 +73,7 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
   # literal, and it is `MishkaCmsCore.Runtime.Compilers.TailwindCompiler` — scanning those stored
   # templates per site — that has to find it, not `mix admin_css`.
   @runtime_templates %{
-    "__extensions/mishka_cms_core/lib/mishka_cms_core/dev/generator.ex" =>
+    "mishka_cms_core/lib/mishka_cms_core/dev/generator.ex" =>
       "writes seeded error-page templates into the database"
   }
 
@@ -82,8 +89,7 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
   # and an `id`.
   test "no Tailwind class is assembled by interpolation" do
     offenders =
-      @roots
-      |> Enum.flat_map(&source_files/1)
+      sources()
       |> Enum.reject(&exempt?/1)
       |> Enum.flat_map(&scan/1)
 
@@ -103,25 +109,33 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
   end
 
   test "every allowed file still exists and still interpolates" do
-    for {path, reason} <- Map.merge(@allowed, @runtime_templates) do
-      assert File.exists?(path), "@allowed lists #{path}, which no longer exists — drop the entry"
+    sources = Map.new(sources())
 
-      assert scan(path) != [],
-             "@allowed lists #{path} (#{reason}), but it no longer interpolates a class — drop the entry"
+    for {label, reason} <- Map.merge(@allowed, @runtime_templates) do
+      path = Map.get(sources, label)
+
+      assert path, "@allowed lists #{label}, which no longer exists — drop the entry"
+
+      assert scan({label, path}) != [],
+             "@allowed lists #{label} (#{reason}), but it no longer interpolates a class — drop the entry"
     end
   end
 
-  defp source_files(root) do
-    root |> Path.join("**/*.{ex,heex,eex}") |> Path.wildcard()
+  # Every file whose classes are scanned, as `{label, absolute_path}`. Match on the label, never on
+  # the path: the folder that holds a package is where Mix put it, and `deps/` is one of those.
+  defp sources do
+    for package <- @packages,
+        source <- Packages.sources(package, "lib/**/*.{ex,heex,eex}"),
+        do: source
   end
 
-  # `_build` and `deps` hold copies of the same sources, and a test tree's fixtures are not rendered.
-  defp exempt?(path) do
-    String.contains?(path, ["/_build/", "/deps/"]) or path =~ ~r{(^|/)test/} or
-      Map.has_key?(@allowed, path) or Map.has_key?(@runtime_templates, path)
+  # A test tree's fixtures are not rendered.
+  defp exempt?({label, _path}) do
+    label =~ ~r{(^|/)test/} or Map.has_key?(@allowed, label) or
+      Map.has_key?(@runtime_templates, label)
   end
 
-  defp scan(path) do
+  defp scan({label, path}) do
     source = File.read!(path)
     regions = class_values(source)
 
@@ -136,10 +150,10 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
       value
       |> string_literals()
       |> Enum.filter(fn {_offset, literal} -> Regex.match?(@glued, literal) end)
-      |> Enum.map(fn {offset, literal} -> {path, line_of(source, at + offset), literal} end)
+      |> Enum.map(fn {offset, literal} -> {label, line_of(source, at + offset), literal} end)
     end)
-    |> Enum.reject(fn {_path, line, _literal} -> commented?(source, line) end)
-    |> Enum.map(fn {path, line, literal} -> {path, line, String.trim(literal)} end)
+    |> Enum.reject(fn {_label, line, _literal} -> commented?(source, line) end)
+    |> Enum.map(fn {label, line, literal} -> {label, line, String.trim(literal)} end)
     |> Enum.uniq()
   end
 

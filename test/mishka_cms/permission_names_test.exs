@@ -19,13 +19,10 @@ defmodule MishkaCms.PermissionNamesTest do
   """
   use ExUnit.Case, async: true
 
+  alias MishkaCms.Test.Packages
   alias MishkaCmsCore.Accounts.Checks.AccessPermissions
 
-  @root Path.expand("../..", __DIR__)
-  @globs [
-    "lib/**/*.{ex,exs,heex}",
-    "__extensions/{mishka_cms_core,mishka_blog,mishka_document}/lib/**/*.{ex,exs,heex}"
-  ]
+  @packages [:mishka_cms, :mishka_cms_core, :mishka_blog, :mishka_document]
   @copy ~w(lib/mishka_cms_web/live/mishka_cms_live.ex lib/mishka_cms_web/live/mishka_cms_live.html.heex)
 
   @looking ~r/^(admin:[a-z0-9_:*]*|[a-z0-9_:]+:\*|page:code:write)$/
@@ -34,9 +31,7 @@ defmodule MishkaCms.PermissionNamesTest do
 
   test "every permission name in the code follows the grammar" do
     wrong =
-      for glob <- @globs,
-          path <- Path.wildcard(Path.join(@root, glob)),
-          file = Path.relative_to(path, @root),
+      for {file, path} <- sources(),
           file not in @copy,
           name <- names(Path.extname(file), File.read!(path)),
           not Regex.match?(@grammar, name),
@@ -60,9 +55,7 @@ defmodule MishkaCms.PermissionNamesTest do
       )
 
     missing =
-      for glob <- @globs,
-          path <- Path.wildcard(Path.join(@root, glob)),
-          file = Path.relative_to(path, @root),
+      for {file, path} <- sources(),
           file not in @copy,
           name <- names(Path.extname(file), File.read!(path)),
           Regex.match?(@grammar, name),
@@ -78,9 +71,7 @@ defmodule MishkaCms.PermissionNamesTest do
   # beside a name it covers asks for nothing more.
   test "no list asks for a wildcard beside a name it covers" do
     redundant =
-      for glob <- @globs,
-          path <- Path.wildcard(Path.join(@root, glob)),
-          file = Path.relative_to(path, @root),
+      for {file, path} <- sources(),
           file not in @copy,
           Path.extname(file) != ".heex",
           {wide, narrow} <- redundant(File.read!(path)),
@@ -125,6 +116,14 @@ defmodule MishkaCms.PermissionNamesTest do
              {"admin:api:*", "admin:api:code"},
              {"admin:dashboard:runtime:*", "admin:dashboard:runtime:page"}
            ]
+  end
+
+  # Every file in the project and in the three packages, as `{label, path}`; see
+  # `MishkaCms.Test.Packages.sources/2`.
+  defp sources do
+    for package <- @packages,
+        source <- Packages.sources(package, "lib/**/*.{ex,exs,heex}"),
+        do: source
   end
 
   defp names(extname, source), do: extname |> literals(source) |> Enum.filter(&looking?/1)
