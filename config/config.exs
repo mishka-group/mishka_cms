@@ -199,6 +199,11 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :mishka_cms_core, MishkaCmsCore.Mailer, adapter: Swoosh.Adapters.Local
 
+# An authenticator app's code (TOTP) is good for its own 30-second period only: no previous period's
+# code is taken (`nil`). Read when mishka_cms_core compiles, so a change needs
+# `mix deps.compile mishka_cms_core --force`.
+config :mishka_cms_core, :totp_grace_period, nil
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.28.2",

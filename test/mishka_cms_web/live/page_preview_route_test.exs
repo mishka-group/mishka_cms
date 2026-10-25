@@ -22,6 +22,9 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
   """
   use MishkaCmsWeb.ConnCase, async: false
 
+  # Over thirty seconds on its own: left out of a pull request, see test/test_helper.exs.
+  @moduletag :slow
+
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 

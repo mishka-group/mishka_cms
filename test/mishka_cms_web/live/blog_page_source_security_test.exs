@@ -36,7 +36,15 @@ defmodule MishkaCmsWeb.BlogPageSourceSecurityTest do
 
   @lock ["members:read"]
 
-  setup do
+  # ONE SITE FOR THE WHOLE MODULE, set up once. Provisioning compiles every page of the site, which
+  # was nearly all that this setup cost each test, and the tests below only add to the site and ask
+  # for it: what a test adds or changes is taken back by the savepoint that
+  # `MishkaCms.DataCase.setup_module_sandbox/0` gives it, and the cache by the snapshot it takes of
+  # it. The name is unique per module: a component's module is named from its site's name, so a
+  # reused one renders the previous module's pages against a site that module rolled back.
+  setup_all do
+    context = MishkaCms.DataCase.setup_module_sandbox()
+
     SiteState.clear()
     name = "blogsource#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -66,7 +74,7 @@ defmodule MishkaCmsWeb.BlogPageSourceSecurityTest do
     MishkaBlog.Provision.ensure!(site)
     register_routes!(site)
 
-    %{site: site}
+    Map.put(context, :site, site)
   end
 
   describe "a locked edition of an open post" do

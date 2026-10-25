@@ -85,7 +85,7 @@ defmodule MishkaCms.MixProject do
   defp deps do
     [
       # Phoenix Prod Stuff
-      {:phoenix, "~> 1.8", override: true},
+      {:phoenix, "~> 1.8"},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},
       {:phoenix_live_dashboard, "~> 0.9"},
@@ -95,9 +95,8 @@ defmodule MishkaCms.MixProject do
       {:ash_events, "~> 0.8"},
       {:ash_state_machine, "~> 0.2"},
       {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
-      {:ash_authentication,
-       github: "team-alembic/ash_authentication", branch: "main", override: true},
-      {:jose, "~> 1.11", override: true},
+      {:ash_authentication, "~> 5.0.0-rc.15"},
+      {:jose, "~> 1.11"},
       {:ash_postgres, "~> 2.15"},
       {:ash_json_api, "~> 1.7"},
       {:ash_graphql, "~> 1.12"},
@@ -120,7 +119,7 @@ defmodule MishkaCms.MixProject do
       # DataBase Stuff
       {:phoenix_ecto, "~> 4.7"},
       {:ecto_sql, "~> 3.14"},
-      {:decimal, "~> 3.2", override: true},
+      {:decimal, "~> 3.2"},
       {:postgrex, "~> 0.22"},
 
       # Req/Res Stuff
@@ -146,7 +145,7 @@ defmodule MishkaCms.MixProject do
       {:file_system, "~> 1.1", only: [:test, :dev]},
       {:floki, "~> 0.38", only: :test},
       {:lazy_html, "~> 0.1", only: :test},
-      {:igniter, "~> 0.8", only: :dev, override: true},
+      {:igniter, "~> 0.8", only: :dev},
       {:usage_rules, "~> 1.2", only: [:dev]},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false, warn_if_outdated: true},
 
@@ -161,36 +160,32 @@ defmodule MishkaCms.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:html_sanitize_ex, "~> 1.5", override: true},
+      {:html_sanitize_ex, "~> 1.5"},
       {:guarded_struct, "~> 0.1.4"},
 
-      # Extentions
-      mishka_dep(:mishka_cms_core),
-      mishka_dep(:mishka_blog),
-      mishka_dep(:mishka_document),
-      mishka_dep(:mishka_gervaz),
+      # Extensions
+      mishka_dep(:mishka_cms_core, "~> 0.0.2"),
+      mishka_dep(:mishka_blog, "~> 0.0.1"),
+      mishka_dep(:mishka_document, "~> 0.0.1"),
+      mishka_dep(:mishka_gervaz, "~> 0.0.2"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
       # the ones the sites do not offer.
-      mishka_dep(:mishka_cms_auth_google),
-      mishka_dep(:mishka_cms_auth_github),
-      mishka_dep(:mishka_cms_auth_slack),
-      mishka_dep(:mishka_cms_auth_discord)
+      mishka_dep(:mishka_cms_auth_google, "~> 0.0.1"),
+      mishka_dep(:mishka_cms_auth_github, "~> 0.0.1"),
+      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.1"),
+      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.1")
     ]
   end
 
-  # A CMS package is the checkout under `__extensions/<name>` when there is one, and otherwise
-  # `mishka-group/<name>` on GitHub at the revision mix.lock pins, as in a Docker build.
-  # `MISHKA_DEPS=github` takes GitHub even beside a checkout. To move the pins to the newest master:
-  #
-  #     MISHKA_DEPS=github MIX_DEPS_PATH=<an empty folder> mix deps.update mishka_cms_core mishka_blog mishka_document mishka_gervaz
-  #
-  # From GitHub each package is `override: true`, because they name each other as `path: "../<name>"`.
-  defp mishka_dep(name) do
-    case File.dir?(Path.expand("__extensions/#{name}", __DIR__)) and
-           System.get_env("MISHKA_DEPS") != "github" do
-      true -> {name, path: "__extensions/#{name}"}
-      false -> {name, github: "mishka-group/#{name}", branch: "master", override: true}
+  # A package is the checkout under `__extensions/<name>` when there is one (`MISHKA_DEPS=hex` skips
+  # them). Otherwise it is its Hex release, at the version the second argument names.
+  defp mishka_dep(name, version) do
+    if File.dir?(Path.expand("__extensions/#{name}", __DIR__)) and
+         System.get_env("MISHKA_DEPS") != "hex" do
+      {name, path: "__extensions/#{name}", override: true}
+    else
+      {name, version}
     end
   end
 

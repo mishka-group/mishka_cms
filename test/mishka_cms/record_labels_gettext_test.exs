@@ -9,15 +9,19 @@ defmodule MishkaCms.RecordLabelsGettextTest do
 
   `SameSiteReference`, `SameWorkspaceVersion` and the blog's `RestoreVersion` put their `:label` into
   a sentence through the `errors` Gettext domain of `MishkaCmsCore.Gettext`. A label is an option on
-  a resource, not a string Gettext can extract, so each one is written into
-  `__extensions/mishka_cms_core/priv/gettext/errors.pot` by hand. This finds every label the host's
-  resources declare, in every extension, so one added later and not written there fails here.
+  a resource, not a string Gettext can extract, so each one is written into the core's
+  `priv/gettext/errors.pot` by hand. This finds every label the host's resources declare, in every
+  extension, so one added later and not written there fails here.
+
+  The file ships in the core package from 0.0.2. The 0.0.1 release on Hex has no `priv/gettext`, so
+  with that release this test fails to find it.
 
   This lives here rather than in each extension because only this project has every extension
   compiled at once.
   """
   use ExUnit.Case, async: true
 
+  alias MishkaCms.Test.Packages
   alias MishkaCmsCore.Runtime.Resources.Validations.SameSiteReference
 
   @labelled [
@@ -26,11 +30,11 @@ defmodule MishkaCms.RecordLabelsGettextTest do
     MishkaBlog.Resources.Changes.RestoreVersion
   ]
 
-  @pot Path.expand("../../__extensions/mishka_cms_core/priv/gettext/errors.pot", __DIR__)
-
   test "every label a refusal names is a msgid of the core's errors domain" do
+    pot = Packages.file!(:mishka_cms_core, "priv/gettext/errors.pot")
+
     msgids =
-      @pot
+      pot
       |> Expo.PO.parse_file!()
       |> Map.fetch!(:messages)
       |> MapSet.new(&IO.iodata_to_binary(&1.msgid))
@@ -44,7 +48,7 @@ defmodule MishkaCms.RecordLabelsGettextTest do
     missing = Enum.reject(labels, &MapSet.member?(msgids, &1))
 
     assert missing == [],
-           "labels missing from #{Path.relative_to_cwd(@pot)}: #{inspect(missing)}"
+           "labels missing from #{Path.relative_to_cwd(pot)}: #{inspect(missing)}"
   end
 
   defp declared_labels do

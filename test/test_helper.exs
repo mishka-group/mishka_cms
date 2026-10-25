@@ -50,5 +50,12 @@ end
 # a longer timeout only delays FAILURES, never successes.
 ExUnit.configure(assert_receive_timeout: 1_000)
 
-ExUnit.start()
+# THE SLOWEST FILES ARE TAGGED `:slow` AND LEFT OUT UNLESS ASKED FOR. Each takes more than thirty
+# seconds on its own, because it compiles a whole site, its pages and its components (or runs the
+# dev seeds) in a suite where almost every module is `async: false`, and together they were most of
+# the time a pull request waited. `mix test --include slow` runs them; CI does on a push to master, on
+# a tag and when started by hand (`.github/workflows/ci.yml`), and not on a pull request. A single
+# test is still run by its line, `mix test path/to/file_test.exs:42`, and a whole file with
+# `mix test path/to/file_test.exs --include slow`.
+ExUnit.start(exclude: [:slow])
 Ecto.Adapters.SQL.Sandbox.mode(MishkaCms.Repo, :manual)

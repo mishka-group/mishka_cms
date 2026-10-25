@@ -45,6 +45,8 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
   require Ash.Query
 
   @moduletag :integration
+  # Over thirty seconds on its own: left out of a pull request, see test/test_helper.exs.
+  @moduletag :slow
 
   # EVERY READ OF A RENDERED PAGE WAITS FOR THE BLOCKS ON IT, because most of them now read in the
   # background: a connected socket takes the `start_async/3` branch, so the first render is the

@@ -86,10 +86,11 @@ config :mishka_cms_core, :prefer_local_ui_kits, true
 
 # THE STYLED KIT FROM A FIXTURE, WITH NOTHING TO DOWNLOAD. A server downloads its kits into
 # `priv/cms_ui_kits/` at install, and none ships there; the tests read the copy of Chelekom's styled
-# bundle mishka_cms_core keeps in its `test/fixtures/cms_ui_kits/`.
+# bundle in this project's `test/fixtures/cms_ui_kits/`. It is not read from mishka_cms_core: a Hex
+# package never ships its `test/`, and CI has no `__extensions/` checkout to take one from.
 config :mishka_cms_core,
        :ui_kits_dir,
-       Path.expand("../__extensions/mishka_cms_core/test/fixtures/cms_ui_kits", __DIR__)
+       Path.expand("../test/fixtures/cms_ui_kits", __DIR__)
 
 # The code default also offers the headless package, which is not among the fixtures, so every cold
 # catalogue — the install

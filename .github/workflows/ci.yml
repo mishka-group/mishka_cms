@@ -1,13 +1,18 @@
 name: CI
 
-# PAUSED FOR NOW: the suites run locally. Started only by hand from the Actions tab; to turn it back
-# on, put back the triggers it had:
-#
-#   push:
-#     branches: [master]
-#   pull_request:
+# Every pull request, and every push to master. A tag that starts with `v` runs it too, for the image
+# job below. The Actions tab can start it by hand as well.
 on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
+
+# A newer push to the same branch or pull request makes the run in progress pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   MIX_ENV: test
@@ -20,6 +25,11 @@ env:
   # release or fixed libraries are out.
   OTP_VERSION: "29.0.5"
   ELIXIR_VERSION: "1.20.4-otp-29"
+  # setup-beam installs Hex from builds.hex.pm, and one slow response there failed a whole run
+  # ("Could not mix hex from any hex.pm mirror"). It tries these in order.
+  HEXPM_MIRRORS: |
+    https://builds.hex.pm
+    https://cdn.jsdelivr.net/hex
 
 jobs:
   # Compiled once; the jobs below start from this build.
@@ -31,43 +41,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Only this repository. The Mishka packages come from Hex at the versions mix.lock pins, as
+      # they do for any user of Mishka CMS, and mix.exs would use an __extensions/ checkout over Hex
+      # if it found one, so none is ever checked out here.
       - uses: actions/checkout@v7
-
-      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
-      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
-      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
 
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
           elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - uses: actions/cache@v6
         with:
@@ -89,41 +73,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
-      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
-      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
-
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
           elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - uses: actions/cache/restore@v6
         with:
@@ -137,10 +92,12 @@ jobs:
       # from the dependencies in .formatter.exs's import_deps, so it runs once they are fetched.
       - run: mix format --check-formatted
 
-  # FOUR MACHINES, A QUARTER OF THE TEST FILES EACH. Most of the suite is `async: false` — it shares
+  # SIX MACHINES, A SIXTH OF THE TEST FILES EACH. Most of the suite is `async: false` — it shares
   # the runtime's global state — and runs one module at a time, so more cores do not make it faster
   # and more machines do. Mix deals the test files out by `--partitions`, and each partition has its
-  # own Postgres and its own database (`config/test.exs` names it after MIX_TEST_PARTITION).
+  # own Postgres and its own database (`config/test.exs` names it after MIX_TEST_PARTITION, for
+  # whatever number there is). The matrix and `--partitions` below must name the same number; nothing
+  # else depends on it: the build cache key is the same for every partition.
   test:
     needs: build
     runs-on: ubuntu-latest
@@ -148,7 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        partition: [1, 2, 3, 4]
+        partition: [1, 2, 3, 4, 5, 6]
 
     services:
       postgres:
@@ -166,41 +123,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # mix.exs loads the CMS packages from __extensions/ (path dependencies), so each one is
-      # checked out there. mishka_cms_core, mishka_blog and mishka_document are private for now:
-      # the MISHKA_REPOS_TOKEN secret (a token that can read them) lets the job check them out.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
-
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
           elixir-version: ${{ env.ELIXIR_VERSION }}
           version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - uses: actions/cache/restore@v6
         with:
@@ -230,7 +158,14 @@ jobs:
 
       # --warnings-as-errors also fails on warnings in the test files, which a plain run can print
       # while a test captures stderr, where nobody sees them — each in the partition that compiles it.
-      - run: mix test --warnings-as-errors --partitions 4
+      #
+      # THE SLOWEST FILES ARE TAGGED `:slow` AND LEFT OUT OF A PULL REQUEST (`test/test_helper.exs`
+      # excludes them by default): each takes over thirty seconds on its own, compiling a whole site,
+      # its pages and its components or running the dev seeds, and together they were most of the
+      # time a pull request waited. They run on a push to master, on a tag and when started by hand,
+      # i.e. whenever the event is not a pull request, so what a pull request skips is run once it
+      # is merged.
+      - run: mix test --warnings-as-errors --partitions 6 ${{ github.event_name != 'pull_request' && '--include slow' || '' }}
         env:
           POSTGRES_HOST: localhost
           DB_HOST: localhost
@@ -247,35 +182,18 @@ jobs:
 
   # The image builds from a clean checkout. It carries no migrations (they are generated, not in
   # git), so this checks the build, not a deploy.
+  #
+  # Not on a pull request: it is the slowest job, and a pull request that passes the tests builds the
+  # same image once it is merged. It runs on a push to master, on a tag and when started by hand.
   docker:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')))
     runs-on: ubuntu-latest
     needs: [test, assets]
     steps:
       - uses: actions/checkout@v7
-      # The build context needs the packages under __extensions/, as the test job does.
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_gervaz
-          ref: ${{ vars.GERVAZ_REF || 'master' }}
-          path: __extensions/mishka_gervaz
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_cms_core
-          ref: ${{ vars.CORE_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_cms_core
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_blog
-          ref: ${{ vars.BLOG_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_blog
-      - uses: actions/checkout@v7
-        with:
-          repository: mishka-group/mishka_document
-          ref: ${{ vars.DOCUMENT_REF || 'master' }}
-          token: ${{ secrets.MISHKA_REPOS_TOKEN || github.token }}
-          path: __extensions/mishka_document
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
