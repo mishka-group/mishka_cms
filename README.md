@@ -72,9 +72,33 @@ docker compose -f examples/docker/dev-docker-compose.yml up -d
 docker compose -f examples/docker/dev-docker-compose.yml exec app bash
 ```
 
+## 🧪 Try it
+
+To see Mishka CMS running without installing Elixir, use the demo image. It has the default extensions, and it is for trying only, not for production: its migrations were generated for one release, so a newer demo needs a fresh database.
+
+```bash
+docker pull ghcr.io/mishka-group/mishka_cms-demo:0.0.1
+```
+
+[`examples/docker/demo-docker-compose.yml`](examples/docker/demo-docker-compose.yml) starts it with PostgreSQL 18. It explains how to make the secrets. One of them, `MISHKA_SETUP_TOKEN`, is the token the installer at `/install` asks for. The image is built for linux/amd64 and linux/arm64, and `gh attestation verify oci://ghcr.io/mishka-group/mishka_cms-demo:0.0.1 --owner mishka-group` checks that this repository's release workflow built it.
+
 ## 🚢 Deploy
 
-The `Dockerfile` in the repository root builds a release. Set `DATABASE_URL`, `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET`, and mount a volume at `MISHKA_DATA_DIR` (`/app/mishka_data` in the image) for Mnesia, uploaded files and caches. Run `/app/bin/migrate` before `/app/bin/server`. The image copies `priv/`, so run `mix ash.codegen cms_with_extensions` where you build it.
+A real install is your own copy of this repository, built with the `Dockerfile` in its root. The migrations are yours too. They follow the extensions your copy loads (`ash_domains` in `config/config.exs`), so this repository does not keep them, and you generate them once and commit them:
+
+```bash
+mix oban.install --yes
+mix ash.codegen first_install
+git add priv/repo/migrations priv/resource_snapshots
+```
+
+`mix ash.codegen` writes the migrations to `priv/repo/migrations` and the snapshots they came from to `priv/resource_snapshots`. Commit both: the next `mix ash.codegen` compares your resources with the snapshots and writes only the difference. The build checks them. It fails when there is no migration, and when your resources have changed since the last `mix ash.codegen`, and its message says what to run.
+
+Run the image with `DATABASE_URL`, `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET` set, and `MISHKA_SETUP_TOKEN` for the first run: `/install` refuses everyone without it, and you open it as `/install?token=...`. Set `SESSION_SIGNING_SALT` too, to replace the default salt of the session cookie. Mount a volume at `MISHKA_DATA_DIR` (`/app/mishka_data` in the image) for Mnesia, uploaded files and caches. Run `/app/bin/migrate` before `/app/bin/server`.
+
+To upgrade, bump the Mishka packages in `mix.exs` and run `mix deps.update` for them, then `mix ash.codegen upgrade_<version>`, commit what it wrote, and deploy. `/app/bin/migrate` runs only the migrations the database has not run yet.
+
+`mix dev_reset` deletes `priv/repo/migrations` and `priv/resource_snapshots` and generates them again, so use it only on a throwaway development database, never on one whose migrations you have deployed.
 
 ## 📚 Documentation
 

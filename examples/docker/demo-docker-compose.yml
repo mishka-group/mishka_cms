@@ -1,0 +1,68 @@
+# FOR TRYING MISHKA CMS ONLY. NOT FOR PRODUCTION.
+#
+# This starts the demo image, ghcr.io/mishka-group/mishka_cms-demo, which has the default extensions
+# and migrations generated for its release alone. A newer demo needs a fresh database: pin the tag
+# below to the one you tried, and remove the old data with `docker compose ... down -v` before you
+# move to another. A real install is your own copy of the repository with your own migrations, built
+# from the Dockerfile (see "Deploy" in the README).
+#
+# The secrets are not in this file. Make them once and keep them in a file named .env next to it,
+# which Docker Compose reads on every command (up, down, logs). Run this in the folder that holds
+# this file:
+#
+#   printf 'SECRET_KEY_BASE=%s\nTOKEN_SIGNING_SECRET=%s\nMISHKA_SETUP_TOKEN=%s\n' \
+#     "$(openssl rand -base64 64 | tr -d '\n')" "$(openssl rand -base64 32 | tr -d '\n')" \
+#     "$(openssl rand -hex 16)" > .env
+#   docker compose -f demo-docker-compose.yml up
+#
+# then open http://localhost:4000/install?token= and the MISHKA_SETUP_TOKEN from .env to install the
+# CMS. The installer refuses everyone without the token. Do not commit .env.
+
+x-mishka-env: &mishka-env
+  DATABASE_URL: ecto://mishka:mishka@db/mishka_cms
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE:?make one with openssl rand -base64 64}
+  TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET:?make one with openssl rand -base64 32}
+  MISHKA_SETUP_TOKEN: ${MISHKA_SETUP_TOKEN:?make one with openssl rand -hex 16}
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: mishka
+      POSTGRES_PASSWORD: mishka
+      POSTGRES_DB: mishka_cms
+    # Postgres 18 keeps its data under /var/lib/postgresql, not under /var/lib/postgresql/data.
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      # Over TCP: while the image sets the database up, a server that listens on a socket only
+      # answers pg_isready a moment before the real one is there.
+      test: ["CMD-SHELL", "pg_isready -U mishka -d mishka_cms -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Runs once and exits: creates the tables. The app starts after it has succeeded.
+  migrate:
+    image: ghcr.io/mishka-group/mishka_cms-demo:0.0.1
+    command: ["/app/bin/migrate"]
+    environment: *mishka-env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    image: ghcr.io/mishka-group/mishka_cms-demo:0.0.1
+    environment: *mishka-env
+    ports:
+      - "4000:4000"
+    # Mnesia, uploaded files and caches (MISHKA_DATA_DIR, /app/mishka_data in the image).
+    volumes:
+      - mishka_data:/app/mishka_data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  mishka_data:
