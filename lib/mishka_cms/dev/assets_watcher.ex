@@ -225,9 +225,11 @@ defmodule MishkaCms.Dev.AssetsWatcher do
       # Watch Phoenix templates and views
       "lib/mishka_cms_web",
 
-      # Watch every git-submoduled extension's source tree — they ship
-      # LiveViews/components whose Tailwind classes must invalidate the
-      # shared-base CSS just like host-app files.
+      # Watch every extension checkout under `__extensions/` — the Mishka
+      # packages a developer works on locally (a package from Hex sits in
+      # `deps/` instead, and this entry is skipped when the folder is absent).
+      # They ship LiveViews/components whose Tailwind classes must invalidate
+      # the shared-base CSS just like host-app files.
       "__extensions",
 
       # Watch any custom CSS files
