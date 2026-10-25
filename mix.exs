@@ -164,7 +164,7 @@ defmodule MishkaCms.MixProject do
       {:guarded_struct, "~> 0.1.4"},
 
       # Extensions
-      mishka_dep(:mishka_cms_core, "~> 0.0.1"),
+      mishka_dep(:mishka_cms_core, "~> 0.0.2"),
       mishka_dep(:mishka_blog, "~> 0.0.1"),
       mishka_dep(:mishka_document, "~> 0.0.1"),
       mishka_dep(:mishka_gervaz, "~> 0.0.2"),
