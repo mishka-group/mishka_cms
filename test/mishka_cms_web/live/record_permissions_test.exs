@@ -41,9 +41,17 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
 
   @locked ["members:read"]
 
-  # A unique site name per test: a component's module is named from its site's name, so a reused one
-  # renders the previous test's module against a site that test rolled back.
-  setup %{url_mode: url_mode} do
+  # ONE SITE FOR THE WHOLE MODULE, provisioned once. Provisioning compiles every page of the blog
+  # and of the documentation, which is nearly all that the setup used to cost per test, and none of
+  # the tests below touches a provisioned page: each adds a post, a category or a document to the
+  # site and asks for it. What a test adds is taken back by the savepoint
+  # `MishkaCms.DataCase.setup_module_sandbox/0` gives it.
+  #
+  # A unique site name per module: a component's module is named from its site's name, so a reused
+  # one renders the previous module's pages against a site that module rolled back.
+  setup_all %{url_mode: url_mode} do
+    context = MishkaCms.DataCase.setup_module_sandbox()
+
     SiteState.clear()
     name = "recordacl#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -79,7 +87,7 @@ defmodule MishkaCmsWeb.RecordPermissionsTest do
     MishkaDocument.Provision.ensure!(site)
     register_routes!(site)
 
-    %{site: site}
+    Map.put(context, :site, site)
   end
 
   describe "a post that names permissions" do

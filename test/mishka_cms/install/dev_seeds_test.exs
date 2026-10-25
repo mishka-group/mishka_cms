@@ -8,9 +8,15 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   through the live Ash actions (no mocks); the heavier extension seeds are not run at their dev
   volumes here — `run([])` covers the core path the installer's default selection takes, and the
   blog's own pipeline is run once at the smallest volume it accepts, to check the pictures it writes.
+
+  THE CORE SEED RUNS ONCE FOR THE MODULE, in `setup_all`, and not once per test: it takes ten seconds,
+  and a test that only reads what it wrote used to pay it again. Every test reads the rows of that one
+  run, and the ones that write more — a second run, an edit, a page for a reference site — are put
+  back by `MishkaCms.DataCase.setup_module_sandbox/0`, which gives each test a savepoint to roll back
+  to. The two tests that need a database with nothing in it are in
+  `MishkaCmsCore.Dev.SeedsInstallFreshTest`, at the end of this file.
   """
   use MishkaCms.DataCase, async: false
-  use Oban.Testing, repo: MishkaCms.Repo
 
   import MishkaCms.Test.Factory, only: [create_site!: 1]
   import Phoenix.LiveViewTest, only: [rendered_to_string: 1]
@@ -43,10 +49,31 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     Stylesheet
   }
 
-  alias MishkaCmsCore.Runtime.Workers.SiteRuntimeWorker
   alias MishkaCmsCore.Settings
 
   require Ash.Query
+
+  # A SEEDED LIBRARY IS FILES, AND THE SANDBOX CANNOT ROLL A FILE BACK. The run stores the whole
+  # shipped media set under `priv/static/uploads/<site id>/`, and each seeded site has an id of its
+  # own, so nothing a run writes is ever written over: left alone, this file would grow that
+  # directory without bound.
+  #
+  # WHAT GOES IS NAMED, not whatever turned up. That is the directory the developer's own server
+  # uploads into, and this file takes a minute to run — long enough for a real upload to land in it
+  # under a site id of its own, which a "remove everything that appeared" sweep would take with it.
+  # A run knows the sites it made, and those are the ones it takes back.
+  setup_all do
+    context = MishkaCms.DataCase.setup_module_sandbox()
+    core = Seeds.run([])
+
+    on_exit(fn ->
+      Enum.each(core.sites, &File.rm_rf!(Path.join(uploads_directory(), &1.id)))
+    end)
+
+    Map.put(context, :core, core)
+  end
+
+  defp uploads_directory, do: Application.app_dir(:mishka_cms, "priv/static/uploads")
 
   test "categories/0 lists the loaded extension seeders" do
     keys = Seeds.categories() |> Enum.map(& &1.key)
@@ -57,9 +84,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # THREE SITES A BROWSER ON THIS MACHINE CAN REALLY OPEN. `mishka.tools` and `api.mishka.tools`
   # resolve to public IPs, so every page seeded onto them was unreachable from the machine that
   # seeded them; `*.localhost` is the loopback.
-  test "run/1 seeds the three dev sites, the sample master and the content" do
-    core = seed_core()
-
+  test "run/1 seeds the three dev sites, the sample master and the content", %{core: core} do
     assert Enum.map(core.sites, &{&1.name, &1.host}) |> Enum.sort() ==
              [
                {"localhost", "localhost"},
@@ -97,8 +122,6 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # the `LocalhostClipboard` bug the hook test below exists for: seeded for three sites from one
   # string, a hardcoded site name gives one site a header and the other two a red box.
   test "every component the seeded pages call for exists, in the scope the page asks for" do
-    seed_core()
-
     pages =
       Page
       |> Ash.Query.for_read(:read_any)
@@ -158,9 +181,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # nothing whatever a developer picked. Two, so a developer has the shape without a catalogue to
   # wade through — and both used by every seeded page, because a component nothing calls is a row,
   # not a demonstration.
-  test "every site gets its own two components, and its own name in them" do
-    core = seed_core()
-
+  test "every site gets its own two components, and its own name in them", %{core: core} do
     components =
       Component
       |> Ash.Query.for_read(:read_any)
@@ -206,8 +227,6 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # decoration. Found by opening a seeded page's preview and reading what the socket had actually
   # registered, which is the only place the difference shows.
   test "every hook a seeded page names is one its site really registers" do
-    seed_core()
-
     # `is_global` is a CALCULATION, and unloaded it is `%Ash.NotLoaded{}` — which `browser_name/2`
     # reads as "not global", so every global hook comes back under its bare name and this test would
     # accuse the seeds of naming hooks that exist.
@@ -262,8 +281,6 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # Two of them, deliberately: one form is not enough to catch the bug that matters, which is one
   # form's typing marking the other's fields.
   test "a seeded page carries two independent forms to develop against" do
-    seed_core()
-
     template =
       Page
       |> Ash.Query.for_read(:read_any)
@@ -340,8 +357,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # the only assertion here that would have caught `site="Global"` being written as
   # `assigns[:site]` in the footer, which resolves `chelekom-footer` under the SITE, finds nothing,
   # and puts that box where every page's footer should be.
-  test "each site's own components really render, with that site's name in them" do
-    core = seed_core()
+  test "each site's own components really render, with that site's name in them", %{core: core} do
     tell_the_cache(core.sites)
 
     for site <- core.sites, name <- ["site-header", "site-footer"] do
@@ -368,8 +384,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
   # AND THE FOOTER IS A `<footer>`. The site's two components are the only markup every page on
   # every site carries, so whatever is wrong with them is wrong everywhere at once.
-  test "the site footer renders a real footer element" do
-    core = seed_core()
+  test "the site footer renders a real footer element", %{core: core} do
     tell_the_cache(core.sites)
     site = hd(core.sites)
 
@@ -385,8 +400,6 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # invented for it — Ash fills a `:string` attribute with arbitrary unicode — and the editor drew a
   # chip for each, so four unreadable categories sat beside Feedback, Forms and Media.
   test "every seeded component lands in a category a reader can read" do
-    seed_core()
-
     types =
       Component
       |> Ash.Query.for_read(:read_any)
@@ -411,9 +424,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   #
   # ASKED OF THE ROUTER, not of a list of paths written out here. A route added tomorrow is in the
   # answer the moment it is added; a list would go on passing.
-  test "no address the seeds write is one this application's own router answers" do
-    core = seed_core()
-
+  test "no address the seeds write is one this application's own router answers", %{core: core} do
     for site <- core.sites, page <- seeded_pages(site) do
       address = concrete(page.path)
 
@@ -427,9 +438,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
   # EVERY LANGUAGE A SITE PUBLISHES IN IS ONE ITS SEEDED PAGES ANSWER IN. The list is a setting, and
   # a `/:lang` page answers only the codes it holds — see `MishkaCmsCore.Runtime.Languages`.
-  test "each site is given its own languages, and nothing overwrites one a developer changed" do
-    core = seed_core()
-
+  test "each site is given its own languages, and nothing overwrites one a developer changed", %{
+    core: core
+  } do
     by_host = Map.new(core.sites, &{&1.host, Languages.site(&1.id)})
 
     assert by_host["localhost"] == ["en", "fa"]
@@ -446,9 +457,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
   # BOTH URL MODES ARE OPEN ON EVERY RESEED: `site-a` prefixes every language, the others leave
   # their first unprefixed.
-  test "each site is given its URL mode, and nothing overwrites one a developer changed" do
-    core = seed_core()
-
+  test "each site is given its URL mode, and nothing overwrites one a developer changed", %{
+    core: core
+  } do
     by_host = Map.new(core.sites, &{&1.host, Languages.url_mode(&1.id)})
 
     assert by_host["localhost"] == "prefix_others"
@@ -475,9 +486,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     "api" => ["admin:api:*"]
   }
 
-  test "every site gets an account per role, holding exactly that role's names" do
-    core = seed_core()
-
+  test "every site gets an account per role, holding exactly that role's names", %{core: core} do
     for site <- core.sites, {role, names} <- @site_roles do
       email = "#{role}@#{site.name}.test"
       account = account(email, site.id)
@@ -487,8 +496,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     end
   end
 
-  test "a second run grants no account anything more" do
-    core = seed_core()
+  test "a second run grants no account anything more", %{core: core} do
     before = Map.new(core.sites, &{&1.id, grants(&1.id)})
 
     Seeds.run([])
@@ -497,8 +505,6 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   end
 
   test "stores the install's names and no other" do
-    seed_core()
-
     stored =
       Permission
       |> Ash.read!(authorize?: false, page: false)
@@ -511,8 +517,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
              |> Enum.sort()
   end
 
-  test "the sample master holds * and none@example.com holds nothing" do
-    core = seed_core()
+  test "the sample master holds * and none@example.com holds nothing", %{core: core} do
     localhost = Enum.find(core.sites, &(&1.host == "localhost"))
 
     assert "master@example.com" |> account(nil) |> held() == ["*"]
@@ -533,9 +538,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # `text-ink`, `border-line` and the rest, and those are utilities only because this row declares
   # the tokens they are generated from. Without it the whole design renders as unstyled body text —
   # silently, since a class nothing generated is simply a class.
-  test "every site gets the theme its pages are written in" do
-    core = seed_core()
-
+  test "every site gets the theme its pages are written in", %{core: core} do
     for site <- core.sites do
       sheets =
         Stylesheet
@@ -562,9 +565,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # in a document — which is what the generated layouts this replaced all did. And a layout that
   # shows the flash is what lets every page stop carrying a message region of its own; see
   # `MishkaCmsCore.Runtime.Compilers.LiveViewCompiler.shows_messages?/1`.
-  test "every seeded layout shows messages and opens no second document" do
-    core = seed_core()
-
+  test "every seeded layout shows messages and opens no second document", %{core: core} do
     layouts =
       Layout
       |> Ash.Query.for_read(:read_any)
@@ -585,9 +586,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # DEV IS PRODUCTION: every dev site's pages are drawn in the column a stranger's install draws
   # them in, not one the seeds hand the layout. A page drawing the design's column of its own — a
   # blog's, a docs' — was drawn in two in dev and in one in production.
-  test "every dev site's site-main draws the production column and the section bar" do
-    core = seed_core()
-
+  test "every dev site's site-main draws the production column and the section bar", %{core: core} do
     column =
       ~s(<main id="site-main" class="mx-auto w-full max-w-[1160px] flex-1 px-8 pb-24">{@inner_content}</main>)
 
@@ -609,9 +608,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # first install opens on, not on a home the seeds wrote for the occasion: the template, the name
   # and the stamps are the ones `StarterContent.seed!/2` writes on a site given nothing else, and
   # the dev seeds' own pages sit beside it.
-  test "every dev site's / is exactly the home page a production install writes" do
-    core = seed_core()
-
+  test "every dev site's / is exactly the home page a production install writes", %{core: core} do
     reference_name = "reference#{System.unique_integer([:positive])}"
     reference = create_site!(name: reference_name, host: "#{reference_name}.test", active: true)
     StarterContent.seed!(reference)
@@ -643,9 +640,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     "site-b" => {"site-b-showcase", "SiteBConsoleLogger", ["en"]}
   }
 
-  test "every dev site keeps its demo at /showcase, on the site's one layout" do
-    core = seed_core()
-
+  test "every dev site keeps its demo at /showcase, on the site's one layout", %{core: core} do
     for site <- core.sites do
       {id, hook, languages} = Map.fetch!(@showcases, site.name)
       pages = seeded_pages(site)
@@ -690,9 +685,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
   @nav_link ~r/navigate=\{site_path\("(\/:lang[^"]*)", lang\(assigns\)\)\}/
 
-  test "every dev site's header holds its links in one Dev dropdown, and each lands on a page" do
-    core = seed_core()
-
+  test "every dev site's header holds its links in one Dev dropdown, and each lands on a page", %{
+    core: core
+  } do
     for site <- core.sites do
       MishkaBlog.Provision.ensure!(site)
       MishkaDocument.Provision.ensure!(site)
@@ -734,9 +729,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   end
 
   # THE SIGN-IN PAGES EVERY SITE GETS, and their Persian words only where a site publishes in `fa`.
-  test "every site gets the sign-in pages, and a site publishing in fa their Persian words" do
-    core = seed_core()
-
+  test "every site gets the sign-in pages, and a site publishing in fa their Persian words", %{
+    core: core
+  } do
     for site <- core.sites do
       signing_in = site |> seeded_pages() |> Enum.filter(&(&1.section == "auth"))
 
@@ -748,21 +743,6 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
     assert persian(localhost, "Sign in") == "ورود"
     assert persian(site_b, "Sign in") == nil
-  end
-
-  # THE SEEDS WRITE THEM THEMSELVES, so the sites they create enqueue no job to write them again.
-  test "the sites it creates enqueue no job for their sign-in pages" do
-    Application.put_env(:mishka_cms_core, :env_test?, false)
-    on_exit(fn -> Application.put_env(:mishka_cms_core, :env_test?, true) end)
-
-    core = seed_core()
-
-    for site <- core.sites do
-      refute_enqueued(
-        worker: SiteRuntimeWorker,
-        args: %{"site_id" => site.id, "transition" => "provision"}
-      )
-    end
   end
 
   defp persian(site, key) do
@@ -780,9 +760,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # `<script>` in a page template are both dropped by the browser with nothing in the page to say so
   # — see `MishkaCmsCore.Runtime.Plugs.SecurityHeaders` — so a sample page written with either is a
   # sample of something that does not work.
-  test "no seeded template carries an inline style or a script tag" do
-    core = seed_core()
-
+  test "no seeded template carries an inline style or a script tag", %{core: core} do
     for site <- core.sites, page <- seeded_pages(site) do
       refute page.template =~ "style=", "#{site.name} #{page.path} carries an inline style"
       refute page.template =~ "<script", "#{site.name} #{page.path} carries a script tag"
@@ -792,8 +770,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # THE ONE PART OF THE EDITOR A FRESH SEED LEFT EMPTY. A draft picker with nothing in it says
   # nothing about what a draft is; this is an edit waiting on a live page, on the site a developer
   # opens first.
-  test "localhost is seeded an unpublished draft, and a second run does not add another" do
-    core = seed_core()
+  test "localhost is seeded an unpublished draft, and a second run does not add another", %{
+    core: core
+  } do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
 
     pricing = Enum.find(seeded_pages(site), &(&1.path == "/:lang/pricing"))
@@ -874,8 +853,6 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # NOTHING TO CHOOSE. A dev database is where every component gets tried, so the seed installs all
   # of every kit on disk — the picker's "only what every site needs" is the production install's.
   test "the core seed installs every component of every kit" do
-    seed_core()
-
     for kit <- UiKitHandler.available_kits() do
       installed =
         Component
@@ -892,9 +869,9 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # in place of every thumbnail, and any page or post that used one of those pictures answered 404
   # for it. Nothing raised, then or now: a missing file is a 404 in the browser and silence in the
   # seed, which is exactly why it has to be asserted here.
-  test "every media row a dev seed writes has its file where the endpoint serves it" do
-    core = seed_core()
-
+  test "every media row a dev seed writes has its file where the endpoint serves it", %{
+    core: core
+  } do
     all_rows = Enum.flat_map(core.sites, &Ash.read!(Media, tenant: &1.id, authorize?: false))
 
     # THE STARTER'S LOGO IS NOT PART OF THE SET: one file, in the master site's library alone, which
@@ -955,8 +932,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # project or in the extension the generator lives in — so a template reading
   # `@page_data.page.content["images"]` drew two broken pictures. A generator cannot know what files
   # exist; the site's own media rows do.
-  test "a page the dev generators build names only pictures its site really has" do
-    core = seed_core()
+  test "a page the dev generators build names only pictures its site really has", %{core: core} do
     site = hd(core.sites)
     layout = Layout |> Ash.read!(tenant: site.id, authorize?: false) |> hd()
 
@@ -981,8 +957,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # suite — and every blogger and team was seeded faceless. `stress_seed/3` is `dev_seed/3`'s
   # pipeline with the volumes given rather than derived, which is the only way to run the real code
   # path in a test without seeding a whole blog.
-  test "every picture the blog seed writes points at a file that is there" do
-    core = seed_core()
+  test "every picture the blog seed writes points at a file that is there", %{core: core} do
     site = hd(core.sites)
     users = core.users.master ++ Map.get(core.users.tenant, site.id, [])
 
@@ -1064,6 +1039,47 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   defp paths(value) when is_list(value), do: Enum.flat_map(value, &paths/1)
   defp paths("/" <> _rest = value), do: [value]
   defp paths(_other), do: []
+end
+
+defmodule MishkaCmsCore.Dev.SeedsInstallFreshTest do
+  @moduledoc """
+  The two tests of `MishkaCmsCore.Dev.SeedsInstallTest` that cannot read one shared run, because what
+  they check is the run itself on a database with NOTHING in it: how it behaves when a LiveView's
+  registered name is among its ancestors, and what it enqueues for the sites it creates. Each runs
+  the seed in its own sandbox, as the whole file used to.
+  """
+  use MishkaCms.DataCase, async: false
+  use Oban.Testing, repo: MishkaCms.Repo
+
+  alias MishkaCmsCore.Dev.Seeds
+  alias MishkaCmsCore.Runtime.Workers.SiteRuntimeWorker
+
+  # THE SEEDS WRITE THEM THEMSELVES, so the sites they create enqueue no job to write them again.
+  test "the sites it creates enqueue no job for their sign-in pages" do
+    Application.put_env(:mishka_cms_core, :env_test?, false)
+    on_exit(fn -> Application.put_env(:mishka_cms_core, :env_test?, true) end)
+
+    core = seed_core()
+
+    for site <- core.sites do
+      refute_enqueued(
+        worker: SiteRuntimeWorker,
+        args: %{"site_id" => site.id, "transition" => "provision"}
+      )
+    end
+  end
+
+  test "run/1 survives a registered-name (atom) ancestor — the LiveView/installer context" do
+    # A LiveView process carries a registered NAME (atom) in `$ancestors`; `Ash.Generator.sequence`
+    # (used by the seed generators) used to crash calling `Process.info/2` on it. run/1 must prune the
+    # ancestor chain to pids and seed successfully from that context too.
+    Process.put(:"$ancestors", [self(), :a_registered_process_name])
+
+    core = seed_core()
+
+    assert length(core.sites) > 0
+    assert Enum.all?(Process.get(:"$ancestors", []), &is_pid/1)
+  end
 
   # A SEEDED LIBRARY IS FILES, AND THE SANDBOX CANNOT ROLL A FILE BACK. Every run here stores the
   # whole shipped media set under `priv/static/uploads/<site id>/`, and each seeded site has an id of
@@ -1085,16 +1101,4 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   end
 
   defp uploads_directory, do: Application.app_dir(:mishka_cms, "priv/static/uploads")
-
-  test "run/1 survives a registered-name (atom) ancestor — the LiveView/installer context" do
-    # A LiveView process carries a registered NAME (atom) in `$ancestors`; `Ash.Generator.sequence`
-    # (used by the seed generators) used to crash calling `Process.info/2` on it. run/1 must prune the
-    # ancestor chain to pids and seed successfully from that context too.
-    Process.put(:"$ancestors", [self(), :a_registered_process_name])
-
-    core = seed_core()
-
-    assert length(core.sites) > 0
-    assert Enum.all?(Process.get(:"$ancestors", []), &is_pid/1)
-  end
 end

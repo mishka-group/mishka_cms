@@ -15,6 +15,11 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   Every seeded thing is counted before and after, because "it did not raise" is not the assertion:
   a step that created a second layout, a second error page or a second copy of every picture would
   pass that and fill the database a little more on every run.
+
+  THE FIRST RUN IS MADE ONCE FOR THE MODULE, in `setup_all`: every test below starts from the
+  database a developer has after one `Seeds.run([])`, and it is the second run that each one is
+  about. A test that edits the seeded rows or runs the seeds again is put back by
+  `MishkaCms.DataCase.setup_module_sandbox/0`, which gives each test a savepoint to roll back to.
   """
   use MishkaCms.DataCase, async: false
 
@@ -26,13 +31,26 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
 
   @counted [Layout, Page, Component, JsHook, ErrorPage, Media, MediaCategory]
 
+  # A SEEDED LIBRARY IS FILES, AND THE SANDBOX CANNOT ROLL A FILE BACK — the same reason
+  # `MishkaCmsCore.Dev.SeedsInstallTest` takes its own sites' directories back, and the same rule:
+  # what goes is named, because that directory is the developer's own server's uploads.
+  setup_all do
+    context = MishkaCms.DataCase.setup_module_sandbox()
+    core = Seeds.run([])
+
+    on_exit(fn ->
+      Enum.each(core.sites, &File.rm_rf!(Path.join(uploads_directory(), &1.id)))
+    end)
+
+    Map.put(context, :core, core)
+  end
+
   # AND IT SAYS SO. `SeedMedia.install/1` answers with the rows THIS run wrote, so `[]` on a second
   # run means the library is complete — not that the set is empty, which is what the caller used to
   # read it as. The developer reseeding to pick up new pictures was told they had none, once per
   # site, by the one step the whole change exists for.
-  test "a second run of the core seed adds nothing, changes nothing, and says the library is complete" do
-    core = seed_core()
-
+  test "a second run of the core seed adds nothing, changes nothing, and says the library is complete",
+       %{core: core} do
     before = census(core.sites)
     said = announced(fn -> Seeds.run([]) end)
 
@@ -49,8 +67,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   # NEVER OVERWRITE WHAT AN ADMIN MAY HAVE EDITED — the rule the whole file is written to. A second
   # run that wrote the sample text back over a page somebody had rewritten would be the seed undoing
   # a day's work every time they wanted the newest pictures.
-  test "a page and a component the admin rewrote survive a second run" do
-    core = seed_core()
+  test "a page and a component the admin rewrote survive a second run", %{core: core} do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
 
     page = one(Page, site.id, &(&1.path == "/:lang/about"))
@@ -75,8 +92,9 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   # AND THE ADDRESS IS STILL SEEDED. `/:lang/about` is free once that page has been moved off it, so
   # the seed writes its own About page there under the next free NAME — the site answers where it
   # should again, and the developer's moved page is exactly where they put it.
-  test "a page whose name the site holds at another address is seeded under another name" do
-    core = seed_core()
+  test "a page whose name the site holds at another address is seeded under another name", %{
+    core: core
+  } do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
 
     moved = one(Page, site.id, &(&1.path == "/:lang/about"))
@@ -122,8 +140,9 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   # master account of that name is still there. Asked without a scope, the seed's own "is this user here?" read then saw two rows,
   # `Ash.read_one/2` answered an error, the error read as "not there", and the run died trying to
   # create the master account it already had.
-  test "a site account holding the sample master's address does not stop a second run" do
-    core = seed_core()
+  test "a site account holding the sample master's address does not stop a second run", %{
+    core: core
+  } do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
 
     tenant_account!("master@example.com", site.id)
@@ -172,8 +191,9 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   # AN ERROR PAGE SEEDED BEFORE THE OFFLINE ENTRY EXISTED GETS IT. Every site on a developer's
   # database already has its Error Page, and the starter writes one only for a site with none, so
   # without this a reseed left localhost showing the built-in page when it was taken offline.
-  test "a second run adds the offline entry to an error page that has none, and nothing else" do
-    core = seed_core()
+  test "a second run adds the offline entry to an error page that has none, and nothing else", %{
+    core: core
+  } do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
     page = one(ErrorPage, site.id, &(&1.site_id == site.id))
 
@@ -197,8 +217,9 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   # asks about all of its names at once. Read through a page sized by the names alone, one name's
   # discarded copies filled it, the other looked absent, and the run wrote a second copy of a row
   # the admin had thrown away: the duplication this whole file was changed to stop.
-  test "a hook the admin archived is recognised from behind another name's archived copies" do
-    core = seed_core()
+  test "a hook the admin archived is recognised from behind another name's archived copies", %{
+    core: core
+  } do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
 
     hooks = Ash.read!(JsHook, tenant: site.id, authorize?: false, page: false)
@@ -330,19 +351,6 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
       authorize?: false
     )
     |> Ash.create!()
-  end
-
-  # A SEEDED LIBRARY IS FILES, AND THE SANDBOX CANNOT ROLL A FILE BACK — the same reason
-  # `MishkaCmsCore.Dev.SeedsInstallTest` takes its own sites' directories back, and the same rule:
-  # what goes is named, because that directory is the developer's own server's uploads.
-  defp seed_core do
-    core = Seeds.run([])
-
-    on_exit(fn ->
-      Enum.each(core.sites, &File.rm_rf!(Path.join(uploads_directory(), &1.id)))
-    end)
-
-    core
   end
 
   defp uploads_directory, do: Application.app_dir(:mishka_cms, "priv/static/uploads")

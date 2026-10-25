@@ -54,7 +54,15 @@ defmodule MishkaCmsWeb.PageQueriesTest do
   # nothing: their editions are in `SiteState`.
   @budgets %{page: 8, front: 7, library: 4, home: 0, translated: 0}
 
-  setup do
+  # ONE SITE FOR THE WHOLE MODULE, set up once. Provisioning compiles every page of the site, which
+  # was nearly all that this setup cost each test, and the tests below only add to the site and ask
+  # for it: what a test adds or changes is taken back by the savepoint that
+  # `MishkaCms.DataCase.setup_module_sandbox/0` gives it, and the cache by the snapshot it takes of
+  # it. The name is unique per module: a component's module is named from its site's name, so a
+  # reused one renders the previous module's pages against a site that module rolled back.
+  setup_all do
+    context = MishkaCms.DataCase.setup_module_sandbox()
+
     SiteState.clear()
     name = "queries#{System.unique_integer([:positive])}"
     site = create_site!(name: name, host: "#{name}.test", active: true, master: true)
@@ -86,7 +94,11 @@ defmodule MishkaCmsWeb.PageQueriesTest do
     MishkaDocument.Provision.ensure!(site)
     register_routes!(site)
 
-    %{site: site, layout_id: layout_id, about: about, fa: fa}
+    context
+    |> Map.put(:site, site)
+    |> Map.put(:layout_id, layout_id)
+    |> Map.put(:about, about)
+    |> Map.put(:fa, fa)
   end
 
   for {page, path, label} <- [
