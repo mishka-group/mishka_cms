@@ -95,7 +95,7 @@ defmodule MishkaCms.MixProject do
       {:ash_events, "~> 0.8"},
       {:ash_state_machine, "~> 0.2"},
       {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
-      {:ash_authentication, "~> 5.0.0-rc.15", override: true},
+      {:ash_authentication, "~> 5.0.0-rc.15"},
       {:jose, "~> 1.11"},
       {:ash_postgres, "~> 2.15"},
       {:ash_json_api, "~> 1.7"},
@@ -171,10 +171,10 @@ defmodule MishkaCms.MixProject do
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
       # the ones the sites do not offer.
-      mishka_dep(:mishka_cms_auth_google, :github),
-      mishka_dep(:mishka_cms_auth_github, :github),
-      mishka_dep(:mishka_cms_auth_slack, :github),
-      mishka_dep(:mishka_cms_auth_discord, :github)
+      mishka_dep(:mishka_cms_auth_google, "~> 0.0.1"),
+      mishka_dep(:mishka_cms_auth_github, "~> 0.0.1"),
+      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.1"),
+      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.1")
     ]
   end
 
