@@ -9,6 +9,10 @@ name: REUSE
 on:
   workflow_dispatch:
 
+# No job writes to the repository, so the token can only read it.
+permissions:
+  contents: read
+
 jobs:
   reuse:
     runs-on: ubuntu-latest

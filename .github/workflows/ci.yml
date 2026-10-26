@@ -14,6 +14,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# No job writes to the repository, so the token can only read it.
+permissions:
+  contents: read
+
 env:
   MIX_ENV: test
   # TEMPORARY: OTP 29.0.5, not the 29.1.x of .tool-versions, in every job and every cache key
