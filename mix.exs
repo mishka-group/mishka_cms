@@ -148,6 +148,7 @@ defmodule MishkaCms.MixProject do
       {:igniter, "~> 0.8", only: :dev},
       {:usage_rules, "~> 1.2", only: [:dev]},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false, warn_if_outdated: true},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
 
       # Extra Stuff
       {:jason, "~> 1.4"},
