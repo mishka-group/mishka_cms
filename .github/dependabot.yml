@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Dependabot opens one pull request per ecosystem and week: every version update of an ecosystem is
+# grouped into a single PR and checked weekly, so keeping up costs one review a week and not one per
+# package. Security updates are not bound to this schedule: Dependabot opens them as soon as an
+# advisory is published, when they are enabled in the repository settings.
+
+version: 2
+
+updates:
+  # increase: an app raises the requirement in mix.exs together with mix.lock.
+  - package-ecosystem: mix
+    directory: /
+    schedule:
+      interval: weekly
+    versioning-strategy: increase
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      hex-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: bun
+    directory: /assets
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      bun-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /examples/docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      docker-images:
+        patterns:
+          - "*"
