@@ -10,12 +10,12 @@
 version: 2
 
 updates:
-  # increase: an app raises the requirement in mix.exs together with mix.lock.
+  # No versioning-strategy: Dependabot rejects `increase` for mix, and its default (`auto`) already
+  # raises an app's requirement in mix.exs together with mix.lock when a release needs it.
   - package-ecosystem: mix
     directory: /
     schedule:
       interval: weekly
-    versioning-strategy: increase
     commit-message:
       prefix: "chore(deps)"
     groups:
