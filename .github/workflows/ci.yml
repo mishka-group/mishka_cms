@@ -92,6 +92,32 @@ jobs:
       # from the dependencies in .formatter.exs's import_deps, so it runs once they are fetched.
       - run: mix format --check-formatted
 
+  # mix_audit checks mix.lock against the elixir-security-advisories database. It runs a task from a
+  # dependency, so it starts from the build like the format check. Hex's own audit is hex-audit.yml.
+  audit:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - run: mix deps.audit
+
   # SIX MACHINES, A SIXTH OF THE TEST FILES EACH. Most of the suite is `async: false` — it shares
   # the runtime's global state — and runs one module at a time, so more cores do not make it faster
   # and more machines do. Mix deals the test files out by `--partitions`, and each partition has its
