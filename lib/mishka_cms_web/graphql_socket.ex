@@ -85,8 +85,8 @@ defmodule MishkaCmsWeb.GraphqlSocket do
   def id(%{assigns: %{site_id: site_id}}), do: SiteAvailability.socket_id(site_id)
 
   @doc """
-  The WebSocket transport's `:error_handler`: answers a connect refused for its site's state as
-  `/gql` answers a request, and anything else with Phoenix's bare `403`.
+  Answers a connect refused for its site's state as `/gql` answers a request, and anything else with
+  Phoenix's bare `403`. It is the WebSocket transport's `:error_handler`:
 
       socket "/ws/gql", MishkaCmsWeb.GraphqlSocket,
         websocket: [

@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 defmodule MishkaCmsWeb.AshJsonApiRouter do
+  @moduledoc """
+  JSON:API for the Runtime, Accounts, Blog and Document domains, which the router forwards
+  `/api/json` to. `modify_open_api_spec/3` titles the OpenAPI spec and adds the `X-No-Tenant` header
+  to every operation; the router serves that spec itself, behind `:api_docs`.
+  """
   @domains [
     MishkaCmsCore.Runtime,
     MishkaCmsCore.Accounts,

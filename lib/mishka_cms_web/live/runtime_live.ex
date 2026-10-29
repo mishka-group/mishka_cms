@@ -547,7 +547,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
           {:ok, socket} ->
             result =
-              apply(page_module, :handle_event, [event_name, event_params, socket])
+              page_module.handle_event(event_name, event_params, socket)
               |> then(&Hook.call("RuntimeLive.HandleEvent.AfterCallEvent", &1))
 
             final_result =
@@ -739,7 +739,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
         %{private: %{site: ^site}} = page_module.__page_information__()
 
         result =
-          apply(page_module, :handle_info, [message, socket])
+          page_module.handle_info(message, socket)
           |> then(&Hook.call("RuntimeLive.HandleInfo.AfterCallInfo", &1))
 
         final_result =
@@ -1239,13 +1239,12 @@ defmodule MishkaCmsWeb.RuntimeLive do
   defp align_page_state(socket, _page), do: socket
 
   defp state_names(state),
-    do:
-      for(
-        entry <- state,
-        name = entry[:name] || entry["name"],
-        PageState.valid_name?(name),
-        do: name
-      )
+    do: for(entry <- state, name = state_name(entry), PageState.valid_name?(name), do: name)
+
+  # A state entry (`Page`'s `state`, a list of maps) may carry its name under an atom or a string key.
+  defp state_name(%{name: name}) when not is_nil(name), do: name
+  defp state_name(%{"name" => name}), do: name
+  defp state_name(_entry), do: nil
 
   # WHAT THE PAGE ASKS FOR, READ THE WAY THE COMPILER READS IT.
   # `MishkaCmsCore.Runtime.Compilers.LiveViewCompiler` writes `permissions || []` into the module, so
