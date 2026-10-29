@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+[exit: :low, format: "txt", ignore: ["Config.HTTPS", "Config.CSP"], ignore_files: [], include_mix_tasks: false, include_scripts: false, out: nil, private: true, router: "lib/mishka_cms_web/router.ex", skip: true, summary: false, threshold: :low, verbose: false]
