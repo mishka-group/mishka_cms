@@ -7,10 +7,9 @@
 // named by an admin template; they animate starfields, type command lines and bob cards on pages a
 // visitor sees.
 //
-// They are here rather than in `app.js` for the mirror of the reason `admin_hooks.js` exists: the
-// admin bundle IS `app.js`, so every one of these was downloaded by every admin page, to sit
-// unmounted behind a dashboard. `app.js` reaches them through `if (!MISHKA_ADMIN)` — false for the
-// admin build, where esbuild drops the branch and this module with it.
+// They are here rather than in `app.js` for the mirror of the reason the admin's hooks are not in
+// `site.js`: the admin bundle IS `app.js`, so every one of these was downloaded by every admin page,
+// to sit unmounted behind a dashboard. `site.js` imports this module and `app.js` does not.
 
 export default {
 };

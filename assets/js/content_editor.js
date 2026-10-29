@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // LOADED ON DEMAND, NOT WITH THE ADMIN BUNDLE — the rich-text editor's engine, Tiptap and
-// ProseMirror, fetched by `pb_content_editor.js` the first time a content editor appears, the way
-// `code_editor.js` is for CodeMirror. It hangs itself on `window.MishkaContentEditor`.
+// ProseMirror, fetched by mishka_cms_core's `ContentEditor` hook (its
+// `assets/js/pb_content_editor.js`) the first time a content editor appears, the way `code_editor.js`
+// is for CodeMirror. It hangs itself on `window.MishkaContentEditor`.
 //
 // `../vendor/editor.js` is Mishka Chelekom's headless `editor` engine (the `chelekom-headless-editor`
 // hook, ui kit 0.0.10-alpha.9, Chelekom commit 1973a209), copied byte for byte out of

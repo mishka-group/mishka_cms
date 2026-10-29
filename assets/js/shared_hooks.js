@@ -5,7 +5,8 @@
 // THE HOOKS BOTH SIDES MOUNT. A flash notice dismisses itself wherever it appears, a
 // copy-to-clipboard button is a copy-to-clipboard button, and a captcha is asked on the sign-in pages
 // and tried on the settings page. Everything else belongs to exactly one audience — see
-// `admin_hooks.js` and `site_hooks.js`.
+// `site_hooks.js`, and the admin's hooks `app.js` imports from `mishka_cms_core` and
+// `mishka_cms_builder`.
 
 // A NOTICE THAT WAITS TO BE CLICKED IS A NOTICE SITTING OVER THE THING YOU WERE ABOUT TO CLICK, and
 // in the editor that is most of the screen — the Review sheet's own header, the top bar's buttons.

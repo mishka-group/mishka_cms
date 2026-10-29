@@ -21,7 +21,8 @@ import { elixir, elixirLanguage } from "codemirror-lang-elixir";
 
 // LOADED ON DEMAND, NOT WITH THE ADMIN BUNDLE. CodeMirror and its grammars are the largest thing the
 // admin could ship and they are wanted on two screens. This file is a separate esbuild entry,
-// fetched by `pb_code_editor.js` the first time a code box appears and never on the pages with none.
+// fetched by mishka_cms_core's `PbCodeEditor` hook (its `assets/js/pb_code_editor.js`) the first
+// time a code box appears and never on the pages with none.
 //
 // It hangs itself on `window.PbCodeMirror` rather than exporting, because the loader injects it as a
 // plain script tag: an ES module import would need the bundle format changed for everything.
