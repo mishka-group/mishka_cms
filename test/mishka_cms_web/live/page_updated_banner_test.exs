@@ -22,6 +22,7 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 
+  alias MishkaCmsCore.Runtime.Handlers.BootHandler
   alias MishkaCmsCore.Runtime.States.SiteState
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Runtime.Workers.RuntimeCompilerWorker
@@ -147,6 +148,67 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
     end
   end
 
+  # A component counts when the page draws it, directly or inside another component: the walk the
+  # site's CSS takes, which reads the components' template files.
+  describe "a component it draws" do
+    setup %{site: site} do
+      n = System.unique_integer([:positive])
+      inner = component!(site, "banner-inner-#{n}", ~s(<span class="inner">inner</span>))
+
+      outer =
+        component!(
+          site,
+          "banner-outer-#{n}",
+          ~s(<div><.component component_name="#{inner.name}" site="#{site.name}" /></div>)
+        )
+
+      unused = component!(site, "banner-unused-#{n}", ~s(<p>unused</p>))
+
+      drawn =
+        published!(site,
+          template:
+            ~s(<div id="page-body"><.component component_name="#{outer.name}" site="#{site.name}" /></div>)
+        )
+
+      %{drawn: drawn, outer: outer, inner: inner, unused: unused}
+    end
+
+    test "shows the banner once a component the page names is rebuilt", %{
+      site: site,
+      drawn: drawn,
+      outer: outer
+    } do
+      {:ok, view, _html} = live(on_site(), drawn.path)
+
+      component_job(site, outer, site.id, :stop)
+
+      assert_push_event(view, "mishka:page-updated", %{})
+    end
+
+    test "and one drawn inside it", %{site: site, drawn: drawn, inner: inner} do
+      {:ok, view, _html} = live(on_site(), drawn.path)
+
+      component_job(site, inner, site.id, :stop)
+
+      assert_push_event(view, "mishka:page-updated", %{})
+    end
+
+    test "says nothing for a component it does not draw, or another site's copy", %{
+      site: site,
+      drawn: drawn,
+      outer: outer,
+      unused: unused
+    } do
+      {:ok, view, _html} = live(on_site(), drawn.path)
+
+      component_job(site, unused, site.id, :stop)
+      component_job(site, outer, Ecto.UUID.generate(), :stop)
+      component_job(site, outer, site.id, :start)
+
+      refute_push_event(view, "mishka:page-updated", %{}, 50)
+    end
+  end
+
   # THE WHOLE PATH: a save queues the page's job, the job rebuilds the module, Oban's telemetry is
   # announced on the site's topic, and the open page pushes the banner.
   test "a saved page tells its reader after the real rebuild", %{page: page} do
@@ -198,6 +260,22 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
       })
 
     page
+  end
+
+  defp component_job(site, component, site_id, event),
+    do:
+      job(
+        site,
+        MishkaCmsCore.Runtime.Component,
+        %{"name" => component.name, "site_id" => site_id},
+        event
+      )
+
+  defp component!(site, name, template) do
+    component = create_component!(site_id: site.id, name: name, template: template)
+    :ok = BootHandler.create_template_file(site.name, "component", name, template)
+    on_exit(fn -> BootHandler.delete_template_file(site.name, "component", name) end)
+    component
   end
 
   defp layout!(site) do
