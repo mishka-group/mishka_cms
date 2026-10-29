@@ -182,147 +182,149 @@ defmodule MishkaCmsWeb.RuntimeLive do
         {:ok, push_navigate(socket, to: to <> query_of_params(params))}
 
       {:serve, language} ->
-        socket = speaking(socket, language, site.id)
-
-        :telemetry.span(
-          [:mishka_cms, :runtime, :mount],
-          %{path: Enum.join(path, "/"), site: site.name},
-          fn ->
-            _ =
-              Hook.call("RuntimeLive.OnMount.BeforeMount", [params, session, socket],
-                return: false
-              )
-
-            socket =
-              if connected?(socket) do
-                Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, "site:#{site.name}:assets")
-
-                # WHAT THIS SITE'S PAGES BECOME, WHILE SOMEBODY IS READING ONE. `MishkaCmsCore.Runtime.Page`
-                # publishes every write to this topic through `Ash.Notifier.PubSub`; `handle_info/2` below
-                # keeps the write that is about the page this socket is showing and drops the rest. One
-                # subscription covers every page the socket goes on to visit, because a live navigation
-                # between database pages keeps this process.
-                #
-                # The name is kept because `handle_info/2` answers only what arrived on it: the resource
-                # publishes `created` and `destroyed` under the same payload shape, and a page listening
-                # for those must still be handed them.
-                page_topic = "page:#{site.id}:updated"
-                Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, page_topic)
-
-                # A SAVE ONLY QUEUES THE REBUILD, so the reader is told the page changed once its
-                # compile job has finished: `MishkaCmsCore.Activity.Sources.Oban` announces every job
-                # of this site's pages here, and `handle_info/2` keeps this page's finished update.
-                # Layouts and components are heard on the resource's own topic, because a global
-                # one's job names no site.
-                Phoenix.PubSub.subscribe(
-                  MishkaCmsCore.PubSub,
-                  "oban_activity:site:#{site.id}:res:#{inspect(Page)}"
-                )
-
-                for resource <- [Layout, Component],
-                    do:
-                      Phoenix.PubSub.subscribe(
-                        MishkaCmsCore.PubSub,
-                        "oban_activity:res:#{inspect(resource)}"
-                      )
-
-                Phoenix.LiveView.put_private(socket, @page_topic, page_topic)
-              else
-                socket
-              end
-
-            # NO VISITOR TRAVELS WITH THIS, and that is not an omission. Rewriting the path is CHOOSING
-            # the page, and which page it is decides whether a user has to be loaded at all — so at this
-            # point nobody has been, and the key this payload used to carry would be `nil` here and a
-            # leftover from some earlier page in `handle_params/3`. A hook that has to know the visitor
-            # is handed the whole socket by `RuntimeLive.OnMount.BeforeMount` a few lines above, and
-            # `MishkaCmsCore.LiveUserAuth.load_current_user/1` verifies one from it.
-            joined_path =
-              %{path: path, site: site}
-              |> then(&Hook.call("RuntimeLive.OnMount.BeforePathTransform", &1).path)
-              |> Enum.join("/")
-              |> then(fn path ->
-                if String.starts_with?(path, "/"), do: path, else: "/" <> path
-              end)
-
-            {found, captured} =
-              WebRunTimeMetaDataState.resolve!("#{joined_path}", site.name, "Page")
-
-            page_module = Helpers.module_name(found.id, found.site, "Page")
-
-            new_socket =
-              :telemetry.span(
-                [:mishka_cms, :runtime, :compile],
-                %{path: joined_path, site: site.name, module: inspect(page_module)},
-                fn ->
-                  compile_result =
-                    page_module
-                    |> ModuleCompilerHandler.compile_or_return_module(
-                      found.path,
-                      site.name,
-                      site.id
-                    )
-                    |> then(
-                      &Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1,
-                        cannot_run: {:error, :cannot_run}
-                      )
-                    )
-                    |> admit(page_module, socket)
-                    |> case do
-                      {{:ok, _result}, socket} ->
-                        new_socket =
-                          socket
-                          |> assign(page_module: page_module)
-                          |> assign(page_module.__page_information__())
-                          |> PageState.assign_initial(page_module)
-                          |> assign_page_title()
-                          |> assign(current_site: site)
-                          |> assign(:query_params, query_params(params, captured))
-                          |> sign_in_assets(path, site)
-                          |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
-
-                        Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
-
-                      {:visitors_only, socket} ->
-                        send_home(socket, page_module)
-
-                      {:signed_in_only, socket} ->
-                        send_to_sign_in(socket, page_module)
-
-                      {{:error, reason}, _socket} ->
-                        _ =
-                          Hook.call("RuntimeLive.OnMount.AfterCompileError", reason,
-                            return: false
-                          )
-
-                        :telemetry.execute(
-                          [:mishka_cms, :runtime, :mount, :error],
-                          %{count: 1},
-                          %{error_reason: inspect(reason), path: joined_path, site: site.name}
-                        )
-
-                        raise MishkaCmsCore.ErrorsExceptions.ServerError,
-                          message: "Sorry, unexpected error occurred. please try again later."
-                    end
-
-                  {compile_result, %{}}
-                end
-              )
-
-            # A DATABASE PAGE, so it takes the site's compiled bundle. Everything else public on this host
-            # is a marketing LiveView whose classes are known at build time and served by `public.css` —
-            # see the root layout. Marking the one runtime surface is cheaper and safer than annotating
-            # the other 44.
-            new_socket = Phoenix.Component.assign(new_socket, :runtime_page, true)
-
-            final_result =
-              {:ok, new_socket, layout: {MishkaCmsWeb.Layouts, :runtime}}
-              |> then(&Hook.call("RuntimeLive.OnMount.Return", &1))
-
-            {final_result, %{}}
-          end
-        )
+        socket
+        |> speaking(language, site.id)
+        |> serve_mount(params, session, site)
     end
+  end
+
+  defp serve_mount(socket, %{"path" => path} = params, session, site) do
+    :telemetry.span(
+      [:mishka_cms, :runtime, :mount],
+      %{path: Enum.join(path, "/"), site: site.name},
+      fn ->
+        _ =
+          Hook.call("RuntimeLive.OnMount.BeforeMount", [params, session, socket], return: false)
+
+        socket = if connected?(socket), do: subscribe_to_pages(socket, site), else: socket
+
+        # NO VISITOR TRAVELS WITH THIS, and that is not an omission. Rewriting the path is CHOOSING
+        # the page, and which page it is decides whether a user has to be loaded at all — so at this
+        # point nobody has been, and the key this payload used to carry would be `nil` here and a
+        # leftover from some earlier page in `handle_params/3`. A hook that has to know the visitor
+        # is handed the whole socket by `RuntimeLive.OnMount.BeforeMount` a few lines above, and
+        # `MishkaCmsCore.LiveUserAuth.load_current_user/1` verifies one from it.
+        joined_path = transformed_path("RuntimeLive.OnMount.BeforePathTransform", path, site)
+
+        {found, captured} =
+          WebRunTimeMetaDataState.resolve!("#{joined_path}", site.name, "Page")
+
+        page_module = Helpers.module_name(found.id, found.site, "Page")
+
+        new_socket =
+          :telemetry.span(
+            [:mishka_cms, :runtime, :compile],
+            %{path: joined_path, site: site.name, module: inspect(page_module)},
+            fn ->
+              compile_result =
+                page_module
+                |> ModuleCompilerHandler.compile_or_return_module(
+                  found.path,
+                  site.name,
+                  site.id
+                )
+                |> then(
+                  &Hook.call("RuntimeLive.OnMount.AclAfterCompile", &1,
+                    cannot_run: {:error, :cannot_run}
+                  )
+                )
+                |> admit(page_module, socket)
+                |> mounted(page_module, %{
+                  params: params,
+                  captured: captured,
+                  path: path,
+                  site: site,
+                  joined_path: joined_path
+                })
+
+              {compile_result, %{}}
+            end
+          )
+
+        # A DATABASE PAGE, so it takes the site's compiled bundle. Everything else public on this host
+        # is a marketing LiveView whose classes are known at build time and served by `public.css` —
+        # see the root layout. Marking the one runtime surface is cheaper and safer than annotating
+        # the other 44.
+        new_socket = Phoenix.Component.assign(new_socket, :runtime_page, true)
+
+        final_result =
+          {:ok, new_socket, layout: {MishkaCmsWeb.Layouts, :runtime}}
+          |> then(&Hook.call("RuntimeLive.OnMount.Return", &1))
+
+        {final_result, %{}}
+      end
+    )
+  end
+
+  defp subscribe_to_pages(socket, site) do
+    Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, "site:#{site.name}:assets")
+
+    # WHAT THIS SITE'S PAGES BECOME, WHILE SOMEBODY IS READING ONE. `MishkaCmsCore.Runtime.Page`
+    # publishes every write to this topic through `Ash.Notifier.PubSub`; `handle_info/2` below
+    # keeps the write that is about the page this socket is showing and drops the rest. One
+    # subscription covers every page the socket goes on to visit, because a live navigation
+    # between database pages keeps this process.
+    #
+    # The name is kept because `handle_info/2` answers only what arrived on it: the resource
+    # publishes `created` and `destroyed` under the same payload shape, and a page listening
+    # for those must still be handed them.
+    page_topic = "page:#{site.id}:updated"
+    Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, page_topic)
+
+    # A SAVE ONLY QUEUES THE REBUILD, so the reader is told the page changed once its
+    # compile job has finished: `MishkaCmsCore.Activity.Sources.Oban` announces every job
+    # of this site's pages here, and `handle_info/2` keeps this page's finished update.
+    # Layouts and components are heard on the resource's own topic, because a global
+    # one's job names no site.
+    Phoenix.PubSub.subscribe(
+      MishkaCmsCore.PubSub,
+      "oban_activity:site:#{site.id}:res:#{inspect(Page)}"
+    )
+
+    for resource <- [Layout, Component],
+        do:
+          Phoenix.PubSub.subscribe(
+            MishkaCmsCore.PubSub,
+            "oban_activity:res:#{inspect(resource)}"
+          )
+
+    Phoenix.LiveView.put_private(socket, @page_topic, page_topic)
+  end
+
+  defp mounted({{:ok, _result}, socket}, page_module, ctx) do
+    %{params: params, captured: captured, path: path, site: site} = ctx
+
+    new_socket =
+      socket
+      |> assign(page_module: page_module)
+      |> assign(page_module.__page_information__())
+      |> PageState.assign_initial(page_module)
+      |> assign_page_title()
+      |> assign(current_site: site)
+      |> assign(:query_params, query_params(params, captured))
+      |> sign_in_assets(path, site)
+      |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
+
+    Hook.call("RuntimeLive.OnMount.AfterCompile", new_socket)
+  end
+
+  defp mounted({:visitors_only, socket}, page_module, _ctx), do: send_home(socket, page_module)
+
+  defp mounted({:signed_in_only, socket}, page_module, _ctx),
+    do: send_to_sign_in(socket, page_module)
+
+  defp mounted({{:error, reason}, _socket}, _page_module, %{joined_path: joined_path, site: site}) do
+    _ =
+      Hook.call("RuntimeLive.OnMount.AfterCompileError", reason, return: false)
+
+    :telemetry.execute(
+      [:mishka_cms, :runtime, :mount, :error],
+      %{count: 1},
+      %{error_reason: inspect(reason), path: joined_path, site: site.name}
+    )
+
+    raise MishkaCmsCore.ErrorsExceptions.ServerError,
+      message: "Sorry, unexpected error occurred. please try again later."
   end
 
   def render(assigns) do
@@ -379,119 +381,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
         {:noreply, push_navigate(socket, to: to <> query_of(url))}
 
       {:serve, language} ->
-        socket = speaking(socket, language, socket.assigns.current_site.id)
-
-        :telemetry.span(
-          [:mishka_cms, :runtime, :handle_params],
-          %{path: Enum.join(path, "/"), site: socket.assigns.current_site.name},
-          fn ->
-            _ =
-              Hook.call("RuntimeLive.HandleParams.BeforeParams", [params, url, socket],
-                return: false
-              )
-
-            current_site = socket.assigns.current_site
-
-            # NO VISITOR TRAVELS WITH THIS EITHER, for the reason given in `mount/3`: whoever an earlier
-            # page in this socket happened to need is not an answer to who is asking for this one.
-            # `RuntimeLive.HandleParams.BeforeParams`, above, is handed the socket.
-            joined_path =
-              %{path: path, site: current_site}
-              |> then(&Hook.call("RuntimeLive.HandleParams.BeforePathTransform", &1).path)
-              |> Enum.join("/")
-              |> then(fn path ->
-                if String.starts_with?(path, "/"), do: path, else: "/" <> path
-              end)
-
-            # if you use patch for navigate it shows pervious data not for this page if they are in same layout
-            %{private: %{site: site_name, site_id: site_id, host: expected_host}} = socket.assigns
-
-            uri = URI.parse(url)
-
-            if uri.host && not same_host?(uri.host, expected_host),
-              do:
-                raise(MishkaCmsCore.ErrorsExceptions.ForbiddenError,
-                  message: "Invalid host for this site"
-                )
-
-            # THE ADDRESS THIS SOCKET IS ON, KEPT BEFORE ANYTHING CAN REFUSE IT. This callback runs after
-            # `mount/3` on the first response and on the connect, and again on every navigation, so it is
-            # the one place that always knows where the browser is — and it has run before any event or
-            # message can arrive.
-            socket = Phoenix.LiveView.put_private(socket, @address, address(uri))
-
-            # A PATTERN'S CAPTURES ARE THINGS THE VISITOR ASKED FOR, so they arrive beside the query
-            # string rather than in a place of their own: a page stored at `/post/:category/:slug` reads
-            # `@query_params["category"]` and `@query_params["slug"]`, and a component reads the same
-            # name whether the value came from the path or from `?slug=`. The path wins a collision,
-            # as in Phoenix's router; see `query_params/2`.
-            {found, captured} = WebRunTimeMetaDataState.resolve!(joined_path, site_name, "Page")
-            page_module = Helpers.module_name(found.id, found.site, "Page")
-
-            result =
-              ModuleCompilerHandler.compile_or_return_module(
-                page_module,
-                found.path,
-                site_name,
-                site_id
-              )
-              |> then(
-                &Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1,
-                  cannot_run: {:error, :cannot_run}
-                )
-              )
-              |> admit(page_module, socket)
-              |> case do
-                {{:ok, _result}, socket} ->
-                  head_before = socket.assigns[:page_seo]
-
-                  # A LIVE NAVIGATION LANDS ON A DIFFERENT PAGE, and that page's uploads are not the
-                  # ones mount registered. `allow_upload/3` refuses a name already registered, so
-                  # `MishkaCmsCore.Runtime.PageUpload.allow/2` skips what is there and adds what the
-                  # page this navigation arrived at asks for.
-                  # ANOTHER PAGE IN THE SAME PROCESS starts from its own state, and what only the
-                  # last page declared is cleared; the same page keeps the visitor's values. See
-                  # `MishkaCmsCore.Runtime.PageState.switch/3`.
-                  socket
-                  |> PageState.switch(socket.assigns[:page_module], page_module)
-                  |> assign(page_module: page_module)
-                  |> assign(page_module.__page_information__())
-                  |> assign_page_language(captured)
-                  # The compiled page and its layout read it (the nav of `MishkaCmsCore.Layouts`).
-                  # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
-                  |> assign(:current_path, joined_path)
-                  |> assign(:query_params, query_params(params, captured))
-                  |> PageSource.assign_source()
-                  |> SiteLayout.assign_frame()
-                  |> assign_page_seo(uri)
-                  |> admit_record(page_module)
-                  |> push_head(head_before)
-                  |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
-                  |> then(&{:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", &1)})
-
-                {:visitors_only, socket} ->
-                  {:noreply, send_home(socket, page_module)}
-
-                {:signed_in_only, socket} ->
-                  {:noreply, send_to_sign_in(socket, page_module)}
-
-                {{:error, reason}, _socket} ->
-                  _ =
-                    Hook.call("RuntimeLive.HandleParams.AfterCompileError", reason, return: false)
-
-                  :telemetry.execute(
-                    [:mishka_cms, :runtime, :handle_params, :error],
-                    %{count: 1},
-                    %{error_reason: inspect(reason), path: joined_path, site: site_name}
-                  )
-
-                  raise MishkaCmsCore.ErrorsExceptions.ServerError,
-                    message: "Sorry, unexpected error occurred. please try again later."
-              end
-
-            {result, %{}}
-          end
-        )
+        socket
+        |> speaking(language, socket.assigns.current_site.id)
+        |> serve_params(params, url)
     end
   end
 
@@ -502,6 +394,135 @@ defmodule MishkaCmsWeb.RuntimeLive do
     # Catch-all for non-path params
     # TODO: We can send logger here to dev and production report
     {:noreply, socket}
+  end
+
+  defp serve_params(socket, %{"path" => path} = params, url) do
+    :telemetry.span(
+      [:mishka_cms, :runtime, :handle_params],
+      %{path: Enum.join(path, "/"), site: socket.assigns.current_site.name},
+      fn ->
+        _ =
+          Hook.call("RuntimeLive.HandleParams.BeforeParams", [params, url, socket], return: false)
+
+        current_site = socket.assigns.current_site
+
+        # NO VISITOR TRAVELS WITH THIS EITHER, for the reason given in `mount/3`: whoever an earlier
+        # page in this socket happened to need is not an answer to who is asking for this one.
+        # `RuntimeLive.HandleParams.BeforeParams`, above, is handed the socket.
+        joined_path =
+          transformed_path("RuntimeLive.HandleParams.BeforePathTransform", path, current_site)
+
+        # if you use patch for navigate it shows pervious data not for this page if they are in same layout
+        %{private: %{site: site_name, site_id: site_id, host: expected_host}} = socket.assigns
+
+        uri = URI.parse(url)
+
+        if uri.host && not same_host?(uri.host, expected_host),
+          do:
+            raise(MishkaCmsCore.ErrorsExceptions.ForbiddenError,
+              message: "Invalid host for this site"
+            )
+
+        # THE ADDRESS THIS SOCKET IS ON, KEPT BEFORE ANYTHING CAN REFUSE IT. This callback runs after
+        # `mount/3` on the first response and on the connect, and again on every navigation, so it is
+        # the one place that always knows where the browser is — and it has run before any event or
+        # message can arrive.
+        socket = Phoenix.LiveView.put_private(socket, @address, address(uri))
+
+        # A PATTERN'S CAPTURES ARE THINGS THE VISITOR ASKED FOR, so they arrive beside the query
+        # string rather than in a place of their own: a page stored at `/post/:category/:slug` reads
+        # `@query_params["category"]` and `@query_params["slug"]`, and a component reads the same
+        # name whether the value came from the path or from `?slug=`. The path wins a collision,
+        # as in Phoenix's router; see `query_params/2`.
+        {found, captured} = WebRunTimeMetaDataState.resolve!(joined_path, site_name, "Page")
+        page_module = Helpers.module_name(found.id, found.site, "Page")
+
+        result =
+          ModuleCompilerHandler.compile_or_return_module(
+            page_module,
+            found.path,
+            site_name,
+            site_id
+          )
+          |> then(
+            &Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1,
+              cannot_run: {:error, :cannot_run}
+            )
+          )
+          |> admit(page_module, socket)
+          |> params_handled(page_module, %{
+            params: params,
+            captured: captured,
+            joined_path: joined_path,
+            uri: uri,
+            site_name: site_name
+          })
+
+        {result, %{}}
+      end
+    )
+  end
+
+  defp params_handled({{:ok, _result}, socket}, page_module, ctx) do
+    %{params: params, captured: captured, joined_path: joined_path, uri: uri} = ctx
+    head_before = socket.assigns[:page_seo]
+
+    # A LIVE NAVIGATION LANDS ON A DIFFERENT PAGE, and that page's uploads are not the
+    # ones mount registered. `allow_upload/3` refuses a name already registered, so
+    # `MishkaCmsCore.Runtime.PageUpload.allow/2` skips what is there and adds what the
+    # page this navigation arrived at asks for.
+    # ANOTHER PAGE IN THE SAME PROCESS starts from its own state, and what only the
+    # last page declared is cleared; the same page keeps the visitor's values. See
+    # `MishkaCmsCore.Runtime.PageState.switch/3`.
+    socket
+    |> PageState.switch(socket.assigns[:page_module], page_module)
+    |> assign(page_module: page_module)
+    |> assign(page_module.__page_information__())
+    |> assign_page_language(captured)
+    # The compiled page and its layout read it (the nav of `MishkaCmsCore.Layouts`).
+    # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
+    |> assign(:current_path, joined_path)
+    |> assign(:query_params, query_params(params, captured))
+    |> PageSource.assign_source()
+    |> SiteLayout.assign_frame()
+    |> assign_page_seo(uri)
+    |> admit_record(page_module)
+    |> push_head(head_before)
+    |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
+    |> then(&{:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", &1)})
+  end
+
+  defp params_handled({:visitors_only, socket}, page_module, _ctx),
+    do: {:noreply, send_home(socket, page_module)}
+
+  defp params_handled({:signed_in_only, socket}, page_module, _ctx),
+    do: {:noreply, send_to_sign_in(socket, page_module)}
+
+  defp params_handled({{:error, reason}, _socket}, _page_module, ctx) do
+    %{joined_path: joined_path, site_name: site_name} = ctx
+
+    _ =
+      Hook.call("RuntimeLive.HandleParams.AfterCompileError", reason, return: false)
+
+    :telemetry.execute(
+      [:mishka_cms, :runtime, :handle_params, :error],
+      %{count: 1},
+      %{error_reason: inspect(reason), path: joined_path, site: site_name}
+    )
+
+    raise MishkaCmsCore.ErrorsExceptions.ServerError,
+      message: "Sorry, unexpected error occurred. please try again later."
+  end
+
+  # THE PATH A HOOK MAY REWRITE, joined and rooted: `mount/3` and `handle_params/3` both choose the
+  # page from it.
+  defp transformed_path(hook, path, site) do
+    %{path: path, site: site}
+    |> then(&Hook.call(hook, &1).path)
+    |> Enum.join("/")
+    |> then(fn path ->
+      if String.starts_with?(path, "/"), do: path, else: "/" <> path
+    end)
   end
 
   # A REDIRECT RULE ANSWERS A LIVE NAVIGATION TOO. `SiteLookupPlug` serves a site's rules on every
@@ -546,39 +567,38 @@ defmodule MishkaCmsWeb.RuntimeLive do
             {{:noreply, refuse(socket)}, %{}}
 
           {:ok, socket} ->
-            result =
+            final_result =
               page_module.handle_event(event_name, event_params, socket)
               |> then(&Hook.call("RuntimeLive.HandleEvent.AfterCallEvent", &1))
-
-            final_result =
-              case result do
-                {:noreply, %Phoenix.LiveView.Socket{} = socket} ->
-                  {:noreply, Hook.call("RuntimeLive.HandleEvent.ReturnCallEvent", socket)}
-
-                other ->
-                  _ =
-                    Hook.call("RuntimeLive.HandleEvent.AfterCallEventError", other, return: false)
-
-                  :telemetry.execute(
-                    [:mishka_cms, :runtime, :handle_event, :error],
-                    %{count: 1},
-                    %{
-                      error_reason: "Invalid return value",
-                      event: event_name,
-                      path: path,
-                      site: site
-                    }
-                  )
-
-                  raise MishkaCmsCore.ErrorsExceptions.ServerError,
-                    message:
-                      "handle_event for #{path} expected return of {:noreply, %Phoenix.LiveView.Socket{}}, but got #{inspect(other)}"
-              end
+              |> event_answered(event_name, path, site)
 
             {final_result, %{}}
         end
       end
     )
+  end
+
+  defp event_answered({:noreply, %Phoenix.LiveView.Socket{} = socket}, _event_name, _path, _site),
+    do: {:noreply, Hook.call("RuntimeLive.HandleEvent.ReturnCallEvent", socket)}
+
+  defp event_answered(other, event_name, path, site) do
+    _ =
+      Hook.call("RuntimeLive.HandleEvent.AfterCallEventError", other, return: false)
+
+    :telemetry.execute(
+      [:mishka_cms, :runtime, :handle_event, :error],
+      %{count: 1},
+      %{
+        error_reason: "Invalid return value",
+        event: event_name,
+        path: path,
+        site: site
+      }
+    )
+
+    raise MishkaCmsCore.ErrorsExceptions.ServerError,
+      message:
+        "handle_event for #{path} expected return of {:noreply, %Phoenix.LiveView.Socket{}}, but got #{inspect(other)}"
   end
 
   # A COMPONENT FOUND NOTHING AT THE ADDRESS, and only it could know — the page is `/:lang/blog/:slug`
@@ -775,43 +795,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
       [:mishka_cms, :runtime, :runtime_layout],
       %{site: site_name, has_layout: !is_nil(layout)},
       fn ->
-        result =
-          if !is_nil(layout) do
-            {site, layout_path} = layout
-            {page_module, compiled} = compile_layout(layout, assigns.private.site_id)
-
-            case compiled do
-              {:ok, _result} ->
-                Hook.call(
-                  "RuntimeLive.RuntimeLayout.AfterCompile",
-                  page_module.render(assigns)
-                )
-
-              {:error, reason} ->
-                _ =
-                  Hook.call("RuntimeLive.RuntimeLayout.AfterCompileError", reason, return: false)
-
-                :telemetry.execute(
-                  [:mishka_cms, :runtime, :runtime_layout, :error],
-                  %{count: 1},
-                  %{error_reason: inspect(reason), layout_path: layout_path, site: site}
-                )
-
-                Logger.warning("""
-                failed to render layout for #{layout_path}, fallback to default layout
-
-                Got:
-
-                #{inspect(reason)}
-                """)
-
-                default_layout(assigns)
-            end
-          else
-            default_layout(assigns)
-          end
-
-        {result, %{}}
+        {layout_result(layout, assigns), %{}}
       end
     )
   rescue
@@ -833,6 +817,41 @@ defmodule MishkaCmsWeb.RuntimeLive do
       """)
 
       default_layout(assigns)
+  end
+
+  defp layout_result(nil, assigns), do: default_layout(assigns)
+
+  defp layout_result(layout, assigns) do
+    {site, layout_path} = layout
+    {page_module, compiled} = compile_layout(layout, assigns.private.site_id)
+
+    case compiled do
+      {:ok, _result} ->
+        Hook.call(
+          "RuntimeLive.RuntimeLayout.AfterCompile",
+          page_module.render(assigns)
+        )
+
+      {:error, reason} ->
+        _ =
+          Hook.call("RuntimeLive.RuntimeLayout.AfterCompileError", reason, return: false)
+
+        :telemetry.execute(
+          [:mishka_cms, :runtime, :runtime_layout, :error],
+          %{count: 1},
+          %{error_reason: inspect(reason), layout_path: layout_path, site: site}
+        )
+
+        Logger.warning("""
+        failed to render layout for #{layout_path}, fallback to default layout
+
+        Got:
+
+        #{inspect(reason)}
+        """)
+
+        default_layout(assigns)
+    end
   end
 
   @doc """

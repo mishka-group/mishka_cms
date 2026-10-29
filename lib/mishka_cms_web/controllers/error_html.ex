@@ -133,6 +133,8 @@ defmodule MishkaCmsWeb.ErrorHTML do
     status_message(template)
   end
 
+  # One clause per status: each message is a literal `gettext/1`, which `mix gettext.extract` reads.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   defp status_message(template) do
     case template |> String.split(".", parts: 2) |> hd() do
       "400" -> gettext("Bad Request")

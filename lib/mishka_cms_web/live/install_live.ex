@@ -2686,14 +2686,14 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp update_step(steps, id, status, detail) do
     Enum.map(steps, fn step ->
-      if step.id == id do
-        logs = if detail, do: add_log(step.logs, detail), else: step.logs
-        %{step | status: status, logs: logs}
-      else
-        step
-      end
+      if step.id == id,
+        do: %{step | status: status, logs: with_detail(step.logs, detail)},
+        else: step
     end)
   end
+
+  defp with_detail(logs, detail) when detail in [nil, false], do: logs
+  defp with_detail(logs, detail), do: add_log(logs, detail)
 
   defp log_running_step(steps, line) do
     Enum.map(steps, fn step ->
