@@ -71,8 +71,8 @@ defmodule MishkaCmsWeb.HeadAudienceTest do
     test "and the builder is on the far side of that boundary" do
       sessions = sessions_by_module()
 
-      builder = sessions[MishkaCmsCoreWeb.Live.Admin.Builder.BuilderLive]
-      canvas = sessions[MishkaCmsCoreWeb.Live.Admin.Builder.CanvasLive]
+      builder = sessions[MishkaCmsBuilderWeb.Live.BuilderLive]
+      canvas = sessions[MishkaCmsBuilderWeb.Live.CanvasLive]
       listing = sessions[MishkaCmsCoreWeb.Live.Admin.Dashboard.Runtime.Page.Index]
 
       assert builder != nil and canvas != nil and listing != nil

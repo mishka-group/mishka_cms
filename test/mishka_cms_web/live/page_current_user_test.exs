@@ -50,7 +50,7 @@ defmodule MishkaCmsWeb.PageCurrentUserTest do
 
   # THE LAYOUT IS DRAWN WITH THE LIVEVIEW'S OWN ASSIGNS, so this reads the visitor exactly as a
   # page's own markup does — and it is the form the builder's "Visitor is signed in" condition
-  # writes. See `MishkaCmsCore.Runtime.PageBuilder.Conditions`.
+  # writes. See `MishkaCmsBuilder.Conditions`.
   @reads_layout ~S(<div id="layout-body">{if assigns[:current_user], do: "in", else: "out"}{@inner_content}</div>)
 
   setup do

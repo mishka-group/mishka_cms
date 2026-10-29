@@ -53,15 +53,15 @@ defmodule MishkaCms.Application do
       MishkaCmsCore.Runtime.States.CompileFailureState,
       # Rendered palette-card previews. Keyed on the template a card would drop, because a
       # component's first render is a module compile and every later one is two milliseconds.
-      MishkaCmsCore.Runtime.States.CardPreviewState,
+      MishkaCmsBuilder.States.CardPreviewState,
       # Live page-builder editing sessions, shared by the editor chrome and its canvas iframe
-      MishkaCmsCore.Runtime.States.EditorSessionState,
+      MishkaCmsBuilder.States.EditorSessionState,
       # The undo history's documents, beside the session rather than in it — ETS flattens what it
       # stores, so fifty snapshots that share their nodes in memory would be copied fifty times over
       # on every read of the session. Started after it: its sweep reads that table's live tokens.
-      MishkaCmsCore.Runtime.States.EditorHistoryState,
+      MishkaCmsBuilder.States.EditorHistoryState,
       # Co-editing avatars for the page builder, on the editing session's own PubSub topic
-      MishkaCmsCore.Runtime.PageBuilder.Presence,
+      MishkaCmsBuilder.Presence,
       MishkaCmsCore.Runtime.Handlers.CompileGate,
       AshGraphql.Subscription.Batcher,
       {Registry, keys: :unique, name: MishkaCms.ModuleCompilerHandlerRegistry},

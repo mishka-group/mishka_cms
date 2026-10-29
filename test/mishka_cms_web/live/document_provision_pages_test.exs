@@ -35,7 +35,7 @@ defmodule MishkaCmsWeb.DocumentProvisionPagesTest do
   alias MishkaCmsCore.ErrorsExceptions.NotFoundError
   alias MishkaCmsCore.Runtime.Page
   alias MishkaCmsCore.Runtime.RuntimePreview
-  alias MishkaCmsCore.Runtime.Snippet
+  alias MishkaCmsBuilder.Snippet
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
   alias MishkaDocument.Provision
