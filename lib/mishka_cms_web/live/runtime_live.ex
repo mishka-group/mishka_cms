@@ -164,6 +164,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
     socket =
       socket
       |> speaking(session[Languages.session()], site.id)
+      # A database page's sign-in form reads it (`MishkaCmsCore.Install.StarterContent`).
+      # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
       |> assign(:client_request, client_request(socket))
       |> note_navigation()
 
@@ -455,6 +457,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
                   |> assign(page_module: page_module)
                   |> assign(page_module.__page_information__())
                   |> assign_page_language(captured)
+                  # The compiled page and its layout read it (the nav of `MishkaCmsCore.Layouts`).
+                  # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
                   |> assign(:current_path, joined_path)
                   |> assign(:query_params, query_params(params, captured))
                   |> PageSource.assign_source()
@@ -1357,6 +1361,8 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # layout is drawn from.
   defp sign_in_assets(socket, path, site) do
     if SiteLookupPlug.sign_in_path?(path, site) and SiteAvailability.state(site.id) != :open,
+      # The root layout reads both.
+      # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
       do: assign(socket, standalone_assets: true, suppress_site_js: true),
       else: socket
   end

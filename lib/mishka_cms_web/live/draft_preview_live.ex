@@ -103,6 +103,8 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
        socket
        |> assign(:page_title, gettext("%{name} · preview", name: Map.get(record, :name)))
        |> assign(record: record, module: module, asset_site: asset_site)
+       # The preview layout (layouts/preview.html.heex) reads both.
+       # credo:disable-for-lines:2 Jump.CredoChecks.UnusedLiveViewAssign
        |> assign(:preview_css, "/_preview/#{resource}/#{token}/css")
        |> assign(:preview_js, site_js(asset_site, token))
        |> assign(:draft?, module in [PageDraft, LayoutDraft, ErrorPageDraft])
@@ -186,6 +188,8 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
     |> MishkaCmsCore.Runtime.PageUpload.allow(preview_module)
     # A page reads the assigns it declares in `state` from its first render.
     |> MishkaCmsCore.Runtime.PageState.assign_initial(preview_module)
+    # The compiled page and its layout read these, through `preview_module.render/2`.
+    # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
     |> assign(
       preview_module: preview_module,
       layout_module: layout_module(record, asset_site),
