@@ -39,6 +39,19 @@ defmodule MishkaCmsWeb.ConnCase do
   def url_modes, do: Enum.map(MishkaCmsCore.Runtime.Languages.url_modes(), &%{url_mode: &1})
 
   @doc """
+  The site bundle a draft preview links in its `<head>` (`layouts/preview.html.heex`), beside the
+  preview's own `preview.js`; `nil` when it links none.
+  """
+  def preview_site_js(html) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query("head script[src]")
+    |> LazyHTML.attribute("src")
+    |> Enum.reject(&(&1 == "/assets/js/preview.js"))
+    |> List.first()
+  end
+
+  @doc """
   Where `language` puts `path` in `url_mode` on a site whose first language is English: English
   under no prefix in `"prefix_others"`, every other language — and English in `"prefix_all"` —
   under its own.

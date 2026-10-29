@@ -32,6 +32,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
   alias MishkaCmsCore.Accounts.{LiveSockets, Permission}
   alias MishkaCmsCore.ErrorsExceptions.NotFoundError
   alias MishkaCmsCore.Runtime.{DraftPreviewAssets, Page, PageDraft}
+  alias MishkaCmsCore.Runtime.Resources.Embeddeds.Helper
   alias MishkaCmsCore.Runtime.States.AssetsState
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, ViewerState}
   alias MishkaCmsCore.Settings
@@ -78,7 +79,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
     test "is minted on create, so every page has a preview route", %{other: site} do
       page = create_page!(site_id: site.id, template: "<b>x</b>")
 
-      assert is_binary(page.preview_token)
+      assert page.preview_token =~ ~r/\A[A-Za-z0-9_-]+\z/, "not url-safe base64"
 
       assert byte_size(page.preview_token) == 43,
              "not 32 random bytes of url-safe base64 — the shape the other resources use"
@@ -181,13 +182,13 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       page = create_page!(site_id: site.id, template: ~s(<b>x</b>))
 
-      {:ok, view, html} = live(on_host("localhost"), "/_preview/page/#{page.preview_token}")
+      {:ok, _view, html} = live(on_host("localhost"), "/_preview/page/#{page.preview_token}")
 
       # The per-draft stylesheet, compiled from this record — never a site bundle, never public.css.
       assert html =~ "/_preview/page/#{page.preview_token}/css"
 
       # And the JS, which is where the hooks come from, is the RECORD's site's.
-      js = :sys.get_state(view.pid).socket.assigns[:preview_js]
+      js = preview_site_js(html)
 
       assert js == "/assets/js/#{site.name}/bbbbbbbb.js?preview=#{page.preview_token}",
              "the preview served #{inspect(js)} rather than #{site.name}'s bundle"
@@ -330,8 +331,6 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
   end
 
   describe "a page or a layout is drawn by its compiled module" do
-    alias MishkaCmsCore.Runtime.Resources.Embeddeds.Helper
-
     test "a page calling its own helper renders, where a template alone could not call it", %{
       other: site
     } do

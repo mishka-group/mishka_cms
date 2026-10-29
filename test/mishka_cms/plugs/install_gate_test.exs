@@ -173,8 +173,12 @@ defmodule MishkaCms.Plugs.InstallGateTest do
 
   describe "the flag itself" do
     test "production requires it; dev and test do not" do
+      assert Config.Reader.read!("config/prod.exs", env: :prod)[:mishka_cms][:require_setup_token]
+
       refute Application.get_env(:mishka_cms, :require_setup_token, false),
              "the test env must keep the optional behaviour, or every install test changes meaning"
+
+      refute call("/install").halted, "with no token asked for, /install opens"
     end
   end
 end

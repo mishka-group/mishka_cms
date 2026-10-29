@@ -28,6 +28,7 @@ defmodule MishkaCmsWeb.LanguageRoutingTest do
   alias MishkaCmsCore.Runtime.Languages
   alias MishkaCmsCore.Runtime.States.{SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
+  alias MishkaCmsWeb.RuntimeLive
 
   setup do
     SiteState.clear()
@@ -411,16 +412,12 @@ defmodule MishkaCmsWeb.LanguageRoutingTest do
 
   describe "<html lang>" do
     test "is a database page's language, the admin's on an admin page, and English otherwise" do
-      alias MishkaCmsWeb.RuntimeLive
-
       assert RuntimeLive.html_lang(%{runtime_page: true, page: %{language: "fa"}}) == "fa"
       assert RuntimeLive.html_lang(%{admin_language: "de"}) == "de"
       assert RuntimeLive.html_lang(%{}) == "en"
     end
 
     test "has a direction on a database page and an admin page, and none otherwise" do
-      alias MishkaCmsWeb.RuntimeLive
-
       assert RuntimeLive.html_dir(%{runtime_page: true, page: %{language: "fa"}}) == "rtl"
       assert RuntimeLive.html_dir(%{admin_css: true, admin_language: "fa"}) == "rtl"
       assert RuntimeLive.html_dir(%{admin_css: true, admin_language: "en"}) == "ltr"

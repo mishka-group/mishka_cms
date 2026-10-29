@@ -234,7 +234,11 @@ defmodule MishkaCmsWeb.CaptchaSignInTest do
           }
         })
 
-      assert is_binary(get_session(conn, "user_token"))
+      # The session's token names the user who signed in.
+      assert {:ok, %{"sub" => subject}} =
+               AshAuthentication.Jwt.peek(get_session(conn, "user_token"))
+
+      assert subject == AshAuthentication.user_to_subject(user)
     end
 
     test "lets the browser load Cloudflare on the site's pages", %{site: site} do

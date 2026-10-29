@@ -376,7 +376,7 @@ defmodule MishkaCmsWeb.LiveSocketDisconnectTest do
 
   defp assert_disconnected(user) do
     topic = LiveSockets.live_socket_id(user)
-    assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"}, 1000
+    assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"}
   end
 
   defp refute_disconnected(user) do

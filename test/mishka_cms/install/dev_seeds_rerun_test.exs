@@ -137,9 +137,9 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   # THE DATABASE THE BUG WAS FOUND ON. `users_unique_email_index` is on `(site_id, email)` and
   # `EnforceMasterEmailSeparation` refuses only a master an address a site holds, so a site's
   # registration or an admin in the dashboard can put the sample master's address on a site while the
-  # master account of that name is still there. Asked without a scope, the seed's own "is this user here?" read then saw two rows,
-  # `Ash.read_one/2` answered an error, the error read as "not there", and the run died trying to
-  # create the master account it already had.
+  # master account of that name is still there. Asked without a scope, the seed's own "is this user
+  # here?" read then saw two rows, `Ash.read_one/2` answered an error, the error read as "not
+  # there", and the run died trying to create the master account it already had.
   test "a site account holding the sample master's address does not stop a second run", %{
     core: core
   } do

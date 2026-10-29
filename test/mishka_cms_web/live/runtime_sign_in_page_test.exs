@@ -313,6 +313,9 @@ defmodule MishkaCmsWeb.RuntimeSignInPageTest do
 
   defp en(page), do: String.replace(page.path, ":lang", "en")
 
+  # What the sign-in form is handed (the client address, the tenant, the user) is the socket's
+  # state; the form draws none of it.
+  # credo:disable-for-next-line Jump.CredoChecks.AvoidSocketAssignsInTest
   defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
   defp register_plugin(module, event) do

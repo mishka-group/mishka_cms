@@ -541,6 +541,9 @@ defmodule MishkaCmsWeb.PageCurrentUserTest do
     module.__layout_information__(keys)
   end
 
+  # Whether the visitor was looked up at all is the socket's state; a page that does not read
+  # `@current_user` draws nothing that could show it.
+  # credo:disable-for-next-line Jump.CredoChecks.AvoidSocketAssignsInTest
   defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
   # THE TABLES A BLOCK OF WORK READ. Ecto names the source of every query it runs, and the
