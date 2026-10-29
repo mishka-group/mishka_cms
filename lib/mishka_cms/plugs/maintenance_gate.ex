@@ -128,6 +128,11 @@ defmodule MishkaCms.Plugs.MaintenanceGate do
   # THE LANGUAGE THE VISITOR READS THE SITE IN, the session's: `LanguagePlug` runs after this gate,
   # so the page — the site's own offline entry, or the built-in one — finds it where a page would,
   # and links the sign-in page in it.
+  #
+  # `page` is the site's own offline entry, rendered by its compiled error page, or
+  # `maintenance_html/4`, which escapes the message and builds the sign-in address from the site's
+  # own languages; nothing from the request reaches it unescaped.
+  # sobelow_skip ["XSS.SendResp"]
   defp answer_offline(conn, site) do
     language = Languages.remembered(get_session(conn, Languages.session()), site && site.id)
 

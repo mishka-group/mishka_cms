@@ -18,7 +18,8 @@ defmodule MishkaCmsWeb.Endpoint do
 
   # LiveView socket with dynamic origin checking for multi-tenant. The sign-in pages' forms are rate
   # limited by the address `RemoteIp` reads off `:x_headers`, or `:peer_data` names — see
-  # `MishkaCmsWeb.RuntimeLive`'s `@client_request`.
+  # `MishkaCmsWeb.RuntimeLive`'s `@client_request`. Sobelow cannot read the validator, so
+  # `.sobelow-skips` marks this socket (Config.CSWH).
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [
       connect_info: [:peer_data, :x_headers, session: @session_options],
@@ -32,7 +33,9 @@ defmodule MishkaCmsWeb.Endpoint do
 
   # `:uri` names the host, which is the site the socket is bound to, and `auth_token` carries a bearer
   # token in a header rather than the address; `error_handler` answers a connect refused for its
-  # site's state as `/gql` does — see `MishkaCmsWeb.GraphqlSocket`.
+  # site's state as `/gql` does — see `MishkaCmsWeb.GraphqlSocket`. Its origin is the endpoint's
+  # `check_origin`, the same validator in production (config/runtime.exs), so `.sobelow-skips`
+  # marks it (Config.CSWH).
   socket "/ws/gql", MishkaCmsWeb.GraphqlSocket,
     websocket: [
       connect_info: [:uri],
@@ -86,6 +89,7 @@ defmodule MishkaCmsWeb.Endpoint do
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
+  # Development only; `.sobelow-skips` marks the live reload socket (Config.CSWH).
   if code_reloading? do
     socket "/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket
     plug Phoenix.LiveReloader

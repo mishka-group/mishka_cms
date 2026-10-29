@@ -280,6 +280,9 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
 
   defp parse_status(_status), do: nil
 
+  # `chrome_css/0` is the preview's own fixed CSS, and `@body_html` is what `RuntimePreview` drew: the
+  # record's template rendered (its assigns escaped), or a note whose text it escapes.
+  # sobelow_skip ["XSS.Raw"]
   def render(assigns) do
     ~H"""
     <style phx-no-curly-interpolation nonce={assigns[:csp_nonce]}>

@@ -439,6 +439,9 @@ defmodule MishkaCmsWeb.InstallLive do
   ]
 
   @impl true
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(%{step: :done} = assigns) do
     ~H"""
     <.shell
@@ -621,6 +624,9 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(%{step: :ui_kit} = assigns) do
     ~H"""
     <.shell
@@ -1216,6 +1222,9 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(%{step: :seeds} = assigns) do
     ~H"""
     <.shell
@@ -1276,6 +1285,9 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(assigns) do
     ~H"""
     <.shell

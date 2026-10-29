@@ -847,6 +847,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
   attr :seo, :map, default: nil, doc: "`@page_seo`, with its `tags` and its `schema`"
   attr :csp_nonce, :string, default: nil
 
+  # Each `json` is encoded by `MishkaCmsCore.Runtime.Seo`, which writes `<`, `>` and `&` as `\u003c`,
+  # `\u003e` and `\u0026`, so nothing in it can close the `<script>` (runtime_head_test.exs).
+  # sobelow_skip ["XSS.Raw"]
   def page_head(%{seo: %{tags: _, schema: _}} = assigns) do
     ~H"""
     <meta :for={{"meta", attrs} <- @seo.tags} {attrs} data-mishka-seo />
