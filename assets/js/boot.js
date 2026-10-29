@@ -17,6 +17,7 @@ import { LiveSocket } from "phoenix_live_view";
 import { hooks as colocatedHooks } from "phoenix-colocated/mishka_cms";
 import topbar from "../vendor/topbar";
 import { syncHead } from "./head_sync";
+import { swapRuntimeCss } from "./css_swap";
 
 export function boot(Hooks) {
   const csrfToken = document
@@ -48,37 +49,7 @@ export function boot(Hooks) {
     if (el) liveSocket.execJS(el, e.detail.js);
   });
 
-  window.addEventListener("phx:mishka:css-updated", (e) => {
-    const href = e.detail && e.detail.href;
-    if (!href || !/^\/assets\/css\/[^\/]+\/[0-9a-f]{32}\.css$/.test(href)) return;
-
-    const old = document.getElementById("mishka-runtime-css");
-    if (old && old.getAttribute("href") === href) return;
-
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = href;
-
-    // The page was served before the site's first compile, so it has no sheet to swap: this is it.
-    if (!old) {
-      link.id = "mishka-runtime-css";
-      document.head.appendChild(link);
-      return;
-    }
-
-    link.onload = () => {
-      link.id = "mishka-runtime-css";
-      old.remove();
-    };
-
-    link.onerror = () => {
-      old.id = "mishka-runtime-css";
-      link.remove();
-    };
-
-    old.removeAttribute("id");
-    old.after(link);
-  });
+  window.addEventListener("phx:mishka:css-updated", (e) => swapRuntimeCss(e.detail));
 
   window.addEventListener("phx:mishka:head", (e) => syncHead(e.detail));
 
