@@ -22,6 +22,7 @@ defmodule MishkaCms.Test.Packages do
 
   @all [
     :mishka_cms_core,
+    :mishka_cms_builder,
     :mishka_blog,
     :mishka_document,
     :mishka_gervaz,
@@ -32,8 +33,8 @@ defmodule MishkaCms.Test.Packages do
   ]
 
   @doc """
-  Every Mishka package this project loads: the engine, the blog and documentation extensions,
-  Mishka Gervaz and the four sign-in providers.
+  Every Mishka package this project loads: the engine, the visual page builder, the blog and
+  documentation extensions, Mishka Gervaz and the four sign-in providers.
   """
   def all, do: @all
 

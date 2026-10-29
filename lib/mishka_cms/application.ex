@@ -6,83 +6,57 @@ defmodule MishkaCms.Application do
   @moduledoc false
   use Application
 
+  alias MishkaCmsCore.Supervision
+
+  # What this tree does not start, because the dependencies' applications start it before this one:
+  # `:mishka_cms_core` starts `MishkaCmsCore.PubSub`, the runtime compiler's partition counter and the
+  # core's plugins, and `:mishka_cms_builder` starts the visual editor's sessions, history, card
+  # previews, Presence and plugins. What is left of the core needs this app's repo or endpoint, so it
+  # is started here, in the phases `MishkaCmsCore.Supervision` names.
   @impl true
   def start(_type, _args) do
     # A malformed TRUSTED_PROXY_RANGES entry stops the boot, named, rather than failing every request
     # in the endpoint's `plug RemoteIp`
     :ok = MishkaCmsCore.Accounts.AuthRateLimit.validate_trusted_proxies!()
 
-    # Start the partition counter for module compilation that we need to use in worker
-    counter_ref = :atomics.new(1, signed: false)
-    :persistent_term.put(:module_compiler_partition_counter, counter_ref)
-
     # Force loading ErrorHandler before it's needed, to prevent some race conditions and bad behavior
     {:module, _} =
       Code.ensure_loaded(MishkaCmsCore.Runtime.Compilers.UndefinedModuleError)
 
-    children = [
-      MishkaCmsWeb.Telemetry,
-      MishkaCms.Repo,
-      {DNSCluster, query: Application.get_env(:mishka_cms, :dns_cluster_query) || :ignore},
-      {Oban,
-       AshOban.config(
-         Application.fetch_env!(:mishka_cms, :ash_domains),
-         Application.fetch_env!(:mishka_cms, Oban)
-       )},
-      # Start ETS for sites - MUST be before BootHandler
-      {Phoenix.PubSub, name: MishkaCmsCore.PubSub},
-      MishkaCmsCore.Runtime.States.SiteState,
-      # ETS cache for global CMS settings (read everywhere, refreshed on change)
-      MishkaCmsCore.Runtime.States.SettingsState,
-      # ETS cache for the words runtime templates ask for with t/1 — see MishkaCmsCore.Runtime.Translations
-      MishkaCmsCore.Runtime.States.TranslationsState,
-      # Each site's redirect rules, read on every request — see MishkaCmsCore.Runtime.Redirects
-      MishkaCmsCore.Runtime.States.RedirectsState,
-      # Who a signed-in user is to the site gates, by id — see MishkaCmsCore.Runtime.States.ViewerState
-      MishkaCmsCore.Runtime.States.ViewerState,
-      # Hammer's ETS counters signing in and the reset and sign-in link requests are limited by,
-      # before anything is served — see MishkaCmsCore.Accounts.AuthRateLimit
-      MishkaCmsCore.Runtime.States.RateLimitState,
-      # Serves only once the caches that say whether a site is up or offline are loaded, so an offline
-      # site is never open at boot. A site still loading is not found yet, which refuses rather than opens.
-      MishkaCmsWeb.Endpoint,
-      # Start ETS for routing and finding page module, also is used for pagination
-      MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState,
-      {Absinthe.Subscription, MishkaCmsWeb.Endpoint},
-      MishkaCmsCore.Runtime.States.AssetsState,
-      MishkaCmsCore.Runtime.States.CompileFailureState,
-      # Rendered palette-card previews. Keyed on the template a card would drop, because a
-      # component's first render is a module compile and every later one is two milliseconds.
-      MishkaCmsBuilder.States.CardPreviewState,
-      # Live page-builder editing sessions, shared by the editor chrome and its canvas iframe
-      MishkaCmsBuilder.States.EditorSessionState,
-      # The undo history's documents, beside the session rather than in it — ETS flattens what it
-      # stores, so fifty snapshots that share their nodes in memory would be copied fifty times over
-      # on every read of the session. Started after it: its sweep reads that table's live tokens.
-      MishkaCmsBuilder.States.EditorHistoryState,
-      # Co-editing avatars for the page builder, on the editing session's own PubSub topic
-      MishkaCmsBuilder.Presence,
-      MishkaCmsCore.Runtime.Handlers.CompileGate,
-      AshGraphql.Subscription.Batcher,
-      {Registry, keys: :unique, name: MishkaCms.ModuleCompilerHandlerRegistry},
-      {PartitionSupervisor,
-       child_spec: DynamicSupervisor,
-       name: MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandlerPartition,
-       partitions: System.schedulers_online()},
-      # Unlinked tasks for BootHandler's per-site passes, so one site that raises is reported rather
-      # than taking BootHandler down with it, and for the sitemap jobs a rebuilt `seo:sitemap:urls`
-      # chain enqueues — MUST be before BootHandler
-      {Task.Supervisor, name: MishkaCmsCore.Runtime.TaskSupervisor},
-      {AshAuthentication.Supervisor, [otp_app: :mishka_cms]}
-    ]
-
-    # Only add BootHandler in non-test environments
+    # In start order; the comments say why each of the core's phases sits where it does.
     children =
-      if Application.get_env(:mishka_cms_core, :env_test?, false) do
-        children
-      else
-        children ++ [MishkaCmsCore.Runtime.Handlers.BootHandler]
-      end
+      Enum.concat([
+        [
+          MishkaCmsWeb.Telemetry,
+          MishkaCms.Repo,
+          {DNSCluster, query: Application.get_env(:mishka_cms, :dns_cluster_query) || :ignore},
+          {Oban,
+           AshOban.config(
+             Application.fetch_env!(:mishka_cms, :ash_domains),
+             Application.fetch_env!(:mishka_cms, Oban)
+           )}
+        ],
+        # The ETS caches a request reads first (sites, settings, translations, redirects, signed-in
+        # viewers, sign-in rate limits), loaded from the repo above.
+        Supervision.children(:caches),
+        # Serves only once the caches that say whether a site is up or offline are loaded, so an
+        # offline site is never open at boot. A site still loading is not found yet, which refuses
+        # rather than opens.
+        [MishkaCmsWeb.Endpoint],
+        # Routing and page metadata, the compiled assets, the compile failures and the runtime
+        # compiler, with the task supervisor BootHandler's per-site passes run under.
+        Supervision.children(:engine),
+        [
+          {Absinthe.Subscription, MishkaCmsWeb.Endpoint},
+          AshGraphql.Subscription.Batcher,
+          {AshAuthentication.Supervisor, [otp_app: :mishka_cms]}
+        ],
+        # BootHandler, last: it compiles every site, so it needs everything above. Its unlinked
+        # per-site tasks (one site that raises is reported rather than taking BootHandler down) and
+        # the sitemap jobs a rebuilt `seo:sitemap:urls` chain enqueues run under the task supervisor
+        # `:engine` started. None in a test run, where each test builds what it needs.
+        Supervision.children(:boot)
+      ])
 
     opts = [strategy: :one_for_one, name: MishkaCms.Supervisor]
     Supervisor.start_link(children, opts)
