@@ -46,8 +46,15 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
     %{site: site, page: published!(site), other: published!(site)}
   end
 
-  defp job(site, page, event, action \\ "update") do
-    topic = "oban_activity:site:#{site.id}:res:MishkaCmsCore.Runtime.Page"
+  # One job as `MishkaCmsCore.Activity.Sources.Oban` announces it: a page's on its site's topic, a
+  # layout's or a component's on the resource's own, since a global one names no site.
+  defp job(site, resource, data, event) do
+    name = inspect(resource)
+
+    topic =
+      if resource == MishkaCmsCore.Runtime.Page,
+        do: "oban_activity:site:#{site.id}:res:#{name}",
+        else: "oban_activity:res:#{name}"
 
     Phoenix.PubSub.broadcast(MishkaCmsCore.PubSub, topic, %Phoenix.Socket.Broadcast{
       topic: topic,
@@ -55,10 +62,13 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
       payload: %{
         __oban__: true,
         event: event,
-        job: %Oban.Job{args: %{"action" => action, "data" => %{"id" => page.id}}}
+        job: %Oban.Job{args: %{"action" => "update", "resource" => name, "data" => data}}
       }
     })
   end
+
+  defp job(site, %MishkaCmsCore.Runtime.Page{} = page, event),
+    do: job(site, MishkaCmsCore.Runtime.Page, %{"id" => page.id}, event)
 
   test "shows the banner once the page's update job has finished", %{site: site, page: page} do
     {:ok, view, _html} = live(on_site(), page.path)
@@ -85,6 +95,56 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
 
     refute_push_event(view, "mishka:page-updated", %{}, 50)
     assert has_element?(view, "#page-body")
+  end
+
+  describe "the layout it is drawn in" do
+    setup %{site: site} do
+      layout = layout!(site)
+
+      %{
+        layout: layout,
+        drawn: published!(site, layout_id: layout.id),
+        other_layout: layout!(site)
+      }
+    end
+
+    test "shows the banner once that layout's update job has finished", %{
+      site: site,
+      layout: layout,
+      drawn: drawn
+    } do
+      {:ok, view, _html} = live(on_site(), drawn.path)
+
+      job(site, MishkaCmsCore.Runtime.Layout, %{"id" => layout.id}, :stop)
+
+      assert_push_event(view, "mishka:page-updated", %{})
+    end
+
+    test "says nothing for another layout, or for a layout job still running", %{
+      site: site,
+      layout: layout,
+      drawn: drawn,
+      other_layout: other_layout
+    } do
+      {:ok, view, _html} = live(on_site(), drawn.path)
+
+      job(site, MishkaCmsCore.Runtime.Layout, %{"id" => other_layout.id}, :stop)
+      job(site, MishkaCmsCore.Runtime.Layout, %{"id" => layout.id}, :start)
+
+      refute_push_event(view, "mishka:page-updated", %{}, 50)
+    end
+
+    test "a page with no layout says nothing for a layout's job", %{
+      site: site,
+      page: page,
+      layout: layout
+    } do
+      {:ok, view, _html} = live(on_site(), page.path)
+
+      job(site, MishkaCmsCore.Runtime.Layout, %{"id" => layout.id}, :stop)
+
+      refute_push_event(view, "mishka:page-updated", %{}, 50)
+    end
   end
 
   # THE WHOLE PATH: a save queues the page's job, the job rebuilds the module, Oban's telemetry is
@@ -116,12 +176,14 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
     assert_push_event(view, "mishka:page-updated", %{})
   end
 
-  defp published!(site) do
+  defp published!(site, overrides \\ []) do
     page =
       create_page!(
-        site_id: site.id,
-        path: "/banner-#{System.unique_integer([:positive])}",
-        template: ~S(<div id="page-body" data-page={@page.path}>page</div>)
+        [
+          site_id: site.id,
+          path: "/banner-#{System.unique_integer([:positive])}",
+          template: ~S(<div id="page-body" data-page={@page.path}>page</div>)
+        ] ++ overrides
       )
 
     :ok =
@@ -136,6 +198,28 @@ defmodule MishkaCmsWeb.PageUpdatedBannerTest do
       })
 
     page
+  end
+
+  defp layout!(site) do
+    layout =
+      create_layout!(
+        site_id: site.id,
+        path: "/banner-layout-#{System.unique_integer([:positive])}",
+        template: ~S(<main id="banner-layout">{@inner_content}</main>)
+      )
+
+    :ok =
+      WebRunTimeMetaDataState.save(%{
+        id: layout.id,
+        site: site.name,
+        path: layout.path,
+        title: layout.name,
+        created_at: DateTime.utc_now(),
+        section: "Layout",
+        priority: 0
+      })
+
+    layout
   end
 
   defp on_site do

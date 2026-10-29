@@ -126,6 +126,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   alias MishkaCmsCore.Runtime.{
     Languages,
+    Layout,
     Page,
     PageEditions,
     PageSource,
@@ -208,9 +209,16 @@ defmodule MishkaCmsWeb.RuntimeLive do
                 # A SAVE ONLY QUEUES THE REBUILD, so the reader is told the page changed once its
                 # compile job has finished: `MishkaCmsCore.Activity.Sources.Oban` announces every job
                 # of this site's pages here, and `handle_info/2` keeps this page's finished update.
+                # Layouts are heard on the resource's own topic, because a global layout's job names
+                # no site.
                 Phoenix.PubSub.subscribe(
                   MishkaCmsCore.PubSub,
                   "oban_activity:site:#{site.id}:res:#{inspect(Page)}"
+                )
+
+                Phoenix.PubSub.subscribe(
+                  MishkaCmsCore.PubSub,
+                  "oban_activity:res:#{inspect(Layout)}"
                 )
 
                 Phoenix.LiveView.put_private(socket, @page_topic, page_topic)
@@ -643,13 +651,45 @@ defmodule MishkaCmsWeb.RuntimeLive do
   def handle_info(
         %Phoenix.Socket.Broadcast{
           event: "oban_activity",
-          payload: %{event: :stop, job: %{args: %{"action" => "update", "data" => %{"id" => id}}}}
+          payload: %{
+            event: :stop,
+            job: %{
+              args: %{
+                "action" => "update",
+                "resource" => "MishkaCmsCore.Runtime.Page",
+                "data" => %{"id" => id}
+              }
+            }
+          }
         },
         %{assigns: %{private: %{id: id}}} = socket
       ),
       do: {:noreply, push_event(socket, "mishka:page-updated", %{})}
 
-  # Another page's job, or this page's job starting or failing: nothing for this reader.
+  # THE LAYOUT IT IS DRAWN IN WAS REBUILT, which changes the page as much as its own edit does.
+  def handle_info(
+        %Phoenix.Socket.Broadcast{
+          event: "oban_activity",
+          payload: %{
+            event: :stop,
+            job: %{
+              args: %{
+                "action" => "update",
+                "resource" => "MishkaCmsCore.Runtime.Layout",
+                "data" => %{"id" => id}
+              }
+            }
+          }
+        },
+        socket
+      ) do
+    case layout_id(socket) do
+      ^id -> {:noreply, push_event(socket, "mishka:page-updated", %{})}
+      _another_layout -> {:noreply, socket}
+    end
+  end
+
+  # Another page's or layout's job, or a job starting or failing: nothing for this reader.
   def handle_info(%Phoenix.Socket.Broadcast{event: "oban_activity"}, socket),
     do: {:noreply, socket}
 
@@ -1315,6 +1355,19 @@ defmodule MishkaCmsWeb.RuntimeLive do
     end
   rescue
     _unreadable -> true
+  end
+
+  # The layout the page names, as the metadata `compile_layout/2` reads it, or `nil` for none.
+  defp layout_id(%{assigns: %{page_module: page_module}}) do
+    case page_module.__page_information__(:private) do
+      %{layout: {site, layout_path}} ->
+        WebRunTimeMetaDataState.find_by_path_and_site!(layout_path, site, "Layout").id
+
+      _no_layout ->
+        nil
+    end
+  rescue
+    _unknown_layout -> nil
   end
 
   defp compile_layout({site, layout_path}, page_site_id) do
