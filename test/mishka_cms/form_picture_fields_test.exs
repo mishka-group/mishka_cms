@@ -4,7 +4,8 @@
 
 defmodule MishkaCms.FormPictureFieldsTest do
   @moduledoc """
-  Every picture a core, blog or document form asks for is filled from the site's media library.
+  Every picture a core, builder, blog or document form asks for is filled from the site's media
+  library.
 
   A field whose name says it holds a picture — `featured_image_url`, `avatar_url`,
   `cover_image_url`, a logo, a banner… — carries `ui do extra %{media: :images} end`, which
@@ -16,7 +17,7 @@ defmodule MishkaCms.FormPictureFieldsTest do
 
   alias MishkaGervaz.Resource.Info.Form, as: FormInfo
 
-  @apps [:mishka_cms_core, :mishka_blog, :mishka_document]
+  @apps [:mishka_cms_core, :mishka_cms_builder, :mishka_blog, :mishka_document]
   @picture ~r/(^|_)(image|avatar|cover|logo|thumbnail|banner|photo|picture)(_url)?$/
 
   defp forms do
