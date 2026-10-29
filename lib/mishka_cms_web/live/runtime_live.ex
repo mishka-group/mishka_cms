@@ -204,6 +204,15 @@ defmodule MishkaCmsWeb.RuntimeLive do
                 # for those must still be handed them.
                 page_topic = "page:#{site.id}:updated"
                 Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, page_topic)
+
+                # A SAVE ONLY QUEUES THE REBUILD, so the reader is told the page changed once its
+                # compile job has finished: `MishkaCmsCore.Activity.Sources.Oban` announces every job
+                # of this site's pages here, and `handle_info/2` keeps this page's finished update.
+                Phoenix.PubSub.subscribe(
+                  MishkaCmsCore.PubSub,
+                  "oban_activity:site:#{site.id}:res:#{inspect(Page)}"
+                )
+
                 Phoenix.LiveView.put_private(socket, @page_topic, page_topic)
               else
                 socket
@@ -627,6 +636,22 @@ defmodule MishkaCmsWeb.RuntimeLive do
       ) do
     {:noreply, socket}
   end
+
+  # THE PAGE WAS REBUILT UNDER WHOEVER IS READING IT. Its update's compile job finished, so a refresh
+  # now serves the edit, and the reader is offered one with the banner a rebuilt JS bundle shows. A
+  # job that failed (`:exception`) rebuilt nothing and says nothing.
+  def handle_info(
+        %Phoenix.Socket.Broadcast{
+          event: "oban_activity",
+          payload: %{event: :stop, job: %{args: %{"action" => "update", "data" => %{"id" => id}}}}
+        },
+        %{assigns: %{private: %{id: id}}} = socket
+      ),
+      do: {:noreply, push_event(socket, "mishka:page-updated", %{})}
+
+  # Another page's job, or this page's job starting or failing: nothing for this reader.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "oban_activity"}, socket),
+    do: {:noreply, socket}
 
   def handle_info(message, socket) do
     %{

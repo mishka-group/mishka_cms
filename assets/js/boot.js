@@ -18,6 +18,7 @@ import { hooks as colocatedHooks } from "phoenix-colocated/mishka_cms";
 import topbar from "../vendor/topbar";
 import { syncHead } from "./head_sync";
 import { swapRuntimeCss } from "./css_swap";
+import { showUpdateBanner } from "./update_banner";
 
 export function boot(Hooks) {
   const csrfToken = document
@@ -53,31 +54,9 @@ export function boot(Hooks) {
 
   window.addEventListener("phx:mishka:head", (e) => syncHead(e.detail));
 
-  window.addEventListener("phx:mishka:js-updated", () => {
-    if (document.getElementById("mishka-update-banner")) return;
-
-    const bar = document.createElement("div");
-    bar.id = "mishka-update-banner";
-    bar.style.cssText =
-      "position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);z-index:99999;" +
-      "background:#111827;color:#fff;padding:.6rem 1rem;border-radius:.6rem;" +
-      "box-shadow:0 6px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:.75rem;" +
-      "font:500 14px system-ui,sans-serif;";
-
-    const text = document.createElement("span");
-    text.textContent = "This page was updated.";
-
-    const button = document.createElement("button");
-    button.textContent = "Refresh";
-    button.style.cssText =
-      "background:#4f46e5;color:#fff;border:0;border-radius:.4rem;padding:.35rem .8rem;" +
-      "cursor:pointer;font:600 13px system-ui,sans-serif;";
-    button.onclick = () => window.location.reload();
-
-    bar.appendChild(text);
-    bar.appendChild(button);
-    document.body.appendChild(bar);
-  });
+  for (const event of ["phx:mishka:js-updated", "phx:mishka:page-updated"]) {
+    window.addEventListener(event, () => showUpdateBanner());
+  }
 
   // connect if there are any LiveViews on the page
   liveSocket.connect();
