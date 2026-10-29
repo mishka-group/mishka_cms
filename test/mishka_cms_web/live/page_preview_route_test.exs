@@ -144,7 +144,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         create_page!(
           site_id: site.id,
           template: """
-          <button id="say-hello" phx-click={#{MishkaCmsCore.Runtime.PageBuilder.Interactions.source("say", "pb-7f3a91b2", %{kind: "info", message: said})}}>
+          <button id="say-hello" phx-click={#{MishkaCmsCore.Runtime.Authoring.Interactions.source("say", "pb-7f3a91b2", %{kind: "info", message: said})}}>
             Send
           </button>
           """
@@ -302,7 +302,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         )
         |> Ash.Changeset.force_change_attribute(
           :source_hash,
-          MishkaCmsCore.Runtime.PageBuilder.Drafts.hash("page", page)
+          MishkaCmsCore.Runtime.Authoring.Drafts.hash("page", page)
         )
         |> Ash.create!(authorize?: false)
 

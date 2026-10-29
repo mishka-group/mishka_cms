@@ -36,7 +36,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   alias MishkaCmsCore.Runtime.LiveViewHelpers
   alias MishkaCmsCore.Runtime.States.CompileFailureState
   alias MishkaCmsCore.Runtime.States.SiteState
-  alias MishkaCmsCore.Runtime.PageBuilder.PageForms
+  alias MishkaCmsCore.Runtime.Authoring.PageForms
   alias MishkaCmsCore.Runtime.Compilers.LiveViewCompiler
   alias MishkaCmsCore.Runtime.Languages
 

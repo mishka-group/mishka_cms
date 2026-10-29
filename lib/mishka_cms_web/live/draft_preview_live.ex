@@ -110,7 +110,7 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
        |> assign(:draft?, module in [PageDraft, LayoutDraft, ErrorPageDraft])
        |> assign(
          :original_changed?,
-         MishkaCmsCore.Runtime.PageBuilder.Drafts.original_changed?(record)
+         MishkaCmsCore.Runtime.Authoring.Drafts.original_changed?(record)
        )
        |> assign(:language, language), layout: false}
     else
