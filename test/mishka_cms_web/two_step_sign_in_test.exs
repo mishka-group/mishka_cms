@@ -75,7 +75,11 @@ defmodule MishkaCmsWeb.TwoStepSignInTest do
              |> render_submit()
 
     conn = site |> on_site() |> get(to)
-    assert is_binary(get_session(conn, "user_token"))
+
+    assert {:ok, %{"sub" => subject}} =
+             AshAuthentication.Jwt.peek(get_session(conn, "user_token"))
+
+    assert subject == AshAuthentication.user_to_subject(user)
   end
 
   test "a recovery code signs in in place of the code, once", %{site: site} do
@@ -96,7 +100,12 @@ defmodule MishkaCmsWeb.TwoStepSignInTest do
              |> form("#auth-second-factor-form", user: %{recovery_code: recovery})
              |> render_submit()
 
-    assert is_binary(site |> on_site() |> get(to) |> get_session("user_token"))
+    conn = site |> on_site() |> get(to)
+
+    assert {:ok, %{"sub" => subject}} =
+             AshAuthentication.Jwt.peek(get_session(conn, "user_token"))
+
+    assert subject == AshAuthentication.user_to_subject(user)
 
     again = page(site)
     sign_in(again, user)

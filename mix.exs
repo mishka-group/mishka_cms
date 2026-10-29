@@ -30,7 +30,11 @@ defmodule MishkaCms.MixProject do
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
-      consolidate_protocols: Mix.env() != :dev
+      consolidate_protocols: Mix.env() != :dev,
+      # `lib/mix/` calls `Mix`, and `test/support` (compiled in :test, where `mix ci` runs dialyzer)
+      # calls ExUnit; neither is in the default PLT. `.dialyzer_ignore.exs` lists what dialyzer
+      # reports that is not a defect, each with the reason.
+      dialyzer: [plt_add_apps: [:mix, :ex_unit], ignore_warnings: ".dialyzer_ignore.exs"]
     ]
   end
 
@@ -54,7 +58,7 @@ defmodule MishkaCms.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [precommit: :test, ci: :test]
     ]
   end
 
@@ -148,7 +152,13 @@ defmodule MishkaCms.MixProject do
       {:igniter, "~> 0.8", only: :dev},
       {:usage_rules, "~> 1.2", only: [:dev]},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false, warn_if_outdated: true},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.16", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:jump_credo_checks, "~> 0.6", only: [:dev, :test], runtime: false},
+      {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
 
       # Extra Stuff
       {:jason, "~> 1.4"},
@@ -210,6 +220,18 @@ defmodule MishkaCms.MixProject do
         "esbuild mishka_cms --minify",
         "admin_css --minify",
         "phx.digest"
+      ],
+      ci: [
+        # First: after `compile`, Mix prunes the code path and the Hex archive's task is not found.
+        "hex.audit",
+        "compile --warnings-as-errors",
+        "format --check-formatted",
+        "credo --strict",
+        "sobelow --config",
+        "deps.audit",
+        "dialyzer",
+        "ex_dna --max-clones 0",
+        "test"
       ],
       precommit: [
         "compile --warnings-as-errors",

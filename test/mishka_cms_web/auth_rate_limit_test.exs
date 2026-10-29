@@ -514,7 +514,8 @@ defmodule MishkaCmsWeb.AuthRateLimitTest do
         assert has_element?(view, "#auth-alert", "Invalid email or password")
       end
 
-      assert is_binary(live_sign_in(view, email, @password))
+      # The right password, once throttled, stays on the page that says so.
+      assert live_sign_in(view, email, @password) =~ "Too many sign-in attempts"
       assert has_element?(view, "#auth-rate-limited", "Too many sign-in attempts")
       assert has_element?(view, "#auth-rate-limited", "Try again in 15 minutes.")
     end

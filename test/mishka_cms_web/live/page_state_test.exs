@@ -184,6 +184,8 @@ defmodule MishkaCmsWeb.PageStateTest do
     {:ok, view, _html} = live(conn, plain.path)
 
     assert read(view, "plain") == "plain"
+    # A page that declares no state gets no assign for one, which nothing it draws could show.
+    # credo:disable-for-next-line Jump.CredoChecks.AvoidSocketAssignsInTest
     refute Map.has_key?(:sys.get_state(view.pid).socket.assigns, :count)
   end
 

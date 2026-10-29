@@ -15,6 +15,7 @@ SPDX-License-Identifier: Apache-2.0
     <.live_title default="Mishka CMS" suffix={if(assigns[:admin_css], do: " - Mishka CMS")}>
       {assigns[:page_title]}
     </.live_title>
+    <%!-- A plugin's hook answers with HTML by design; `.sobelow-skips` marks the two raw calls. --%>
     {raw(MishkaInstaller.Event.Hook.call("RootHtml.MetaTags", %{html: "", assigns: assigns}).html)}<MishkaCmsWeb.RuntimeLive.page_head
       :if={assigns[:runtime_page]}
       seo={assigns[:page_seo]}

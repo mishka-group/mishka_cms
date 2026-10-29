@@ -121,6 +121,9 @@ defmodule MishkaCms.Plugs.InstallGate do
   # Where the token is required and none is configured, `/install` admits NOBODY. That is the safe
   # direction for the one page that mints the master user: a missing token is an operator mistake
   # they will see immediately, whereas admitting everyone is a mistake nobody sees until it is used.
+  #
+  # The body is a fixed translated sentence; nothing from the request reaches it.
+  # sobelow_skip ["XSS.SendResp"]
   defp refuse_unconfigured(conn) do
     conn
     |> send_resp(
@@ -134,6 +137,8 @@ defmodule MishkaCms.Plugs.InstallGate do
 
   defp required?, do: Application.get_env(:mishka_cms, :require_setup_token, false)
 
+  # The body is a fixed translated sentence; nothing from the request reaches it.
+  # sobelow_skip ["XSS.SendResp"]
   defp verify_token(conn, token) do
     conn = fetch_query_params(conn)
 

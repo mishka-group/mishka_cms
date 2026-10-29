@@ -58,7 +58,9 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       assert is_nil(user.site_id)
       assert to_string(user.email) == "owner@example.com"
       assert %DateTime{} = reload_user(user).confirmed_at
-      assert is_binary(user.__metadata__[:token])
+      # A JWT: header, claims and signature, none of them empty.
+      assert [_, _, _] = parts = String.split(user.__metadata__[:token], ".")
+      assert Enum.all?(parts, &(&1 != ""))
       refute_email_sent()
 
       # The "*" permission is granted via exactly one UserPermission row.

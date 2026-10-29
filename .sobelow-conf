@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# ignore_files: the two dev asset tools (Traversal.FileModule). They run only in development, from the
+# watcher in config/dev.exs, and at release build (`mix copy_js_assets`), and copy between fixed
+# directories of the project (assets/, priv/static); no path comes from a request.
+[
+  exit: :low,
+  format: "txt",
+  ignore: ["Config.HTTPS", "Config.CSP"],
+  ignore_files: ["lib/mishka_cms/dev/js_assets_copier.ex", "lib/mishka_cms/dev/assets_watcher.ex"],
+  include_mix_tasks: false,
+  include_scripts: false,
+  out: nil,
+  private: true,
+  router: "lib/mishka_cms_web/router.ex",
+  skip: true,
+  summary: false,
+  threshold: :low,
+  verbose: false
+]

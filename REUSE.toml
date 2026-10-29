@@ -1,8 +1,9 @@
 version = 1
 
-# Files that cannot carry an SPDX comment header: Markdown, JSON, lock files, binaries (images,
-# fonts, uploads), gettext catalogs, vendored browser code, Docker and CI config, the release
-# overlay scripts, and the license texts themselves. Source files carry their header in place.
+# Files that cannot carry an SPDX comment header: Markdown, JSON, lock files, sobelow's skip list,
+# binaries (images, fonts, uploads), gettext catalogs, vendored browser code, Docker and CI config,
+# the release overlay scripts, and the license texts themselves. Source files carry their header in
+# place.
 
 [[annotations]]
 path = [
@@ -10,6 +11,7 @@ path = [
   "**/*.json",
   "assets/bun.lock",
   "mix.lock",
+  ".sobelow-skips",
   "assets/vendor/**",
   "priv/**",
   "examples/**",

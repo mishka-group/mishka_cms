@@ -4,8 +4,10 @@
 
 defmodule MishkaCmsWeb.Layouts do
   @moduledoc """
-  This module holds layouts and related functionality
-  used by your application.
+  Where pages are drawn: a template under `layouts/` for each of `root` (the document around every
+  page), `runtime` (around a database page, `MishkaCmsWeb.RuntimeLive`) and `preview` (the root of a
+  draft preview, `MishkaCmsWeb.DraftPreviewLive`), and the `app` layout, the flash group and the
+  theme toggle as function components.
   """
   use MishkaCmsWeb, :html
 

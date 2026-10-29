@@ -3,6 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 defmodule MishkaCmsWeb.GraphqlSchema do
+  @moduledoc """
+  What `/gql` and the `/ws/gql` socket (`MishkaCmsWeb.GraphqlSocket`) answer. AshGraphql draws no
+  domain into it yet (`domains: []`), so it carries only the sample `say_hello` query.
+  """
   use Absinthe.Schema
 
   use AshGraphql,

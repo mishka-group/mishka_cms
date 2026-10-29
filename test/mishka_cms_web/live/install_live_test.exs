@@ -173,6 +173,11 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       url: "https://github.com/acme/kit/releases/download/v1.2.3/acme.json"
     }
 
+  # What the screen names a package's version by (`version_label/1`): the release tag it was fetched
+  # at, or else the bundle's own version.
+  defp shown_version(%{tag: tag}) when is_binary(tag), do: tag
+  defp shown_version(%{version: version}), do: version
+
   defp to_ui_kit(conn, config \\ @valid) do
     {:ok, view, _html} = live(conn, "/install")
     view |> form("#install-form", install: config) |> render_submit()
@@ -210,6 +215,31 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     }
 
     File.write!(headless_bundle_path(), Jason.encode!(bundle))
+  end
+
+  # THE STARTER STORES ITS LOGO in the master site's media folder: this test's own.
+  defp own_media_dir! do
+    dir = Path.join(System.tmp_dir!(), "install_media_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    Application.put_env(:mishka_cms_core, :media_static_dir, dir)
+
+    on_exit(fn ->
+      Application.delete_env(:mishka_cms_core, :media_static_dir)
+      File.rm_rf(dir)
+    end)
+  end
+
+  # The settings step submitted with a title and a sender, which starts the install.
+  defp submit_settings(conn) do
+    view = to_settings(conn)
+
+    view
+    |> form("#install-settings-form",
+      settings: %{"site.title" => "Acme Docs", "mailer.from" => "hello@acme.test"}
+    )
+    |> render_submit()
+
+    view
   end
 
   defp to_settings(conn, config \\ @valid) do
@@ -381,7 +411,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
       for source <- UiKitHandler.resolve_kits().sources do
         assert html =~ source.name
-        assert html =~ source.tag || html =~ source.version
+        assert html =~ shown_version(source)
       end
     end
 
@@ -390,9 +420,8 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     test "a locally placed bundle reports its own version, not a tag" do
       assert %{sources: sources} = UiKitHandler.resolve_kits()
 
-      for source <- sources do
-        assert source.official? or is_nil(source.tag)
-      end
+      # The bundles that were not fetched from an official release and still name a tag.
+      assert for(source <- sources, not source.official?, source.tag, do: source.name) == []
     end
 
     # ONE ROW A PACKAGE WHILE IT DOWNLOADS. A 12 MB kit on a slow line took minutes behind a single
@@ -413,6 +442,9 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
       {:ok, view, _html} = live(conn, "/install")
       view |> form("#install-form", install: @valid) |> render_submit()
+      # The download starts in a task after the submit; on a loaded machine that takes past the
+      # suite's one second.
+      # credo:disable-for-next-line Jump.CredoChecks.AssertReceiveTimeout
       assert_receive {:fetching, download}, 5_000
 
       assert has_element?(view, "#uikit-fetch-acme", "Acme kit")
@@ -523,6 +555,9 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
       {:ok, view, _html} = live(conn, "/install")
       view |> form("#install-form", install: @valid) |> render_submit()
+      # The download starts in a task after the submit; on a loaded machine that takes past the
+      # suite's one second.
+      # credo:disable-for-next-line Jump.CredoChecks.AssertReceiveTimeout
       assert_receive {:fetching, download}, 5_000
 
       assert has_element?(view, "#uikit-channel-stable.on[disabled]")
@@ -1192,26 +1227,9 @@ defmodule MishkaCmsWeb.InstallLiveTest do
   end
 
   describe "commit" do
-    test "installs the master + site and writes the chosen settings, then shows success", %{
-      conn: conn
-    } do
-      # THE STARTER STORES ITS LOGO in the master site's media folder: this test's own.
-      dir = Path.join(System.tmp_dir!(), "install_media_#{System.unique_integer([:positive])}")
-      File.mkdir_p!(dir)
-      Application.put_env(:mishka_cms_core, :media_static_dir, dir)
-
-      on_exit(fn ->
-        Application.delete_env(:mishka_cms_core, :media_static_dir)
-        File.rm_rf(dir)
-      end)
-
-      view = to_settings(conn)
-
-      view
-      |> form("#install-settings-form",
-        settings: %{"site.title" => "Acme Docs", "mailer.from" => "hello@acme.test"}
-      )
-      |> render_submit()
+    test "installs behind a live checklist, then shows success", %{conn: conn} do
+      own_media_dir!()
+      view = submit_settings(conn)
 
       # The install runs asynchronously behind a live progress checklist.
       assert has_element?(view, "#install-progress")
@@ -1229,6 +1247,15 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert render(view) =~ "localhost"
 
       assert Install.installed?()
+    end
+
+    test "makes the master user and site, writes the chosen settings and the site's pages", %{
+      conn: conn
+    } do
+      own_media_dir!()
+      view = submit_settings(conn)
+      render_async(view, 15_000)
+      view |> element("#install-finish") |> render_click()
 
       assert [user] = User |> Ash.Query.filter(is_nil(site_id)) |> Ash.read!(authorize?: false)
       assert to_string(user.email) == "owner@example.com"

@@ -4,18 +4,9 @@
 
 defmodule MishkaCms.DataCase do
   @moduledoc """
-  This module defines the setup for tests requiring
-  access to the application's data layer.
-
-  You may define functions here to be used as helpers in
-  your tests.
-
-  Finally, if the test case interacts with the database,
-  we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use MishkaCms.DataCase, async: true`, although
-  this option is not recommended for other databases.
+  For tests that read and write the database: imports Ecto, its changesets and queries, the factory
+  (`MishkaCms.Test.Factory`) and the version helpers, and checks a sandbox out for each test with
+  `setup_sandbox/1`, shared with the processes it starts unless the test is `async`.
   """
 
   use ExUnit.CaseTemplate

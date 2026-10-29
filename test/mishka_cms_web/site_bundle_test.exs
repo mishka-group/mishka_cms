@@ -302,8 +302,8 @@ defmodule MishkaCmsWeb.SiteBundleTest do
     # The preview page as a link holder opens it, on an address that is not the record's site.
     defp preview_js!(page, host) do
       on_exit(fn -> DraftPreviewAssets.purge(page) end)
-      {:ok, view, _html} = live(on_host(host), "/_preview/page/#{page.preview_token}")
-      :sys.get_state(view.pid).socket.assigns[:preview_js]
+      {:ok, _view, html} = live(on_host(host), "/_preview/page/#{page.preview_token}")
+      preview_site_js(html)
     end
 
     test "gets its site's bundle on the master site's address, to whoever holds the link", %{

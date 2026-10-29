@@ -151,7 +151,11 @@ defmodule MishkaCmsWeb.BlogListCanvasTest do
     view
   end
 
-  defp token(view), do: :sys.get_state(view.pid).socket.assigns.token
+  # The editor session the builder opened, read off the canvas frame it points at.
+  defp token(view) do
+    [_all, token] = Regex.run(~r{/runtime/builder-canvas/([^"/]+)"}, render(view))
+    token
+  end
 
   defp canvas(conn, view) do
     {:ok, canvas, _html} = live(conn, "/admin/dashboard/runtime/builder-canvas/#{token(view)}")

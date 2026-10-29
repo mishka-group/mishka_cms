@@ -70,8 +70,11 @@ defmodule MishkaCmsWeb.CspNonceSessionTest do
     nonce
   end
 
+  # The nonce the socket renders its styles and scripts with; the connected render of these pages
+  # draws none, so the socket's own is the one to read.
   defp socket_nonce(conn) do
     {:ok, view, _html} = live(conn)
+    # credo:disable-for-next-line Jump.CredoChecks.AvoidSocketAssignsInTest
     :sys.get_state(view.pid).socket.assigns.csp_nonce
   end
 

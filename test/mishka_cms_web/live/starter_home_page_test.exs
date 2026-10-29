@@ -347,7 +347,7 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
 
     # THE FIRST LOAD STILL SAYS IT IN THE DOCUMENT, which is what a crawler and a browser without a
     # socket read; the element only repeats it.
-    test "a full load of a Persian page is `<html lang=\"fa\" dir=\"rtl\">`", %{site: site} do
+    test ~s(a full load of a Persian page is `<html lang="fa" dir="rtl">`), %{site: site} do
       {:ok, _} = Settings.put("site.languages", ["en", "fa"], site_id: site.id)
 
       {:ok, view, html} = live(on_site(), "/fa")

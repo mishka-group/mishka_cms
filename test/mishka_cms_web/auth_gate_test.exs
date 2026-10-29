@@ -236,9 +236,11 @@ defmodule MishkaCmsWeb.AuthGateTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Sign-in is closed"
       assert get_session(conn, "user_token") == nil
       assert get_session(conn, "live_socket_id") == nil
-      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 1000
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
 
-      assert (site |> signed_in(user, token) |> get("/en/auth")).assigns.current_user == nil,
+      conn = site |> signed_in(user, token) |> get("/en/auth")
+
+      assert conn.assigns.current_user == nil,
              "the token is revoked, so the old session names nobody"
     end
 
@@ -252,13 +254,13 @@ defmodule MishkaCmsWeb.AuthGateTest do
       admin_token = token!(site, admin_email)
       close!(:sign_in, site)
 
-      assert (site |> signed_in(user, token) |> get("/en/auth")).assigns.current_user.id ==
-               user.id
+      conn = site |> signed_in(user, token) |> get("/en/auth")
+      assert conn.assigns.current_user.id == user.id
 
       sign_out_on!(site)
 
-      assert (site |> signed_in(admin, admin_token) |> get("/en/auth")).assigns.current_user.id ==
-               admin.id
+      conn = site |> signed_in(admin, admin_token) |> get("/en/auth")
+      assert conn.assigns.current_user.id == admin.id
     end
 
     test "an API token is revoked and names nobody, even once sign-in opens again", %{
@@ -266,14 +268,17 @@ defmodule MishkaCmsWeb.AuthGateTest do
       user: user,
       token: token
     } do
-      assert bearer(site, token).assigns.current_user.id == user.id
+      conn = bearer(site, token)
+      assert conn.assigns.current_user.id == user.id
 
       close!(:sign_in, site)
       sign_out_on!(site)
-      assert bearer(site, token).assigns[:current_user] == nil
+      conn = bearer(site, token)
+      assert conn.assigns[:current_user] == nil
 
       {:ok, _} = Settings.put("auth.sign_in.closed", false, site_id: site.id)
-      assert bearer(site, token).assigns[:current_user] == nil
+      conn = bearer(site, token)
+      assert conn.assigns[:current_user] == nil
     end
 
     test "an open dashboard page reloads as soon as the switch is saved", %{site: site} do

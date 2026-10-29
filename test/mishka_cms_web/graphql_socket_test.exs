@@ -288,7 +288,9 @@ defmodule MishkaCmsWeb.GraphqlSocketTest do
     end
   end
 
-  # The Absinthe context the socket's subscriptions run with.
+  # The Absinthe context the socket's subscriptions run with: what `connect/3` answers, a channel
+  # socket and not a LiveView's.
+  # credo:disable-for-next-line Jump.CredoChecks.AvoidSocketAssignsInTest
   defp context(socket), do: socket.assigns.absinthe.opts[:context]
 
   describe "through the endpoint, over long polling" do

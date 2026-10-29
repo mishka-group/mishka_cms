@@ -81,6 +81,8 @@ defmodule MishkaCmsWeb.InstallLive do
        site: nil,
        seeded?: false
      )
+     # The root layout reads it.
+     # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
      |> assign(standalone_assets: true)
      |> assign(config: %{}, submitted?: false)
      |> assign(
@@ -96,7 +98,6 @@ defmodule MishkaCmsWeb.InstallLive do
        kits_configured?: false,
        custom_url: "",
        custom_error: nil,
-       custom_busy: false,
        catalog: nil,
        kits: []
      )
@@ -168,11 +169,11 @@ defmodule MishkaCmsWeb.InstallLive do
       {:ok, _bundle} ->
         {:noreply,
          socket
-         |> assign(custom_url: "", custom_error: nil, custom_busy: false)
+         |> assign(custom_url: "", custom_error: nil)
          |> load_bundle()}
 
       {:error, reason} ->
-        {:noreply, assign(socket, custom_url: url, custom_error: reason, custom_busy: false)}
+        {:noreply, assign(socket, custom_url: url, custom_error: reason)}
     end
   end
 
@@ -439,6 +440,9 @@ defmodule MishkaCmsWeb.InstallLive do
   ]
 
   @impl true
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(%{step: :done} = assigns) do
     ~H"""
     <.shell
@@ -621,6 +625,9 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(%{step: :ui_kit} = assigns) do
     ~H"""
     <.shell
@@ -1216,6 +1223,9 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(%{step: :seeds} = assigns) do
     ~H"""
     <.shell
@@ -1276,6 +1286,9 @@ defmodule MishkaCmsWeb.InstallLive do
     """
   end
 
+  # Every value these translations take goes through `strong/1` or `inline_code/1`, which escape it,
+  # so only the translator's own markup is raw.
+  # sobelow_skip ["XSS.Raw"]
   def render(assigns) do
     ~H"""
     <.shell
@@ -2673,14 +2686,14 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp update_step(steps, id, status, detail) do
     Enum.map(steps, fn step ->
-      if step.id == id do
-        logs = if detail, do: add_log(step.logs, detail), else: step.logs
-        %{step | status: status, logs: logs}
-      else
-        step
-      end
+      if step.id == id,
+        do: %{step | status: status, logs: with_detail(step.logs, detail)},
+        else: step
     end)
   end
+
+  defp with_detail(logs, detail) when detail in [nil, false], do: logs
+  defp with_detail(logs, detail), do: add_log(logs, detail)
 
   defp log_running_step(steps, line) do
     Enum.map(steps, fn step ->

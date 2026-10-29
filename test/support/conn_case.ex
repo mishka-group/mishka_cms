@@ -4,19 +4,9 @@
 
 defmodule MishkaCmsWeb.ConnCase do
   @moduledoc """
-  This module defines the test case to be used by
-  tests that require setting up a connection.
-
-  Such tests rely on `Phoenix.ConnTest` and also
-  import other functionality to make it easier
-  to build common data structures and query the data layer.
-
-  Finally, if the test case interacts with the database,
-  we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use MishkaCmsWeb.ConnCase, async: true`, although
-  this option is not recommended for other databases.
+  For tests that need a connection: imports `Plug.Conn`, `Phoenix.ConnTest` and the verified routes,
+  sets `@endpoint`, and hands each test a `conn` over the sandbox `MishkaCms.DataCase.setup_sandbox/1`
+  checks out, shared with the processes it starts unless the test is `async`.
   """
 
   use ExUnit.CaseTemplate
@@ -47,6 +37,19 @@ defmodule MishkaCmsWeb.ConnCase do
       use MishkaCmsWeb.ConnCase, async: false, parameterize: MishkaCmsWeb.ConnCase.url_modes()
   """
   def url_modes, do: Enum.map(MishkaCmsCore.Runtime.Languages.url_modes(), &%{url_mode: &1})
+
+  @doc """
+  The site bundle a draft preview links in its `<head>` (`layouts/preview.html.heex`), beside the
+  preview's own `preview.js`; `nil` when it links none.
+  """
+  def preview_site_js(html) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query("head script[src]")
+    |> LazyHTML.attribute("src")
+    |> Enum.reject(&(&1 == "/assets/js/preview.js"))
+    |> List.first()
+  end
 
   @doc """
   Where `language` puts `path` in `url_mode` on a site whose first language is English: English

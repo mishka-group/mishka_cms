@@ -95,7 +95,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
                {"site-b", "site-b.localhost"}
              ]
 
-    assert length(core.sites) > 0
+    assert core.sites != []
     assert Enum.any?(core.users.master, &(to_string(&1.email) == "master@example.com"))
     assert Site |> Ash.count!(authorize?: false) == length(core.sites)
 
@@ -1083,7 +1083,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallFreshTest do
 
     core = seed_core()
 
-    assert length(core.sites) > 0
+    assert core.sites != []
     assert Enum.all?(Process.get(:"$ancestors", []), &is_pid/1)
   end
 
