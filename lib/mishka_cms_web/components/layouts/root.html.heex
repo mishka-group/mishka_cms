@@ -33,7 +33,8 @@ SPDX-License-Identifier: Apache-2.0
          with a site's components, so its bundle was megabytes of CSS the admin never used — and on a
          host whose site has never compiled, the href had an empty hash and 404ed. The canvas iframe
          is the exception and asks for it deliberately, because it must show the document exactly as
-         production will; it takes the inline path instead, which is what `suppress_site_css` means. --%>
+         production will; it links its bundle further down, above the generator, which is what
+         `suppress_site_css` means. --%>
     <link
       :if={
         css_href && !assigns[:suppress_site_css] && !assigns[:admin_css] && assigns[:runtime_page]
@@ -135,12 +136,20 @@ SPDX-License-Identifier: Apache-2.0
          override and the page's own classes come out of one Tailwind pass, correctly sorted.
 
          Linked and not inlined: a real site's bundle is megabytes, and it arrives compressed and
-         cached `immutable` behind its content hash. --%>
+         cached `immutable` behind its content hash.
+
+         `mishka-runtime-css`, the site link's id — that link is off in the canvas — because an open
+         frame follows its bundle with the live page's own swap, `phx:mishka:css-updated`
+         (`css_swap.js`): the newer sheet goes in beside this one, which leaves only once the newer
+         has loaded. A frame drawn before anything compiled gets an empty link in the same place, so
+         the bundle it is later pointed at still lands above the generator. --%>
     <link
       :for={href <- assigns[:canvas_css_hrefs] || []}
+      id="mishka-runtime-css"
       rel="stylesheet"
       href={href}
     />
+    <link :if={assigns[:canvas_css_hrefs] == []} id="mishka-runtime-css" rel="stylesheet" />
     <script :if={assigns[:live_tailwind] && assigns[:csp_nonce]} nonce={assigns[:csp_nonce]}>
       (() => {
         const nonce = document.currentScript.nonce;

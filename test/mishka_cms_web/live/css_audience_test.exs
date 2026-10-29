@@ -243,13 +243,37 @@ defmodule MishkaCmsWeb.CssAudienceTest do
       assert html =~ ~s|src="/assets/js/localhost/cafe.js"|
     end
 
-    # The canvas renders the document with the site's CSS INLINE, so it must take neither link — a
-    # second copy over the wire, or a marketing sheet that was never part of the page.
-    test "the builder canvas takes no stylesheet link at all" do
+    # The canvas takes the site's own link off and links ONE bundle of its own above the generator,
+    # under the id the `phx:mishka:css-updated` swap (`css_swap.js`) follows — so an open frame moves
+    # to a rebuilt bundle the way a live page does. Never a marketing sheet that was never part of it.
+    test "the builder canvas links its own bundle once, under the id the swap follows" do
+      html =
+        layout(%{
+          runtime_page: true,
+          suppress_site_css: true,
+          canvas_css_hrefs: ["/assets/css/localhost/#{String.duplicate("a", 32)}.css"]
+        })
+
+      assert [_one] = Regex.scan(~r|id="mishka-runtime-css"|, html)
+      assert html =~ ~s|href="/assets/css/localhost/#{String.duplicate("a", 32)}.css"|
+      refute html =~ "/assets/css/localhost/deadbeef.css", "the site's own link was not taken off"
+      refute html =~ @public_sheet
+    end
+
+    # Drawn before anything compiled, the frame inlines what there is; the empty link keeps the
+    # bundle's place above the generator for the swap to put the first one in.
+    test "a canvas with nothing to link yet keeps an empty link in the bundle's place" do
+      html = layout(%{runtime_page: true, suppress_site_css: true, canvas_css_hrefs: []})
+
+      assert [link] = Regex.scan(~r|<link[^>]*id="mishka-runtime-css"[^>]*>|, html)
+      refute hd(link) =~ "href="
+      refute html =~ @public_sheet
+    end
+
+    test "a page that is not the canvas takes no empty link" do
       html = layout(%{runtime_page: true, suppress_site_css: true})
 
       refute html =~ ~s|id="mishka-runtime-css"|
-      refute html =~ @public_sheet
     end
   end
 end
