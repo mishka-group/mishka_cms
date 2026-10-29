@@ -158,6 +158,11 @@ config :mishka_cms_core,
   web_module: MishkaCmsWeb,
   core_components: MishkaCmsWeb.CoreComponents
 
+# The editor's strict checks (`MishkaCmsCore.Runtime.Authoring.Strict`) raise outside production.
+# Without this line they follow `Mix.env()` when the core is compiled, and Mix compiles a
+# dependency in `:prod`, so in development and test here they compiled to nothing.
+config :mishka_cms_core, builder_strict: config_env() != :prod
+
 config :mishka_cms,
   ecto_repos: [MishkaCms.Repo],
   generators: [timestamp_type: :utc_datetime],
