@@ -4,7 +4,8 @@
 
 defmodule MishkaCms.RefusalMessagesTest do
   @moduledoc """
-  The fixed messages the core, the blog and the document extension refuse an action with.
+  The fixed messages the core, the builder, the blog and the document extension refuse an action
+  with.
 
   A refusal is a message an action stores on an error: the `message` of a `validate`, an
   `identity` or a `check_constraint`, a `:message` inside an `{:error, …}` a validation returns or
@@ -16,8 +17,9 @@ defmodule MishkaCms.RefusalMessagesTest do
     punctuation. Without it an admin reads "Parent Section Section cannot be its own parent".
   - A sentence refusal is written out, not built with `"\#{…}"`, so a translation can match it: one
     sentence for each case, or a `%{key}` placeholder the error's `vars` fill.
-  - A refusal the core writes as a fixed text is a msgid of the core's
-    `priv/gettext/errors.pot`, so a translator is given it. That file ships in the core package
+  - A refusal the core or the builder writes as a fixed text is a msgid of the core's
+    `priv/gettext/errors.pot`, so a translator is given it (the builder translates with
+    `MishkaCmsCore.Gettext`, whose templates read its messages). That file ships in the core package
     from 0.0.2; the 0.0.1 release on Hex has no `priv/gettext`, so that test needs a newer core.
 
   The sources are read, not the compiled resources: most refusals are inside anonymous functions
@@ -28,7 +30,7 @@ defmodule MishkaCms.RefusalMessagesTest do
 
   alias MishkaCms.Test.Packages
 
-  @packages [:mishka_cms_core, :mishka_blog, :mishka_document]
+  @packages [:mishka_cms_core, :mishka_cms_builder, :mishka_blog, :mishka_document]
 
   @contexts [
     :validate,
@@ -66,7 +68,7 @@ defmodule MishkaCms.RefusalMessagesTest do
     assert built == [], "sentence refusals built with \"\#{…}\":\n" <> list(built)
   end
 
-  test "every refusal the core writes is a msgid of its errors domain" do
+  test "every refusal the core or the builder writes is a msgid of the core's errors domain" do
     pot = Packages.file!(:mishka_cms_core, "priv/gettext/errors.pot")
 
     msgids =
@@ -76,7 +78,8 @@ defmodule MishkaCms.RefusalMessagesTest do
       |> MapSet.new(&IO.iodata_to_binary(&1.msgid))
 
     missing =
-      for {file, line, text} <- refusals(:mishka_cms_core),
+      for package <- [:mishka_cms_core, :mishka_cms_builder],
+          {file, line, text} <- refusals(package),
           is_binary(text) and not MapSet.member?(msgids, text),
           uniq: true,
           do: "#{file}:#{line} #{inspect(text)}"

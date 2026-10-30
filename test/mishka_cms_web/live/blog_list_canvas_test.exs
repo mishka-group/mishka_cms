@@ -15,7 +15,7 @@ defmodule MishkaCmsWeb.BlogListCanvasTest do
   `CanvasLive` draws a live component cold, through `LiveViewHelpers.static_component/1` — the kit's
   `mount/1`, its `update/2`, then `render/1`. `blog-post-list`'s `update/2` is where it reads the
   site's posts, so the frame shows the first page of the real list rather than a placeholder standing
-  in for it. `MishkaCmsCoreWeb.Test.StatefulCanvasTest` pins that path with a toy counter; this is
+  in for it. `MishkaCmsBuilderWeb.Live.StatefulCanvasTest` pins that path with a toy counter; this is
   the component an author actually drops, against real rows.
 
   The page binds `base={@page.path}` and `params={@query_params}`, which the canvas does not evaluate.
@@ -33,9 +33,9 @@ defmodule MishkaCmsWeb.BlogListCanvasTest do
   import MishkaCms.Test.Factory
 
   alias MishkaCmsCore.Accounts.{Permission, User, UserPermission}
-  alias MishkaCmsCore.Runtime.PageBuilder.EditorSession
-  alias MishkaCmsCore.Runtime.PageBuilder.Tree
-  alias MishkaCmsCore.Runtime.PageBuilder.Tree.Node
+  alias MishkaCmsBuilder.EditorSession
+  alias MishkaCmsCore.Runtime.Authoring.Tree
+  alias MishkaCmsCore.Runtime.Authoring.Tree.Node
   alias MishkaCmsCore.Runtime.States.SiteState
 
   require Ash.Query

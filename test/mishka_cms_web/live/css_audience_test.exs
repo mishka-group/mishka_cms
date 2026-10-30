@@ -275,5 +275,50 @@ defmodule MishkaCmsWeb.CssAudienceTest do
 
       refute html =~ ~s|id="mishka-runtime-css"|
     end
+
+    # THE CANVAS TAKES THE SITE'S HOOKS AND NOT ITS SOCKET. Its components name the site's runtime
+    # hooks, which only the site's script carries, so the frame loads that script marked for its
+    # hooks alone (`canvas_hooks.js`) — and AHEAD of the admin's `app.js`: both are deferred and run
+    # in the order written, and the admin's socket can only register what was handed over before it.
+    test "the builder canvas takes the site's script for its hooks, ahead of the admin's" do
+      AssetsState.save(%{id: "localhost", type: "js", value: "", hash: "cafe", updated_at: nil})
+
+      html =
+        layout(%{
+          suppress_site_css: true,
+          suppress_site_js: true,
+          site_hooks: true,
+          standalone_assets: true
+        })
+
+      assert [[script]] =
+               Regex.scan(~r|<script[^>]*src="/assets/js/localhost/cafe.js"[^>]*>|, html)
+
+      assert script =~ "data-mishka-site-hooks", "the script would boot a second socket"
+
+      {hooks_at, _} = :binary.match(html, "/assets/js/localhost/cafe.js")
+      {admin_at, _} = :binary.match(html, "/assets/js/app.js")
+
+      assert hooks_at < admin_at,
+             "the admin's socket would start before the hooks are handed over"
+    end
+
+    test "an admin page that does not ask for the site's hooks takes no site script" do
+      AssetsState.save(%{id: "localhost", type: "js", value: "", hash: "cafe", updated_at: nil})
+
+      html = layout(%{suppress_site_js: true, standalone_assets: true})
+
+      refute html =~ "/assets/js/localhost/"
+      refute html =~ "data-mishka-site-hooks"
+    end
+
+    test "a database page's own script is not marked, so it boots its socket" do
+      AssetsState.save(%{id: "localhost", type: "js", value: "", hash: "cafe", updated_at: nil})
+
+      html = layout(%{runtime_page: true})
+
+      assert html =~ ~s|src="/assets/js/localhost/cafe.js"|
+      refute html =~ "data-mishka-site-hooks"
+    end
   end
 end

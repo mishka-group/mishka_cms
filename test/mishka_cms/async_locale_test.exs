@@ -12,14 +12,14 @@ defmodule MishkaCms.AsyncLocaleTest do
   `assign_async/4` carry the page's locales into it, and the site and CSP nonce a runtime template
   renders with (`MishkaCmsCore.Runtime.LiveViewHelpers.carry_into_tasks/0`), so `t/1` and
   `site_path/2` answer in the task what they answer in the template. This fails on a call to
-  Phoenix's own, in the core, the blog, the document extension or this project. It lives here
-  because only this project has every extension at hand.
+  Phoenix's own, in the core, the builder, the blog, the document extension or this project. It
+  lives here because only this project has every extension at hand.
   """
   use ExUnit.Case, async: true
 
   alias MishkaCms.Test.Packages
 
-  @packages [:mishka_cms, :mishka_cms_core, :mishka_blog, :mishka_document]
+  @packages [:mishka_cms, :mishka_cms_core, :mishka_cms_builder, :mishka_blog, :mishka_document]
 
   @phoenix [:start_async, :assign_async]
 

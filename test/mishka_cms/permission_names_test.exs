@@ -4,10 +4,10 @@
 
 defmodule MishkaCms.PermissionNamesTest do
   @moduledoc """
-  Every permission-looking string literal in `lib/` and in the core, blog and document extensions'
-  `lib/` follows the grammar: `*`, `admin:*`, or `admin:<dashboard|api>:<area>[:<sub>]` in lower
-  snake_case, with `*` only as the whole last segment. `admin:dashboard` and `admin:api` are the
-  prefixes `{:under, prefix}` takes.
+  Every permission-looking string literal in `lib/` and in the core's, the builder's and the blog
+  and document extensions' `lib/` follows the grammar: `*`, `admin:*`, or
+  `admin:<dashboard|api>:<area>[:<sub>]` in lower snake_case, with `*` only as the whole last
+  segment. `admin:dashboard` and `admin:api` are the prefixes `{:under, prefix}` takes.
 
   A literal is permission-looking when it is colon-separated words with no space and starts with
   `admin:` or ends in `:*`, or is `page:code:write`. Each word of a `~w` sigil is a literal, each
@@ -22,7 +22,7 @@ defmodule MishkaCms.PermissionNamesTest do
   alias MishkaCms.Test.Packages
   alias MishkaCmsCore.Accounts.Checks.AccessPermissions
 
-  @packages [:mishka_cms, :mishka_cms_core, :mishka_blog, :mishka_document]
+  @packages [:mishka_cms, :mishka_cms_core, :mishka_cms_builder, :mishka_blog, :mishka_document]
   @copy ~w(lib/mishka_cms_web/live/mishka_cms_live.ex lib/mishka_cms_web/live/mishka_cms_live.html.heex)
 
   @looking ~r/^(admin:[a-z0-9_:*]*|[a-z0-9_:]+:\*|page:code:write)$/
@@ -118,7 +118,7 @@ defmodule MishkaCms.PermissionNamesTest do
            ]
   end
 
-  # Every file in the project and in the three packages, as `{label, path}`; see
+  # Every file in the project and in the four packages, as `{label, path}`; see
   # `MishkaCms.Test.Packages.sources/2`.
   defp sources do
     for package <- @packages,

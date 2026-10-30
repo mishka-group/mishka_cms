@@ -68,6 +68,18 @@ SPDX-License-Identifier: Apache-2.0
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
       })();
     </script>
+    <%!-- THE SITE'S HOOKS WITHOUT ITS SOCKET, for the page-builder canvas. The document it draws
+         names the site's runtime hooks, and only the site's bundle carries them; marked, that bundle
+         hands them to the admin's `app.js` and opens no LiveSocket of its own (`canvas_hooks.js`).
+         Above `app.js` because both are deferred and run in the order written: the admin's socket
+         registers only what was handed over before it started. --%>
+    <script
+      :if={js_src && assigns[:site_hooks]}
+      defer
+      src={js_src}
+      data-mishka-site-hooks
+    >
+    </script>
     <%!-- The installer runs before any site, so no runtime CSS/JS bundle exists yet — load the
          prebuilt static LiveView client (`app.js`) directly for interactivity. The page styles itself
          with its own inline <style> (pure CSS, no Tailwind), so no stylesheet is needed here. --%>

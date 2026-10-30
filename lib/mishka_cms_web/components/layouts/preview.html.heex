@@ -24,6 +24,10 @@ SPDX-License-Identifier: Apache-2.0
     />
     <script :if={assigns[:preview_js]} defer src={@preview_js}>
     </script>
+    <%!-- The faces the seeded and starter designs are written in, linked as the root layout links
+         them for a database page: without them `font-sans` falls back to the system's, and every line
+         of the preview breaks somewhere the published page's does not. --%>
+    <link rel="stylesheet" href={~p"/fonts/fonts.css"} />
     <script defer src={~p"/assets/js/preview.js"}>
     </script>
   </head>

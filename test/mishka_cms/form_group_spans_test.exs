@@ -4,8 +4,8 @@
 
 defmodule MishkaCms.FormGroupSpansTest do
   @moduledoc """
-  No form of the core, blog or document extension draws a group's fields side by side when the
-  group asks for fewer columns.
+  No form of the core, the builder, or the blog or document extension draws a group's fields side
+  by side when the group asks for fewer columns.
 
   A group's fields sit in a CSS grid of its `columns`. A field with a wider `span` makes the grid
   add the columns it is missing, and every field that does not span them is then packed into those
@@ -17,7 +17,7 @@ defmodule MishkaCms.FormGroupSpansTest do
 
   alias MishkaGervaz.Resource.Info.Form, as: FormInfo
 
-  @apps [:mishka_cms_core, :mishka_blog, :mishka_document]
+  @apps [:mishka_cms_core, :mishka_cms_builder, :mishka_blog, :mishka_document]
 
   defp forms do
     for app <- @apps,

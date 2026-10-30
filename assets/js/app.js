@@ -8,6 +8,11 @@
 // never receives this file; their page is served `site.js`, built per site by
 // `MishkaCmsCore.Runtime.Compilers.JavaScriptCompiler`.
 //
+// The admin's hooks are not in this directory. `mishka_cms_core` ships the ones its own templates
+// mount and `mishka_cms_builder` the visual editor's, each as ES module sources behind the `main` of
+// its `package.json`, and esbuild finds both by name through the `NODE_PATH` of the `mishka_cms`
+// profile in config/config.exs: an `__extensions/` checkout first, then `deps/`.
+//
 // The two used to be one. The runtime compiler took THIS file as its entry point and spliced the
 // site's own hooks into it, so every visitor of every site downloaded the page builder, the
 // dashboard's widget grid and `sortablejs` in order never to mount any of them. Two entry points
@@ -16,6 +21,7 @@
 
 import { boot } from "./boot";
 import SharedHooks from "./shared_hooks";
-import AdminHooks from "./admin_hooks";
+import CoreHooks from "mishka_cms_core";
+import BuilderHooks from "mishka_cms_builder";
 
-boot({ ...SharedHooks, ...AdminHooks });
+boot({ ...SharedHooks, ...CoreHooks, ...BuilderHooks });

@@ -158,10 +158,16 @@ config :mishka_cms_core,
   web_module: MishkaCmsWeb,
   core_components: MishkaCmsWeb.CoreComponents
 
+# The editor's strict checks (`MishkaCmsCore.Runtime.Authoring.Strict`) raise outside production.
+# Without this line they follow `Mix.env()` when the core is compiled, and Mix compiles a
+# dependency in `:prod`, so in development and test here they compiled to nothing.
+config :mishka_cms_core, builder_strict: config_env() != :prod
+
 config :mishka_cms,
   ecto_repos: [MishkaCms.Repo],
   generators: [timestamp_type: :utc_datetime],
   ash_domains: [
+    MishkaCmsBuilder,
     MishkaDocument,
     MishkaBlog,
     MishkaCmsCore.Runtime,
@@ -176,7 +182,8 @@ config :mishka_cms_core,
   extensions: [
     MishkaCmsCoreWeb,
     MishkaBlogWeb,
-    MishkaDocumentWeb
+    MishkaDocumentWeb,
+    MishkaCmsBuilderWeb
   ]
 
 # Configures the endpoint
@@ -204,6 +211,18 @@ config :mishka_cms_core, MishkaCmsCore.Mailer, adapter: Swoosh.Adapters.Local
 # `mix deps.compile mishka_cms_core --force`.
 config :mishka_cms_core, :totp_grace_period, nil
 
+# Where `app.js` finds `import CoreHooks from "mishka_cms_core"` and `import BuilderHooks from
+# "mishka_cms_builder"`: each package's root `package.json` names its `assets/js/index.js`. A package
+# is looked up the way `mishka_dep/2` in mix.exs picks it: the checkout under `__extensions/` first
+# (unless `MISHKA_DEPS=hex`), so a package being worked on wins over a stale copy in `deps/`, then its
+# Hex release in `deps/`. `assets/node_modules` comes last so an npm package a hook imports
+# (`sortablejs` in core's) resolves from this app's own npm tree: a file under `deps/` or
+# `__extensions/` never walks up into `assets/`.
+mishka_js =
+  if System.get_env("MISHKA_DEPS") == "hex",
+    do: [],
+    else: [Path.expand("../__extensions", __DIR__)]
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.28.2",
@@ -211,7 +230,15 @@ config :esbuild,
     args:
       ~w(js/app.js js/site.js js/code_editor.js js/content_editor.js js/preview.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
-    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+    env: %{
+      "NODE_PATH" =>
+        mishka_js ++
+          [
+            Path.expand("../deps", __DIR__),
+            Mix.Project.build_path(),
+            Path.expand("../assets/node_modules", __DIR__)
+          ]
+    }
   ],
   mishka_cms_css: [
     # CSS only

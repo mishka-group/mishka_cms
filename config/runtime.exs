@@ -31,10 +31,10 @@ end
 # a database restored from somewhere else — is one that happens to a developer's machine and to
 # staging far more often than to production. A dump carries the signatures of the environment that
 # made it, so on the next boot every handler and every live component's `handle_event/3` in it
-# compiles to a clause that does nothing. `MishkaCmsCore.Runtime.PageBuilder.CodeAudit` counts them
+# compiles to a clause that does nothing. `MishkaCmsCore.Runtime.Authoring.CodeAudit` counts them
 # at boot and `mix mishka.resign_code` is the fix.
 #
-# See `MishkaCmsCore.Runtime.PageBuilder.CodeSignature`.
+# See `MishkaCmsCore.Runtime.Authoring.CodeSignature`.
 config :mishka_cms_core, code_signing_key: System.get_env("CODE_SIGNING_KEY")
 
 if config_env() == :prod do
@@ -114,7 +114,7 @@ if config_env() == :prod do
   # compiling: a switch that silently broke every live page carrying a handler would be a worse
   # failure than the one it prevents. To be rid of existing code, remove it from the documents.
   #
-  # See `MishkaCmsCore.Runtime.PageBuilder.CodeAccess`.
+  # See `MishkaCmsCore.Runtime.Authoring.CodeAccess`.
   config :mishka_cms_core,
     page_code: (System.get_env("PAGE_CODE") == "off" && :off) || :on
 

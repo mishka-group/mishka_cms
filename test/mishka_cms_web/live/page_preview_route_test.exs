@@ -144,7 +144,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         create_page!(
           site_id: site.id,
           template: """
-          <button id="say-hello" phx-click={#{MishkaCmsCore.Runtime.PageBuilder.Interactions.source("say", "pb-7f3a91b2", %{kind: "info", message: said})}}>
+          <button id="say-hello" phx-click={#{MishkaCmsCore.Runtime.Authoring.Interactions.source("say", "pb-7f3a91b2", %{kind: "info", message: said})}}>
             Send
           </button>
           """
@@ -302,7 +302,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         )
         |> Ash.Changeset.force_change_attribute(
           :source_hash,
-          MishkaCmsCore.Runtime.PageBuilder.Drafts.hash("page", page)
+          MishkaCmsCore.Runtime.Authoring.Drafts.hash("page", page)
         )
         |> Ash.create!(authorize?: false)
 
@@ -395,6 +395,71 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       assert has_element?(view, "#layout-probe", "Shell")
       assert has_element?(view, "main #page-probe", "Page")
+    end
+
+    # A PAGE WITH NO LAYOUT IS NOT A PAGE WITH NO FRAME. A visitor gets it inside
+    # `MishkaCmsWeb.RuntimeLive.default_layout/1` — a padded `main` and a `max-w-4xl` column — and the
+    # preview drew it edge to edge, so every width and height on it was a different page's.
+    test "a page with no layout is drawn in the frame a visitor gets it in", %{other: site} do
+      page = create_page!(site_id: site.id, template: ~s(<p id="page-probe">Page</p>))
+
+      {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{page.preview_token}")
+
+      assert has_element?(view, "main.px-4.py-20 > div.mx-auto.max-w-4xl #page-probe", "Page")
+    end
+
+    # A DRAFT IS PREVIEWED AS PUBLISHING IT WOULD LEAVE THE PAGE: in the layout the draft names, and in
+    # the visitor's frame when it names none — whatever the page has today, since the publish writes
+    # the draft's choice over it.
+    test "a draft is drawn in the layout it names, or the visitor's frame when it names none", %{
+      other: site
+    } do
+      layout =
+        create_layout!(
+          site_id: site.id,
+          template: ~S|<header id="layout-probe">Shell</header><main>{@inner_content}</main>|
+        )
+
+      page = create_page!(site_id: site.id, template: "<b>live</b>")
+
+      draft = fn layout_id ->
+        PageDraft
+        |> Ash.Changeset.for_create(
+          :create,
+          %{
+            name: page.name,
+            title: page.title,
+            path: page.path,
+            template: ~s(<p id="draft-probe">Draft</p>),
+            source_page_id: page.id,
+            layout_id: layout_id
+          },
+          tenant: site.id
+        )
+        |> Ash.create!(authorize?: false)
+      end
+
+      named = draft.(layout.id)
+      {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{named.preview_token}")
+      assert has_element?(view, "#layout-probe", "Shell")
+      assert has_element?(view, "main #draft-probe", "Draft")
+      refute has_element?(view, "main.px-4")
+
+      none = draft.(nil)
+      {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{none.preview_token}")
+      refute has_element?(view, "#layout-probe")
+      assert has_element?(view, "main.px-4.py-20 > div.mx-auto.max-w-4xl #draft-probe", "Draft")
+    end
+
+    # The seeded and starter designs are written in the faces `/fonts/fonts.css` serves, and a public
+    # database page links it; the preview did not, so its type fell back to the system's and every
+    # line broke somewhere else.
+    test "a preview loads the faces a database page is written in", %{other: site} do
+      page = create_page!(site_id: site.id, template: "<b>x</b>")
+
+      conn = get(on_host("localhost"), "/_preview/page/#{page.preview_token}")
+
+      assert html_response(conn, 200) =~ ~s(href="/fonts/fonts.css")
     end
 
     test "the sign-in pages render with their own helpers and Ash's live components", %{

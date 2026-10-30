@@ -213,8 +213,9 @@ defmodule MishkaCmsWeb.Router do
     end
   end
 
-  # The visual editor is the native LiveView one, declared by `MishkaCmsCoreWeb.Routes` inside the
-  # admin `live_session` above. Nothing is routed here any more: the Inertia `template_creator` GETs
+  # The visual editor is mishka_cms_builder's LiveView one, declared by `MishkaCmsBuilderWeb.Routes`
+  # and mounted by `extension_routes(:admin_standalone)` in the second admin `live_session` above.
+  # Nothing is routed here any more: the Inertia `template_creator` GETs
   # matched the same paths and were shadowed the moment those LiveView routes landed, and
   # `POST /render` was the React editor's server-render endpoint — an ungated `Code.eval_quoted/3`
   # over client-supplied JSON, which the new canvas has no use for because it renders by calling
