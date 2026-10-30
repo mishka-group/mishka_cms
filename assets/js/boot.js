@@ -19,16 +19,22 @@ import topbar from "../vendor/topbar";
 import { syncHead } from "./head_sync";
 import { swapRuntimeCss } from "./css_swap";
 import { showUpdateBanner } from "./update_banner";
+import { handOverHooks, handedOverHooks } from "./canvas_hooks";
 
 export function boot(Hooks) {
+  // A site's bundle loaded by the page builder's canvas for its hooks alone: they go to the admin's
+  // socket, and this bundle opens none of its own — see `canvas_hooks.js`.
+  if (handOverHooks(Hooks)) return;
+
   const csrfToken = document
     .querySelector("meta[name='csrf-token']")
     .getAttribute("content");
 
+  // The hooks a site's bundle handed over come first, so the admin's own win any name both use.
   const liveSocket = new LiveSocket("/live", Socket, {
     longPollFallbackMs: 2500,
     params: { _csrf_token: csrfToken },
-    hooks: { ...colocatedHooks, ...Hooks },
+    hooks: { ...colocatedHooks, ...handedOverHooks(), ...Hooks },
   });
 
   // Show progress bar on live navigation and form submits

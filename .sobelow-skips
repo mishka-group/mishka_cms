@@ -2,4 +2,4 @@ Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:23,60
 Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:39,6561B14
 Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:94,35535E7
 XSS.Raw: XSS,lib/mishka_cms_web/components/layouts/root.html.heex:19,624EBDB
-XSS.Raw: XSS,lib/mishka_cms_web/components/layouts/root.html.heex:192,BE6C86
+XSS.Raw: XSS,lib/mishka_cms_web/components/layouts/root.html.heex:204,15C0DC8
