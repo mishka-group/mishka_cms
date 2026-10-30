@@ -206,8 +206,10 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
     )
   end
 
-  # A PAGE IS PREVIEWED INSIDE ITS LAYOUT, as a visitor gets it: the draft's own choice for a draft,
-  # compiled the same way the page is. A layout that does not compile leaves the page alone.
+  # A PAGE IS PREVIEWED INSIDE ITS LAYOUT, as a visitor gets it: the draft's own choice for a draft —
+  # which is what publishing it writes over the page, a draft that names none included — compiled the
+  # same way the page is. A page with none, or whose layout does not compile, takes the visitor's
+  # frame in `preview/1`.
   defp layout_module(%{layout: %Layout{} = layout}, site), do: compiled_layout(layout, site)
 
   defp layout_module(%{loaded_layout: %Layout{} = layout}, site),
@@ -310,6 +312,9 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
     """
   end
 
+  # A PAGE IS FRAMED AS `MishkaCmsWeb.RuntimeLive` FRAMES IT for a visitor: inside its layout, and
+  # inside `RuntimeLive.default_layout/1` when it has none or the layout will not compile. Drawn bare
+  # instead, a page without a layout previewed edge to edge where the visitor gets a padded column.
   defp preview(%{preview_module: preview_module} = assigns) do
     cond do
       function_exported?(preview_module, :__layout_information__, 0) ->
@@ -318,8 +323,14 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
       assigns.layout_module ->
         assigns.layout_module.render(assigns, preview_module.render(assigns))
 
+      # `assign/3`, not `Map.put/3`: the page is new on every render, and a key the change tracking
+      # was not told about kept the frame's first page through every patch. `default_layout/1` reads
+      # it, so the check below cannot see the read.
       true ->
-        preview_module.render(assigns)
+        assigns
+        # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
+        |> assign(:inner_content, preview_module.render(assigns))
+        |> MishkaCmsWeb.RuntimeLive.default_layout()
     end
   end
 

@@ -1520,7 +1520,15 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   defp query_params(_not_a_map, _captured), do: %{}
 
-  defp default_layout(assigns) do
+  @doc """
+  The frame a database page with no layout is drawn in — `MishkaCmsWeb.Layouts.app/1` around
+  `@inner_content` — and the one a page whose layout will not compile falls back to.
+
+  `MishkaCmsWeb.DraftPreviewLive` draws a page without a layout in it too, so a preview has the
+  widths and the padding the visitor gets.
+  """
+  @spec default_layout(map()) :: Phoenix.LiveView.Rendered.t()
+  def default_layout(assigns) do
     ~H"""
     <Layouts.app flash={assigns[:flash] || %{}}>
       {assigns[:inner_content] || ""}
