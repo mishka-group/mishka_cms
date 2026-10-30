@@ -77,10 +77,10 @@ docker compose -f examples/docker/dev-docker-compose.yml exec app bash
 To see Mishka CMS running without installing Elixir, use the demo image. It has the default extensions, and it is for trying only, not for production: its migrations were generated for one release, so a newer demo needs a fresh database.
 
 ```bash
-docker pull ghcr.io/mishka-group/mishka_cms-demo:0.0.1
+docker pull ghcr.io/mishka-group/mishka_cms-demo:0.0.2
 ```
 
-[`examples/docker/demo-docker-compose.yml`](examples/docker/demo-docker-compose.yml) starts it with PostgreSQL 18. It explains how to make the secrets. One of them, `MISHKA_SETUP_TOKEN`, is the token the installer at `/install` asks for. The image is built for linux/amd64 and linux/arm64, and `gh attestation verify oci://ghcr.io/mishka-group/mishka_cms-demo:0.0.1 --owner mishka-group` checks that this repository's release workflow built it.
+[`examples/docker/demo-docker-compose.yml`](examples/docker/demo-docker-compose.yml) starts it with PostgreSQL 18. It explains how to make the secrets. One of them, `MISHKA_SETUP_TOKEN`, is the token the installer at `/install` asks for. The image is built for linux/amd64 and linux/arm64, and `gh attestation verify oci://ghcr.io/mishka-group/mishka_cms-demo:0.0.2 --owner mishka-group` checks that this repository's release workflow built it.
 
 ## 🚢 Deploy
 
