@@ -175,10 +175,8 @@ defmodule MishkaCms.MixProject do
       {:guarded_struct, "~> 0.1.4"},
 
       # Extensions
-      mishka_dep(:mishka_cms_core, "~> 0.0.2"),
-      # The visual page builder. Not on Hex yet: until its 0.0.1 is published it comes only from a
-      # checkout under `__extensions/mishka_cms_builder`, and `MISHKA_DEPS=hex mix deps.get` fails to
-      # resolve it.
+      mishka_dep(:mishka_cms_core, "~> 0.0.3"),
+      # The visual page builder.
       mishka_dep(:mishka_cms_builder, "~> 0.0.1-alpha.1"),
       mishka_dep(:mishka_blog, "~> 0.0.1"),
       mishka_dep(:mishka_document, "~> 0.0.1"),
