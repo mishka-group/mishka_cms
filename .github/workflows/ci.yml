@@ -20,15 +20,6 @@ permissions:
 
 env:
   MIX_ENV: test
-  # TEMPORARY: OTP 29.0.5, not the 29.1.x of .tool-versions, in every job and every cache key
-  # below. From OTP 29.0.6 on, :httpc stops at 10240 bytes of response headers by default, and the
-  # redirect GitHub answers a release download with now carries about 10.8 KB of them, so precompiled
-  # NIFs and binaries downloaded through :httpc (elixir_make, cc_precompiler, rustler_precompiled,
-  # tailwind) fail with {:header_too_long, {:max, 10240}}. Move back to the latest OTP, with
-  # `version-file: .tool-versions` and .tool-versions in the cache keys again, once a fixed OTP
-  # release or fixed libraries are out.
-  OTP_VERSION: "29.0.5"
-  ELIXIR_VERSION: "1.20.4-otp-29"
   # setup-beam installs Hex from builds.hex.pm, and one slow response there failed a whole run
   # ("Could not mix hex from any hex.pm mirror"). It tries these in order.
   HEXPM_MIRRORS: |
@@ -50,10 +41,10 @@ jobs:
       # if it found one, so none is ever checked out here.
       - uses: actions/checkout@v7
 
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
@@ -62,8 +53,8 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
-          restore-keys: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-
 
       - run: mix deps.get
 
@@ -77,10 +68,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
@@ -89,7 +80,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # The formatter takes the DSL's paren-free calls (`table "pages"`, `reference :site, ...`)
@@ -105,10 +96,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
@@ -117,7 +108,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       - run: mix deps.audit
@@ -153,10 +144,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
@@ -165,7 +156,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # The migrations are generated, not in git (they belong to the copy that loads the extensions):
@@ -216,10 +207,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
@@ -228,7 +219,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # Generated once, here, and sent to Docker with the rest of the checkout: the image takes the

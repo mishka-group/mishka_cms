@@ -41,7 +41,7 @@ The website's [features section](https://mishka.tools/cms#platform) walks throug
 
 ## 🚀 Getting started
 
-You need Elixir 1.20 or newer (`.tool-versions` pins Elixir 1.20.4 on Erlang/OTP 29.1.1), PostgreSQL and [bun](https://bun.sh). In development the app connects to PostgreSQL as `postgres` with the password `postgres`; `DB_HOST` and `DB_NAME` change the host and the database name.
+You need Elixir 1.20 or newer (`.tool-versions` pins Elixir 1.20.5 on Erlang/OTP 29.1.2), PostgreSQL and [bun](https://bun.sh). In development the app connects to PostgreSQL as `postgres` with the password `postgres`; `DB_HOST` and `DB_NAME` change the host and the database name.
 
 ```bash
 git clone https://github.com/mishka-group/mishka_cms.git

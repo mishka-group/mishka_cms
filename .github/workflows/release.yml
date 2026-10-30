@@ -50,11 +50,6 @@ permissions:
   contents: read
 
 env:
-  # TEMPORARY: OTP 29.0.5, the pin of ci.yml. See the comment on OTP_VERSION there; both files move
-  # back to the latest OTP together. It is the OTP of the job that generates the migrations: the
-  # image is built with the OTP of the Dockerfile.
-  OTP_VERSION: "29.0.5"
-  ELIXIR_VERSION: "1.20.4-otp-29"
   # setup-beam tries these in order, so one slow builds.hex.pm cannot fail the run.
   HEXPM_MIRRORS: |
     https://builds.hex.pm
@@ -232,8 +227,8 @@ jobs:
   # different migration versions, and the index would hold two images that disagree about the
   # database. They follow the default extensions of the tag's config/config.exs.
   #
-  # OTP and mirrors as in ci.yml: `deps.get` and the compile download precompiled NIFs through
-  # :httpc, which fails on a newer OTP (see OTP_VERSION). Generating them needs no database.
+  # OTP and mirrors as in ci.yml: `deps.get` and the compile download precompiled NIFs, so the build
+  # cache of the CI run saves the compile. Generating them needs no database.
   migrations:
     name: Generate the migrations
     needs: version
@@ -250,10 +245,10 @@ jobs:
           name: scripts
           path: ${{ runner.temp }}/scripts
 
+      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image, and as ci.yml.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
@@ -265,8 +260,8 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-${{ needs.version.outputs.sha }}
-          restore-keys: ${{ runner.os }}-otp-${{ env.OTP_VERSION }}-elixir-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('mix.lock') }}-
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ needs.version.outputs.sha }}
+          restore-keys: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-
 
       - run: mix deps.get
 
