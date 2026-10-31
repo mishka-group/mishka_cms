@@ -2,116 +2,92 @@
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-mishkagroup-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/mishkagroup)
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-mishka--group-ea4aaa?style=flat-square&logo=github)](https://github.com/sponsors/mishka-group)
+[![Discord](https://img.shields.io/badge/Discord-Mishka_Tools-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/m4zdCJjDJg)
 
 # Mishka CMS
 
 **An [open source real-time CMS](https://mishka.tools/cms) for Elixir and Phoenix LiveView. One install runs many websites.**
 
-[Website](https://mishka.tools/cms) · [Documentation](https://mishka.tools/cms/docs) · [Admin preview](https://mishka.tools/cms#demo) · [Hire us](https://mishka.tools/hire-us)
+[Website](https://mishka.tools/cms) · [Documentation](https://mishka.tools/cms/docs) · [Admin preview](https://mishka.tools/cms#demo) · [Discord](https://discord.gg/m4zdCJjDJg) · [Hire us](https://mishka.tools/hire-us)
 
 </div>
 
 ## 📖 What is Mishka CMS?
 
-Mishka CMS is an [open source real-time CMS](https://mishka.tools/cms) written in Elixir on Phoenix LiveView and the Ash framework. One install serves many websites. Each site is a tenant with its own domain, languages, pages, layouts, components, media, users and permissions, and master users work across all of them.
+Mishka CMS is an [open source real-time CMS](https://mishka.tools/cms) built on Elixir, Phoenix LiveView and the Ash framework. You build pages in the browser, publish them without a redeploy, and run many websites from one install.
 
-Pages, layouts, components, error pages, stylesheets and JavaScript hooks are stored in the database and compiled at runtime. You edit them in the browser with a visual page builder or a code editor, save a draft, and publish. Publishing does not need a redeploy.
+This repository is the application that runs it: the Phoenix endpoint, the router, the release scripts and the Dockerfile. The engine and the extensions are packages it loads from Hex.
 
-This repository is the application that runs the CMS: the Phoenix endpoint, the router, the release scripts and the Dockerfile. The engine and the extensions are separate packages that it loads.
+## ✨ Why Mishka CMS
 
-## 🧩 Part of Mishka CMS
+- 🌐 **[Many websites, one install](https://mishka.tools/cms/docs/sites-and-masters)**: each brand, client or market gets its own site with its own domain, languages, users and content. One master account runs them all.
+- 🎨 **[Visual page builder](https://mishka.tools/cms/docs/build-a-page)**: place sections and components on a live canvas, edit text in place and check every screen size. The code behind the page is one click away.
+- ⚡ **[Publish without a redeploy](https://mishka.tools/cms/docs/how-pages-reach-visitors)**: pages, layouts and components live in the database and compile while the app runs. Visitors with the page open get the new styles at once.
+- 📝 **[Drafts and versions](https://mishka.tools/cms/docs/drafts-and-versions)**: your work saves to a draft, teammates [review it from a link](https://mishka.tools/cms/docs/share-a-draft), and every earlier version can be restored.
+- 🔍 **[SEO with no setup](https://mishka.tools/cms/docs/page-seo)**: every page ships with its title, description, canonical link, social preview and structured data, and pages without an image get a share card drawn for them. Each site has its own sitemap and robots.txt.
+- 🌍 **[Every language you publish in](https://mishka.tools/cms/docs/languages)**: one site serves several languages, with addresses like `/fa/blog`, [translated pages](https://mishka.tools/cms/docs/translate-a-page) and [interface words](https://mishka.tools/cms/docs/translate-interface), and dates and numbers in each language's own format.
+- 🔐 **[Secure sign-in](https://mishka.tools/cms/docs/secure-sign-in)**: passwords or emailed sign-in links, two-step sign-in with an authenticator app, rate limits, and a captcha from Cloudflare Turnstile, Google reCAPTCHA or hCaptcha.
+- 🛡️ **[Permissions you can read](https://mishka.tools/cms/docs/permissions)**: names like `admin:dashboard:blog:post`, with wildcards, kept apart for the dashboard and the API. [Lock a page](https://mishka.tools/cms/docs/lock-a-page) or a post to members.
+- 🔌 **[Headless, coupled or both](https://mishka.tools/cms/docs/headless-or-coupled)**: a site serves its own pages, a [JSON:API](https://mishka.tools/cms/docs/json-api) for your frontend, or both. The API comes with an OpenAPI spec and Swagger UI.
+- 🧩 **[Plugins instead of forks](https://mishka.tools/cms/docs/extensions-and-plugins)**: every action fires a named [event](https://mishka.tools/cms/docs/plugin-events) such as `blog:comment:after_create`, and your plugin hooks in by priority.
+- 🧱 **[Components and UI kits](https://mishka.tools/cms/docs/components-and-ui-kits)**: install a kit of ready components, [write your own](https://mishka.tools/cms/docs/custom-code), and reuse [snippets and design tokens](https://mishka.tools/cms/docs/snippets-and-tokens) across a site.
+- 🧰 **Everything a site needs**: a [media library](https://mishka.tools/cms/docs/media), [forms](https://mishka.tools/cms/docs/add-a-form), [redirects](https://mishka.tools/cms/docs/redirects), [email delivery](https://mishka.tools/cms/docs/send-email) and an [activity log](https://mishka.tools/cms/docs/activity-log) of every change.
+- 🤖 **[Bring your own AI model](https://mishka.tools/cms/docs/connect-an-ai-model)**: connect a model to the editor's Assistant with one Elixir module, and undo its edits like your own.
 
-This is [Mishka CMS](https://mishka.tools/cms) itself. It loads eight packages: [mishka_cms_core](https://github.com/mishka-group/mishka_cms_core), the engine; [mishka_blog](https://github.com/mishka-group/mishka_blog), the [blog extension](https://mishka.tools/cms/extensions/blog); [mishka_document](https://github.com/mishka-group/mishka_document), the [documentation extension](https://mishka.tools/cms/extensions/documentation); [mishka_gervaz](https://github.com/mishka-group/mishka_gervaz), the [Mishka Gervaz](https://mishka.tools/gervaz) toolkit the admin screens are built with; and four sign-in providers, [mishka_cms_auth_google](https://github.com/mishka-group/mishka_cms_auth_google), [mishka_cms_auth_github](https://github.com/mishka-group/mishka_cms_auth_github), [mishka_cms_auth_slack](https://github.com/mishka-group/mishka_cms_auth_slack) and [mishka_cms_auth_discord](https://github.com/mishka-group/mishka_cms_auth_discord). Plugins and events run on [Mishka Installer](https://mishka.tools/installer), and the UI components come from [Mishka Chelekom](https://mishka.tools/chelekom).
+## 🚀 Get started
 
-## ✨ Features
-
-- Many sites from one install. Master users manage every site, tenant users see only their own, and the data layer keeps tenants apart. See [multi-tenant sites](https://mishka.tools/cms#tenant).
-- Live editing. A visual page builder and a code editor write pages in HEEx, EEx or Markdown. Drafts autosave, a draft can be previewed through a shareable link, and every saved version can be restored.
-- A stylesheet and a script bundle for each site, built at runtime from that site's own templates, Tailwind CSS v4 styles and JavaScript hooks.
-- SEO from the page itself: title, description, canonical address, Open Graph and Twitter tags, JSON-LD, a `sitemap.xml` and `robots.txt` for every site, and a 1200 x 630 share card for a page with no image of its own.
-- Several languages per site, translation keys for templates (`t("nav.blog")`), and dates, numbers and language names written the way each language writes them.
-- Sign-in controls: password or emailed sign-in link, optional two-step sign-in with an authenticator app and recovery codes, rate limits per IP address and per account, and a captcha from Cloudflare Turnstile, Google reCAPTCHA or hCaptcha, chosen per site.
-- Permissions written as plain names such as `admin:dashboard:blog:post`, with wildcards, separate for the dashboard and for the API.
-- An admin that updates live over LiveView, with notifications and an activity log.
-- A JSON:API under `/api/json`, described by an OpenAPI spec, with Swagger UI for API admins.
-- Plugins instead of forks. Every action fires a named event such as `blog:comment:after_create` through Mishka Installer, and plugins hook in by priority.
-- A first-run install wizard, and blog and documentation extensions you can install per site.
-
-The website's [features section](https://mishka.tools/cms#platform) walks through the main ones.
-
-## 🚀 Getting started
-
-You need Elixir 1.20 or newer (`.tool-versions` pins Elixir 1.20.4 on Erlang/OTP 29.1.1), PostgreSQL and [bun](https://bun.sh). In development the app connects to PostgreSQL as `postgres` with the password `postgres`; `DB_HOST` and `DB_NAME` change the host and the database name.
+Follow **[Install Mishka CMS and sign in](https://mishka.tools/cms/docs/install)**, then [build your first site](https://mishka.tools/cms/docs/first-site) and [start a blog](https://mishka.tools/cms/docs/start-a-blog). In short, with Elixir 1.20 or newer, PostgreSQL and [bun](https://bun.sh):
 
 ```bash
-git clone https://github.com/mishka-group/mishka_cms.git
-cd mishka_cms
-
-mix deps.get
-mix assets.setup
-
-mix ecto.create
-mix oban.install --yes
-mix ash.codegen cms_with_extensions
-mix ash.migrate
-
-mix assets.build
-mix phx.server
+git clone https://github.com/mishka-group/mishka_cms.git && cd mishka_cms
+mix deps.get && mix assets.setup
+mix ecto.create && mix oban.install --yes
+mix ash.codegen cms_with_extensions && mix ash.migrate
+mix assets.build && mix phx.server
 ```
 
-The migrations are generated and not stored in the repository, so `mix ash.codegen` is part of the setup. `mix dev_reset` repeats the database steps from an empty database and drops the existing one.
+Open <http://localhost:4000>, and the install wizard creates the master admin and the first site. `mix run priv/repo/dev_seeds.exs` fills a development database with sample sites and content. Without a local Elixir or PostgreSQL, use the development container in [`examples/docker`](examples/docker/dev-docker-compose.yml).
 
-Open <http://localhost:4000>. Until the CMS is installed, every request goes to `/install`. The wizard creates the master admin and the first site, lets you choose the Chelekom components and the extensions to install, and sets the site title, the sender address and the languages. When it finishes, sign in with the master account.
-
-For a development database filled with sample sites, users, pages, blog posts and documents, run `mix run priv/repo/dev_seeds.exs`.
-
-Without a local Elixir or PostgreSQL, use the development container in `examples/docker`, which has Elixir, bun and a PostgreSQL 18 database, and run the same `mix` commands inside it:
+## 🧪 Try the demo image
 
 ```bash
-docker compose -f examples/docker/dev-docker-compose.yml up -d
-docker compose -f examples/docker/dev-docker-compose.yml exec app bash
+docker pull ghcr.io/mishka-group/mishka_cms-demo:0.0.2
 ```
 
-## 🧪 Try it
-
-To see Mishka CMS running without installing Elixir, use the demo image. It has the default extensions, and it is for trying only, not for production: its migrations were generated for one release, so a newer demo needs a fresh database.
-
-```bash
-docker pull ghcr.io/mishka-group/mishka_cms-demo:0.0.1
-```
-
-[`examples/docker/demo-docker-compose.yml`](examples/docker/demo-docker-compose.yml) starts it with PostgreSQL 18. It explains how to make the secrets. One of them, `MISHKA_SETUP_TOKEN`, is the token the installer at `/install` asks for. The image is built for linux/amd64 and linux/arm64, and `gh attestation verify oci://ghcr.io/mishka-group/mishka_cms-demo:0.0.1 --owner mishka-group` checks that this repository's release workflow built it.
+[`demo-docker-compose.yml`](examples/docker/demo-docker-compose.yml) starts it with PostgreSQL 18 and explains the secrets. Open `/install?token=...` with your `MISHKA_SETUP_TOKEN`. The demo is for trying only: its migrations belong to one release, so a newer demo needs a fresh database.
 
 ## 🚢 Deploy
 
-A real install is your own copy of this repository, built with the `Dockerfile` in its root. The migrations are yours too. They follow the extensions your copy loads (`ash_domains` in `config/config.exs`), so this repository does not keep them, and you generate them once and commit them:
+A real install is your own copy of this repository, built with its `Dockerfile`.
 
-```bash
-mix oban.install --yes
-mix ash.codegen first_install
-git add priv/repo/migrations priv/resource_snapshots
-```
+1. Generate the migrations for the extensions you load and commit them: run `mix oban.install --yes` and `mix ash.codegen first_install`, then commit `priv/repo/migrations` and `priv/resource_snapshots`. The build fails without them.
+2. Run the image with `DATABASE_URL`, `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET` and `SESSION_SIGNING_SALT`, and with `MISHKA_SETUP_TOKEN` for the first run.
+3. Mount a volume at `MISHKA_DATA_DIR` (`/app/mishka_data`), and run `/app/bin/migrate` before `/app/bin/server`.
 
-`mix ash.codegen` writes the migrations to `priv/repo/migrations` and the snapshots they came from to `priv/resource_snapshots`. Commit both: the next `mix ash.codegen` compares your resources with the snapshots and writes only the difference. The build checks them. It fails when there is no migration, and when your resources have changed since the last `mix ash.codegen`, and its message says what to run.
+To upgrade, bump the Mishka packages in `mix.exs`, run `mix deps.update` for them and `mix ash.codegen upgrade_<version>`, commit what it wrote and deploy. `mix dev_reset` regenerates every migration, so keep it to throwaway development databases.
 
-Run the image with `DATABASE_URL`, `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET` set, and `MISHKA_SETUP_TOKEN` for the first run: `/install` refuses everyone without it, and you open it as `/install?token=...`. Set `SESSION_SIGNING_SALT` too, to replace the default salt of the session cookie. Mount a volume at `MISHKA_DATA_DIR` (`/app/mishka_data` in the image) for Mnesia, uploaded files and caches. Run `/app/bin/migrate` before `/app/bin/server`.
+## 🧩 The Mishka CMS family
 
-To upgrade, bump the Mishka packages in `mix.exs` and run `mix deps.update` for them, then `mix ash.codegen upgrade_<version>`, commit what it wrote, and deploy. `/app/bin/migrate` runs only the migrations the database has not run yet.
-
-`mix dev_reset` deletes `priv/repo/migrations` and `priv/resource_snapshots` and generates them again, so use it only on a throwaway development database, never on one whose migrations you have deployed.
+- **[Mishka CMS Core, the Elixir CMS engine](https://mishka.tools/cms/docs)**: sites, pages, permissions, the runtime compiler and the JSON:API.
+- **[Mishka CMS Builder, the visual page editor](https://mishka.tools/cms/docs/build-a-page)**: the live canvas, drafts, history and review notes.
+- **[Mishka Blog, the blog extension](https://mishka.tools/cms/extensions/blog)**: posts, categories, tags, authors and moderated comments.
+- **[Mishka Document, the documentation extension](https://mishka.tools/cms/extensions/documentation)**: versioned docs, proposed changes as drafts, and issue tracking.
+- **[Mishka Gervaz, the admin DSL for Ash](https://mishka.tools/gervaz)**: the toolkit the admin screens are built with.
+- **[Mishka Installer, plugins and events for Elixir](https://mishka.tools/installer)**: the event system every plugin hooks into.
+- **[Mishka Chelekom, Phoenix LiveView components](https://mishka.tools/chelekom)**: the UI kits the install wizard offers.
+- **Sign-in providers**: [Google](https://github.com/mishka-group/mishka_cms_auth_google), [GitHub](https://github.com/mishka-group/mishka_cms_auth_github), [Slack](https://github.com/mishka-group/mishka_cms_auth_slack) and [Discord](https://github.com/mishka-group/mishka_cms_auth_discord).
 
 ## 📚 Documentation
 
-- [Mishka CMS documentation](https://mishka.tools/cms/docs), which is still being written
-- [Features](https://mishka.tools/cms#platform), [multi-tenant sites](https://mishka.tools/cms#tenant), the [interactive admin preview](https://mishka.tools/cms#demo) and the [extensions](https://mishka.tools/cms#extensions)
-- The [Mishka Blog extension](https://mishka.tools/cms/extensions/blog) and the [Mishka Document extension](https://mishka.tools/cms/extensions/documentation)
+- [Mishka CMS documentation](https://mishka.tools/cms/docs): tutorials, how-to guides, reference and concepts
+- The [Blog extension docs](https://mishka.tools/cms/extensions/blog/docs) and the [Documentation extension docs](https://mishka.tools/cms/extensions/documentation/docs)
 - [Mishka Installer documentation](https://mishka.tools/installer/docs), for plugins and events
 - The [Mishka blog](https://mishka.tools/blog), for releases and articles
 
 ## 💬 Community and support
 
+- Chat with the team and other users on [Discord](https://discord.gg/m4zdCJjDJg).
 - Report a bug or ask a question in [GitHub issues](https://github.com/mishka-group/mishka_cms/issues).
-- Read about new releases on the [Mishka blog](https://mishka.tools/blog).
 - For a custom extension, a migration from another CMS or priority support, [hire the Mishka team](https://mishka.tools/hire-us).
 
 ## 💖 Support the project

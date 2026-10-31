@@ -44,7 +44,7 @@ services:
 
   # Runs once and exits: creates the tables. The app starts after it has succeeded.
   migrate:
-    image: ghcr.io/mishka-group/mishka_cms-demo:0.0.1
+    image: ghcr.io/mishka-group/mishka_cms-demo:0.0.2
     command: ["/app/bin/migrate"]
     environment: *mishka-env
     depends_on:
@@ -52,7 +52,7 @@ services:
         condition: service_healthy
 
   app:
-    image: ghcr.io/mishka-group/mishka_cms-demo:0.0.1
+    image: ghcr.io/mishka-group/mishka_cms-demo:0.0.2
     environment: *mishka-env
     ports:
       - "4000:4000"
