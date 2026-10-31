@@ -30,7 +30,9 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
   debug_errors: false,
   secret_key_base: "w745hNwPTNToyTAJMDZXQLdbCTGyscON2cz/qaH3QxlfvMMJl1PaHqP+MjdAhGyE",
   watchers: [
-    # esbuild: {Esbuild, :install_and_run, [:mishka_cms, ~w(--sourcemap=inline --watch)]},
+    # Rebuilds the admin bundle when its JS changes, including the core and builder hooks it
+    # imports through NODE_PATH, so a pulled package change reaches the browser without a rebuild.
+    esbuild: {Esbuild, :install_and_run, [:mishka_cms, ~w(--sourcemap=inline --watch)]},
     # tailwind: {Tailwind, :install_and_run, [:mishka_cms, ~w(--watch)]},
     esbuild_css: {Esbuild, :install_and_run, [:mishka_cms_css, ~w(--sourcemap=inline --watch)]},
     mishka_cms_tailwind:
