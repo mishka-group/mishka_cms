@@ -1,7 +1,7 @@
 # Changelog for MishkaCms 0.0.2
 
 ### Features:
-- The visual editor is a package of its own. The host installs `mishka_cms_builder` 0.0.1-alpha.3 and `mishka_cms_core` 0.0.4 from Hex, imports the admin and editor hooks from their packages, and starts the runtime through the core's supervision API
+- The visual editor is a package of its own. The host installs `mishka_cms_builder` 0.0.1-alpha.4 and `mishka_cms_core` 0.0.4 from Hex, imports the admin and editor hooks from their packages, and starts the runtime through the core's supervision API
 - A reader is told when the open page changed because its layout or a component it draws was rebuilt
 - The release workflow publishes a demo image to GHCR and a GitHub release for a tag, and the demo image is `ghcr.io/mishka-group/mishka_cms-demo:0.0.2`
 
