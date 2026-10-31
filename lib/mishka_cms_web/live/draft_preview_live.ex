@@ -11,8 +11,18 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
 
   The draft is looked up by its unguessable `preview_token` (the token is the capability — no
   login). Its template is rendered inline; the layout (`MishkaCmsWeb.Layouts`, `:preview`) links the
-  draft's own temporary CSS (`/_preview/:resource/:token/css`, compiled per-draft, never the live
-  site bundle) and the per-site JS bundle.
+  per-site JS bundle, and the page links the draft's own temporary CSS
+  (`/_preview/:resource/:token/css`, never the live site bundle).
+
+  ## Built on every open
+
+  That stylesheet is compiled by `MishkaCmsWeb.DraftPreviewController` for each request, from the
+  record as it is then, a draft's own Custom CSS included, and kept nowhere — a few seconds of
+  Tailwind. So the page opens at once under a "Building preview…" overlay (`#mishka-preview-building`),
+  and links the stylesheet after it, in the body: a stylesheet in the head would hold the whole page
+  blank until it arrived. The stylesheet itself ends with the rule that hides the overlay
+  (`ready_css/0`), so the overlay goes the moment the CSS applies, with no script for the CSP to let
+  in. A stylesheet that could not be built ends with `failed_css/0` instead, which says so on it.
 
   A page or a layout is drawn by its compiled module, built by the compiler its site uses
   (`MishkaCmsCore.Runtime.DraftPreviewAssets.ensure_module/2`), with the assigns
@@ -94,7 +104,8 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
       # the admin is viewing from (`SiteLookupPlug` resolved it into the session), so the preview
       # borrows that domain's JS bundle (hooks run) and compiles its CSS against that site's base.
       asset_site = Map.get(record, :site) || Map.get(session, "current_site")
-      _ = DraftPreviewAssets.ensure_css(record, asset_site)
+
+      # The stylesheet follows this site: it is served only under a token a preview was opened with.
       :ok = DraftPreviewAssets.remember_site(record, asset_site)
       language = Map.get(record, :language) || site_language(asset_site)
       :ok = speaking(language, asset_site)
@@ -103,9 +114,9 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
        socket
        |> assign(:page_title, gettext("%{name} · preview", name: Map.get(record, :name)))
        |> assign(record: record, module: module, asset_site: asset_site)
-       # The preview layout (layouts/preview.html.heex) reads both.
-       # credo:disable-for-lines:2 Jump.CredoChecks.UnusedLiveViewAssign
        |> assign(:preview_css, "/_preview/#{resource}/#{token}/css")
+       # The preview layout (layouts/preview.html.heex) reads it.
+       # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
        |> assign(:preview_js, site_js(asset_site, token))
        |> assign(:draft?, module in [PageDraft, LayoutDraft, ErrorPageDraft])
        |> assign(
@@ -286,18 +297,57 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
 
   defp parse_status(_status), do: nil
 
+  @doc """
+  The rule the preview's stylesheet ends with once it is built: it hides the "Building preview…"
+  overlay. `MishkaCmsWeb.DraftPreviewController` appends it.
+  """
+  @spec ready_css() :: String.t()
+  def ready_css, do: "\n#mishka-preview-building{display:none!important}\n"
+
+  @doc """
+  The rules a stylesheet that could not be built is answered with: the overlay stays, and says so.
+  """
+  @spec failed_css() :: String.t()
+  def failed_css,
+    do:
+      "\n#mishka-preview-building .mishka-preview-wait{display:none}" <>
+        "#mishka-preview-building .mishka-preview-failed{display:block}\n"
+
   # `chrome_css/0` is the preview's own fixed CSS, and `@body_html` is what `RuntimePreview` drew: the
   # record's template rendered (its assigns escaped), or a note whose text it escapes.
+  #
+  # THE OVERLAY, THEN THE STYLESHEET, IN THAT ORDER. Everything before an in-body stylesheet is drawn
+  # while it loads, so the overlay is on screen at once; the stylesheet hides it when it applies (see
+  # "Built on every open" above). `phx-update="ignore"` keeps the link the one the page was served
+  # with, so a join or a patch never fetches — and compiles — it again.
   # sobelow_skip ["XSS.Raw"]
   def render(assigns) do
     ~H"""
     <style phx-no-curly-interpolation nonce={assigns[:csp_nonce]}>
       <%= raw(RuntimePreview.chrome_css()) %>
-      #mishka-draft-banner{position:sticky;top:0;z-index:2147483647;background:#fef3c7;color:#92400e;font:500 12px/1.45 ui-sans-serif,system-ui,sans-serif;padding:6px 12px;border-bottom:1px solid #fde68a;text-align:center}
+      #mishka-draft-banner{position:sticky;top:0;z-index:2147483646;background:#fef3c7;color:#92400e;font:500 12px/1.45 ui-sans-serif,system-ui,sans-serif;padding:6px 12px;border-bottom:1px solid #fde68a;text-align:center}
+      #mishka-preview-building{position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#fafaf9;color:#44403c;font:500 13px/1.45 ui-sans-serif,system-ui,sans-serif;text-align:center;padding:24px}
+      #mishka-preview-building .mishka-preview-spinner{width:22px;height:22px;border:2px solid #e7e5e4;border-top-color:#57534e;border-radius:50%;animation:mishka-preview-spin .8s linear infinite}
+      #mishka-preview-building .mishka-preview-failed{display:none;max-width:420px}
+      @keyframes mishka-preview-spin{to{transform:rotate(360deg)}}
+      @media (prefers-reduced-motion:reduce){#mishka-preview-building .mishka-preview-spinner{animation:none}}
     </style>
+    <div id="mishka-preview-building" role="status" aria-live="polite">
+      <span class="mishka-preview-wait mishka-preview-spinner" aria-hidden="true"></span>
+      <span class="mishka-preview-wait">{gettext("Building preview…")}</span>
+      <span class="mishka-preview-failed">
+        {gettext("The preview's styles could not be built. Reload the page to try again.")}
+      </span>
+    </div>
+    <link
+      id="mishka-preview-css"
+      rel="stylesheet"
+      href={@preview_css}
+      phx-update="ignore"
+    />
     <div :if={@draft?} id="mishka-draft-banner">
       {gettext(
-        "Draft preview — temporary CSS rebuilt just for this draft, discarded when it's published or deleted."
+        "Draft preview — its CSS is built from this draft, its own styles included, each time it is opened."
       )}
       {gettext("Links to other pages open the published site in a new tab.")}
       <strong :if={@original_changed?} id="mishka-draft-original-changed">
@@ -343,6 +393,14 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
   # The page's server-side handlers never run in a preview, so the events its template emits are
   # ignored rather than crash the socket.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  @doc """
+  Finds what `/_preview/:resource/:token` shows by its token: the draft holding it first, then the
+  live original. Answers `{:ok, record, resource_module}` with its site loaded, and a page's layout,
+  or `:error`. `MishkaCmsWeb.DraftPreviewController` compiles the stylesheet of the same one.
+  """
+  @spec record(String.t(), String.t()) :: {:ok, struct(), module()} | :error
+  def record(resource, token), do: load_record(resource, token)
 
   defp load_record(resource, token) do
     cond do

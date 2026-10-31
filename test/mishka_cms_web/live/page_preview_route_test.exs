@@ -240,15 +240,6 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       assert_raise NotFoundError, fn -> live(on_host("third.test"), "/_preview/page/#{token}") end
 
-      :ok =
-        AssetsState.save(%{
-          id: token,
-          type: "css",
-          value: "/* preview */",
-          hash: "p",
-          updated_at: DateTime.utc_now()
-        })
-
       assert ("third.test" |> on_host() |> get("/_preview/page/#{token}/css")).status == 404
       assert "elsewhere.test" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200)
       assert "localhost" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200)
@@ -578,22 +569,15 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       |> AshAuthentication.Plug.Helpers.store_in_session(master)
     end
 
-    # A stylesheet saved under the token a preview of `page` was opened with, while its site is up.
+    # The token a preview of `page` was opened with, while its site is up.
     defp preview_css!(page) do
       {:ok, _view, _html} = preview(page, nil)
-
-      :ok =
-        AssetsState.save(%{
-          id: page.preview_token,
-          type: "css",
-          value: "/* preview */",
-          hash: "p",
-          updated_at: DateTime.utc_now()
-        })
-
       on_exit(fn -> DraftPreviewAssets.purge(page) end)
       page.preview_token
     end
+
+    # A stylesheet this route compiled, which ends with the rule that takes the overlay away.
+    defp compiled?(css), do: String.ends_with?(css, MishkaCmsWeb.DraftPreviewLive.ready_css())
 
     defp preview(record, viewer, resource \\ "page") do
       "localhost"
@@ -786,15 +770,6 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       :ok =
         AssetsState.save(%{
-          id: token,
-          type: "css",
-          value: "/* preview */",
-          hash: "p",
-          updated_at: DateTime.utc_now()
-        })
-
-      :ok =
-        AssetsState.save(%{
           id: closed.name,
           type: "css",
           value: "/* the site's live bundle */",
@@ -807,8 +782,11 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         AssetsState.delete(closed.name, "css")
       end)
 
-      assert "localhost" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200) ==
-               "/* preview */"
+      assert "localhost"
+             |> on_host()
+             |> get("/_preview/page/#{token}/css")
+             |> response(200)
+             |> compiled?()
 
       assert ("localhost" |> on_host() |> get("/_preview/page/#{closed.name}/css")).status == 404,
              "a site's name read as a token handed out its live bundle"
@@ -824,8 +802,8 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
              |> on_host()
              |> signed_in(user!(nil, ["*"]))
              |> then(css)
-             |> response(200) ==
-               "/* preview */"
+             |> response(200)
+             |> compiled?()
     end
 
     # A PREVIEW IS THE PAGES' SIDE, as the site's files are: while its site is closed, its stylesheet
@@ -850,7 +828,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
           ] do
         close.()
 
-        assert css.(dashboard) |> response(200) == "/* preview */",
+        assert css.(dashboard) |> response(200) |> compiled?(),
                "#{state}: a dashboard master was refused the stylesheet"
 
         assert css.(api).status == 404, "#{state}: an API-only master was given the stylesheet"
@@ -870,10 +848,10 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         build_conn()
         |> Plug.Conn.assign(:current_site, closed)
         |> Plug.Conn.assign(:current_user, user)
-        |> MishkaCmsWeb.DraftPreviewController.css(%{"token" => token})
+        |> MishkaCmsWeb.DraftPreviewController.css(%{"resource" => "page", "token" => token})
       end
 
-      assert css.(dashboard) |> response(200) == "/* preview */"
+      assert css.(dashboard) |> response(200) |> compiled?()
       assert css.(api).status == 404
     end
 
@@ -889,15 +867,6 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       {:ok, _view, _html} = "closed.test" |> on_host() |> live("/_preview/layout/#{token}")
 
-      :ok =
-        AssetsState.save(%{
-          id: token,
-          type: "css",
-          value: "/* compiled against closed */",
-          hash: "c",
-          updated_at: DateTime.utc_now()
-        })
-
       offline!(closed)
       css = fn conn -> get(conn, "/_preview/layout/#{token}/css") end
 
@@ -907,13 +876,13 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
              |> on_host()
              |> signed_in(user!(nil, ["*"]))
              |> then(css)
-             |> response(200) ==
-               "/* compiled against closed */"
+             |> response(200)
+             |> compiled?()
 
       {:ok, _view, _html} = "localhost" |> on_host() |> live("/_preview/layout/#{token}")
 
       assert DraftPreviewAssets.site(token) == {:ok, admin.id}
-      refute ("localhost" |> on_host() |> then(css)).resp_body == "/* compiled against closed */"
+      assert "localhost" |> on_host() |> then(css) |> response(200) |> compiled?()
     end
 
     # A site owner's plugin that answers a refused preview stylesheet with one of its own.

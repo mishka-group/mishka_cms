@@ -57,5 +57,15 @@ ExUnit.configure(assert_receive_timeout: 1_000)
 # a tag and when started by hand (`.github/workflows/ci.yml`), and not on a pull request. A single
 # test is still run by its line, `mix test path/to/file_test.exs:42`, and a whole file with
 # `mix test path/to/file_test.exs --include slow`.
-ExUnit.start(exclude: [:slow])
+#
+# A DRAFT HOLDS ITS OWN CUSTOM CSS from mishka_cms_core 0.0.5 on, and its preview compiles it
+# (`DraftPreviewAssets.css/2`). Against an older core the tests tagged `:draft_css` have nothing to
+# test and are left out too.
+draft_css =
+  if Code.ensure_loaded?(MishkaCmsCore.Runtime.DraftPreviewAssets) and
+       function_exported?(MishkaCmsCore.Runtime.DraftPreviewAssets, :css, 2),
+     do: [],
+     else: [:draft_css]
+
+ExUnit.start(exclude: [:slow | draft_css])
 Ecto.Adapters.SQL.Sandbox.mode(MishkaCms.Repo, :manual)

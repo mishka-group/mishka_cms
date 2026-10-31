@@ -9,6 +9,7 @@
 - The editor's canvas follows its rebuilt CSS, registers the site's runtime hooks on the admin's socket, and shows a page's preview framed and typeset as the published page is
 - The editor's strict checks raise in the host's development and test runs
 - A page with no layout is drawn bare, exactly the markup its author wrote, on the published page and in the preview as on the editor's canvas, like a full-width canvas template: `RuntimeLive.default_layout/1` adds the flash group and no padded `max-w-4xl` frame, and the author sets a width by wrapping the content in a section, for example `max-w-4xl mx-auto`
+- The new-tab draft preview opens at once under a "Building preview…" overlay and builds its stylesheet on every open, from the draft as it is, its own Custom CSS included (with mishka_cms_core 0.0.5). `/_preview/:resource/:token/css` compiles for each request, still only under a token a preview was opened with, and the page links it in the body after the overlay; the stylesheet's last rule hides the overlay, and one that cannot be built says so on it. No script does it, so the preview's Content-Security-Policy stays strict: no `'unsafe-inline'` for scripts or style elements, and its only inline `<style>` carries the response's nonce. With core 0.0.4 the stylesheet is compiled again through `refresh_css/2`
 - Security: `phoenix_html` 4.4.0, `bandit` 1.14.1 (EEF-CVE-2026-116078) and `jose` 1.11.13 (8 advisories)
 
 ### Refactors:
