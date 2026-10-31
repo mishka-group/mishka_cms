@@ -8,6 +8,7 @@
 ### Bug fixes:
 - The editor's canvas follows its rebuilt CSS, registers the site's runtime hooks on the admin's socket, and shows a page's preview framed and typeset as the published page is
 - The editor's strict checks raise in the host's development and test runs
+- A page with no layout is drawn bare, exactly the markup its author wrote, on the published page and in the preview as on the editor's canvas, like a full-width canvas template: `RuntimeLive.default_layout/1` adds the flash group and no padded `max-w-4xl` frame, and the author sets a width by wrapping the content in a section, for example `max-w-4xl mx-auto`
 - Security: `phoenix_html` 4.4.0, `bandit` 1.14.1 (EEF-CVE-2026-116078) and `jose` 1.11.13 (8 advisories)
 
 ### Refactors:

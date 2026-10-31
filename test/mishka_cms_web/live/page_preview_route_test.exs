@@ -397,21 +397,24 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       assert has_element?(view, "main #page-probe", "Page")
     end
 
-    # A PAGE WITH NO LAYOUT IS NOT A PAGE WITH NO FRAME. A visitor gets it inside
-    # `MishkaCmsWeb.RuntimeLive.default_layout/1` — a padded `main` and a `max-w-4xl` column — and the
-    # preview drew it edge to edge, so every width and height on it was a different page's.
-    test "a page with no layout is drawn in the frame a visitor gets it in", %{other: site} do
+    # A PAGE WITH NO LAYOUT IS DRAWN BARE, as a visitor gets it from
+    # `MishkaCmsWeb.RuntimeLive.default_layout/1`: the author's markup with no `main`, width or
+    # padding around it, and the flash group after it.
+    test "a page with no layout is drawn bare, as a visitor gets it", %{other: site} do
       page = create_page!(site_id: site.id, template: ~s(<p id="page-probe">Page</p>))
 
       {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{page.preview_token}")
 
-      assert has_element?(view, "main.px-4.py-20 > div.mx-auto.max-w-4xl #page-probe", "Page")
+      assert has_element?(view, "#page-probe", "Page")
+      refute has_element?(view, "main #page-probe")
+      refute has_element?(view, ".max-w-4xl #page-probe")
+      assert has_element?(view, "#flash-group")
     end
 
-    # A DRAFT IS PREVIEWED AS PUBLISHING IT WOULD LEAVE THE PAGE: in the layout the draft names, and in
-    # the visitor's frame when it names none — whatever the page has today, since the publish writes
-    # the draft's choice over it.
-    test "a draft is drawn in the layout it names, or the visitor's frame when it names none", %{
+    # A DRAFT IS PREVIEWED AS PUBLISHING IT WOULD LEAVE THE PAGE: in the layout the draft names, and
+    # bare when it names none — whatever the page has today, since the publish writes the draft's
+    # choice over it.
+    test "a draft is drawn in the layout it names, or bare when it names none", %{
       other: site
     } do
       layout =
@@ -443,12 +446,12 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{named.preview_token}")
       assert has_element?(view, "#layout-probe", "Shell")
       assert has_element?(view, "main #draft-probe", "Draft")
-      refute has_element?(view, "main.px-4")
 
       none = draft.(nil)
       {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{none.preview_token}")
       refute has_element?(view, "#layout-probe")
-      assert has_element?(view, "main.px-4.py-20 > div.mx-auto.max-w-4xl #draft-probe", "Draft")
+      assert has_element?(view, "#draft-probe", "Draft")
+      refute has_element?(view, "main #draft-probe")
     end
 
     # The seeded and starter designs are written in the faces `/fonts/fonts.css` serves, and a public

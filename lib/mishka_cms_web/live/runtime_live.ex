@@ -1521,18 +1521,19 @@ defmodule MishkaCmsWeb.RuntimeLive do
   defp query_params(_not_a_map, _captured), do: %{}
 
   @doc """
-  The frame a database page with no layout is drawn in — `MishkaCmsWeb.Layouts.app/1` around
-  `@inner_content` — and the one a page whose layout will not compile falls back to.
+  Draws a database page with no layout, and a page whose layout will not compile: `@inner_content`
+  bare, exactly the markup the author wrote, followed by the flash group. No `main`, width or
+  padding is added, like a full-width canvas template; the author sets a width by wrapping the
+  content in a section, for example `max-w-4xl mx-auto`.
 
-  `MishkaCmsWeb.DraftPreviewLive` draws a page without a layout in it too, so a preview has the
-  widths and the padding the visitor gets.
+  `MishkaCmsWeb.DraftPreviewLive` draws a page without a layout through it too, and the editor's
+  canvas draws such a page bare, so the canvas, the preview and the published page match.
   """
   @spec default_layout(map()) :: Phoenix.LiveView.Rendered.t()
   def default_layout(assigns) do
     ~H"""
-    <Layouts.app flash={assigns[:flash] || %{}}>
-      {assigns[:inner_content] || ""}
-    </Layouts.app>
+    {assigns[:inner_content] || ""}
+    <Layouts.flash_group flash={assigns[:flash] || %{}} />
     """
   end
 end

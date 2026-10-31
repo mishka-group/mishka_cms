@@ -312,9 +312,9 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
     """
   end
 
-  # A PAGE IS FRAMED AS `MishkaCmsWeb.RuntimeLive` FRAMES IT for a visitor: inside its layout, and
-  # inside `RuntimeLive.default_layout/1` when it has none or the layout will not compile. Drawn bare
-  # instead, a page without a layout previewed edge to edge where the visitor gets a padded column.
+  # A PAGE IS DRAWN AS `MishkaCmsWeb.RuntimeLive` DRAWS IT for a visitor: inside its layout, and
+  # through `RuntimeLive.default_layout/1` when it has none or the layout will not compile, which
+  # adds the flash group and no frame, so the preview has the same widths as the published page.
   defp preview(%{preview_module: preview_module} = assigns) do
     cond do
       function_exported?(preview_module, :__layout_information__, 0) ->
