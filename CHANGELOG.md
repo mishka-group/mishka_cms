@@ -8,6 +8,7 @@
 ### Bug fixes:
 - The editor's canvas follows its rebuilt CSS, registers the site's runtime hooks on the admin's socket, and shows a page's preview framed and typeset as the published page is
 - The editor's strict checks raise in the host's development and test runs
+- The editor's canvas draws a page with no layout in the frame the published page and the preview draw it in, `RuntimeLive.default_layout/1`, named by `config :mishka_cms_builder, default_layout:` (read by the builder release after 0.0.1-alpha.4)
 - Security: `phoenix_html` 4.4.0, `bandit` 1.14.1 (EEF-CVE-2026-116078) and `jose` 1.11.13 (8 advisories)
 
 ### Refactors:
