@@ -163,6 +163,11 @@ config :mishka_cms_core,
 # dependency in `:prod`, so in development and test here they compiled to nothing.
 config :mishka_cms_core, builder_strict: config_env() != :prod
 
+# The frame the editor's canvas draws a page with no layout in: the one the published page and the
+# preview draw it in, `MishkaCmsWeb.RuntimeLive.default_layout/1`. Without it the canvas draws such
+# a page with no frame, wider than any visitor sees it.
+config :mishka_cms_builder, default_layout: {MishkaCmsWeb.RuntimeLive, :default_layout}
+
 config :mishka_cms,
   ecto_repos: [MishkaCms.Repo],
   generators: [timestamp_type: :utc_datetime],
