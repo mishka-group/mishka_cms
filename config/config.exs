@@ -272,8 +272,8 @@ config :tailwind,
   # profile is that split made explicit — `admin_*` is static and shipped, everything else is the
   # runtime compiler's.
   #
-  # It must stay out of `app.css`: the runtime compiler inlines that file into the static base every
-  # site's CSS is built on, so the dashboard's utilities would end up inside every public page.
+  # It must stay out of `app.css`: the runtime compiler inlines that file into every site's CSS, so
+  # the dashboard's utilities would end up inside every public page.
   # Args are supplied by `mix admin_css`, not here: the `@source` globs must be ABSOLUTE (Tailwind v4
   # filters relative ones through .gitignore, which excludes several vendored extensions), so the
   # input is generated. Configuring `--input` here would win over the task's and silently compile the

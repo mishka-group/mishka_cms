@@ -262,9 +262,9 @@ defmodule MishkaCms.Dev.AssetsWatcher do
   defp perform_initial_compilation(site_names) do
     Logger.debug("🚀 Performing initial asset compilation for sites: #{inspect(site_names)}")
     # No class extraction in dev: TailwindCompiler.host_app_web_sources/0 scans
-    # the live source tree (lib/**, __extensions/**) directly, so Tailwind's
-    # own scanner finds every class. The precompiled static_base.css is a
-    # release-only artifact (see `mix compile_static_css`).
+    # the runtime shell's sources directly, so Tailwind's own scanner finds
+    # every class. Only a release reads the class list `mix compile_static_css`
+    # writes.
     MishkaCms.Dev.JsAssetsCopier.run()
 
     Enum.each(site_names, fn site_name ->
