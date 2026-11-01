@@ -28,8 +28,8 @@ defmodule Mix.Tasks.CompileStaticCss do
   @impl Mix.Task
   def run(_args) do
     Mix.Task.run("app.config")
-    sources = TailwindCompiler.shell_sources()
-    path = TailwindCompiler.shell_classes_path()
+    sources = core(:shell_sources)
+    path = core(:shell_classes_path)
 
     if sources == [], do: Mix.raise("No runtime shell sources under #{File.cwd!()}/lib")
 
@@ -42,4 +42,9 @@ defmodule Mix.Tasks.CompileStaticCss do
       {output, status} -> Mix.raise("Shell classes failed (exit #{status}): #{output}")
     end
   end
+
+  # The core's list of shell sources and the path it reads the classes from. Through apply/3 while
+  # the host builds against mishka_cms_core 0.0.4, which has neither; this task runs in the image
+  # build only, after the core release that has them.
+  defp core(fun), do: apply(TailwindCompiler, fun, [])
 end
