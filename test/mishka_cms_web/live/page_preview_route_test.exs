@@ -456,6 +456,79 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       assert html_response(conn, 200) =~ ~s(href="/fonts/fonts.css")
     end
 
+    # A LAYOUT REACHES `<head>` ONLY THROUGH ITS STORED TAGS, and the starter designs link their web
+    # fonts there. The published page draws them; the preview drew none, so its type fell back to the
+    # system's and its lines broke where the published page's do not.
+    test "a draft's preview carries the head its page will have, its layout's tags included", %{
+      other: site
+    } do
+      fonts = "https://fonts.googleapis.com/css2?family=Geist:wght@400;500&display=swap"
+
+      layout =
+        create_layout!(
+          site_id: site.id,
+          template: ~S|<main>{@inner_content}</main>|,
+          seo_tags: [
+            %{
+              tag: "link",
+              attrs: %{"rel" => "preconnect", "href" => "https://fonts.gstatic.com"}
+            },
+            %{tag: "link", attrs: %{"rel" => "stylesheet", "href" => fonts}}
+          ]
+        )
+
+      page = create_page!(site_id: site.id, template: "<b>live</b>")
+
+      draft =
+        PageDraft
+        |> Ash.Changeset.for_create(
+          :create,
+          %{
+            name: page.name,
+            title: page.title,
+            path: page.path,
+            template: ~s(<p id="draft-probe">Draft</p>),
+            source_page_id: page.id,
+            layout_id: layout.id,
+            seo_tags: [
+              %{tag: "meta", attrs: %{"name" => "description"}, content: "The draft's own"},
+              %{tag: "meta", attrs: %{"name" => "robots"}, content: "index, follow"}
+            ]
+          },
+          tenant: site.id
+        )
+        |> Ash.create!(authorize?: false)
+
+      conn = get(on_host("localhost"), "/_preview/page/#{draft.preview_token}")
+      doc = LazyHTML.from_document(html_response(conn, 200))
+      attr = fn selector, name -> doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name) end
+
+      assert attr.(~s(head link[rel="stylesheet"][data-mishka-seo]), "href") == [fonts]
+
+      assert attr.(~s(head link[rel="preconnect"][data-mishka-seo]), "href") == [
+               "https://fonts.gstatic.com"
+             ]
+
+      assert attr.(~s(head meta[name="description"][data-mishka-seo]), "content") == [
+               "The draft's own"
+             ]
+
+      # Kept out of an index, whatever the draft stores: the preview's own tag is the only one.
+      assert attr.(~s(meta[name="robots"]), "content") == ["noindex, nofollow"]
+      assert Enum.empty?(LazyHTML.query(doc, ~s(script[type="application/ld+json"])))
+
+      # And the policy the preview is served lets those fonts in, as a published page's does.
+      policy =
+        Enum.join(
+          get_resp_header(conn, "content-security-policy") ++
+            get_resp_header(conn, "content-security-policy-report-only"),
+          "\n"
+        )
+
+      assert policy =~ ~r/style-src-elem [^;]*https:\/\/fonts\.googleapis\.com/
+      assert policy =~ ~r/font-src [^;]*https:\/\/fonts\.gstatic\.com/
+    end
+
     test "the sign-in pages render with their own helpers and Ash's live components", %{
       other: site
     } do

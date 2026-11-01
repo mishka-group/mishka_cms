@@ -194,6 +194,8 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
         do: preview_module.__page_information__(),
         else: layout_information(preview_module, record, language)
 
+    layout_module = layout_module(record, asset_site)
+
     socket
     # A page that declares an upload draws `@uploads`, which only an allowed upload puts there.
     |> MishkaCmsCore.Runtime.PageUpload.allow(preview_module)
@@ -203,7 +205,7 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
     # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
     |> assign(
       preview_module: preview_module,
-      layout_module: layout_module(record, asset_site),
+      layout_module: layout_module,
       page: Map.put(info.page, :path, path),
       private: info.private,
       acl: info.acl,
@@ -215,7 +217,44 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
       client_request: %{remote_ip: nil},
       page_languages: []
     )
+    # The preview layout (layouts/preview.html.heex) reads it.
+    # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
+    |> assign(:page_seo, head(info, path, query_params, layout_module || preview_module))
   end
+
+  # THE HEAD THE PUBLISHED PAGE HAS, resolved by `MishkaCmsWeb.RuntimeLive.page_seo/4` as it is for a
+  # visitor, with the stored tags of the layout it is drawn in — or of the layout being previewed. A
+  # layout reaches `<head>` only through them, so the web fonts it links are among them, and without
+  # them every line of the preview broke somewhere the published page's does not.
+  #
+  # Its `robots` tag is left out, so the `noindex` the `:preview` layout writes is the only one, and
+  # so is its JSON-LD, which only a crawler reads; no share card is asked for.
+  defp head(info, path, query_params, frame) do
+    seo =
+      MishkaCmsWeb.RuntimeLive.page_seo(
+        %{
+          page: info.page,
+          private: info.private,
+          acl: info.acl,
+          extra: info.extra,
+          query_params: query_params,
+          page_languages: []
+        },
+        path,
+        layout_tags(frame)
+      )
+
+    %{seo | tags: Enum.reject(seo.tags, &robots?/1), schema: []}
+  end
+
+  defp layout_tags(module) do
+    if function_exported?(module, :__layout_information__, 0),
+      do: module.__layout_information__([:layout, :seo, :meta_tags]),
+      else: []
+  end
+
+  defp robots?({"meta", attrs}), do: {"name", "robots"} in attrs
+  defp robots?(_tag), do: false
 
   # A PAGE IS PREVIEWED INSIDE ITS LAYOUT, as a visitor gets it: the draft's own choice for a draft —
   # which is what publishing it writes over the page, a draft that names none included — compiled the

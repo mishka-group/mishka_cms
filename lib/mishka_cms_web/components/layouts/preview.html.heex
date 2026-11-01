@@ -16,6 +16,10 @@ SPDX-License-Identifier: Apache-2.0
     <.live_title default={gettext("Draft preview")}>
       {assigns[:page_title]}
     </.live_title>
+    <%!-- The head the published page has, its layout's web fonts among it, as
+         `MishkaCmsWeb.DraftPreviewLive` resolved it: without its `robots`, so the tag above is the
+         only one. --%>
+    <MishkaCmsWeb.RuntimeLive.page_head seo={assigns[:page_seo]} />
     <%!-- The record's own stylesheet is linked by `MishkaCmsWeb.DraftPreviewLive` in the body, after
          its "Building preview…" overlay: compiled on every open, it would hold the page blank here. --%>
     <script :if={assigns[:preview_js]} defer src={@preview_js}>
