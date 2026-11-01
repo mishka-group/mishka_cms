@@ -1004,26 +1004,43 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # `assign_page_language/2`, `:query_params`, `PageSource.assign_source/1` and
   # `SiteLayout.assign_frame/1`, whose captures, rows and languages it reads.
   defp assign_page_seo(socket, %URI{path: path}) do
-    %{page: page, private: private, page_languages: languages, query_params: params} =
-      socket.assigns
-
-    base = Seo.base(private[:host])
-
     seo =
-      Seo.resolve(page,
-        site_id: private[:site_id],
-        url: Seo.absolute(canonical_path(path, params), base),
-        params: params,
-        record: Seo.record_of(socket.assigns[:extra]),
-        base: base,
-        languages: languages,
-        restricted?: Seo.noindex?(acl_permissions(socket.assigns[:acl]), socket.assigns[:extra]),
-        layers: [layout_seo_tags(private), stored_seo(page, :meta_tags)],
-        card: true,
-        source: socket.assigns[:page_source]
-      )
+      page_seo(socket.assigns, path, layout_seo_tags(socket.assigns.private), card: true)
 
     assign(socket, page_seo: seo, page_title: seo.title)
+  end
+
+  @doc """
+  The head a database page has at `path`, which `page_head/1` draws:
+  `MishkaCmsCore.Runtime.Seo.resolve/2` over the `page`, `private`, `page_languages` and
+  `query_params` in `assigns`, and their `extra`, `acl` and `page_source` when there, with
+  `layout_tags` — the stored tags of the layout the page is drawn in — under the page's own. `opts`
+  go to `Seo.resolve/2` over these; a visitor's page asks for its share card with `card: true`.
+
+  `MishkaCmsWeb.DraftPreviewLive` resolves a preview's head with it, so the two cannot drift apart.
+  """
+  @spec page_seo(map(), String.t(), list() | nil, keyword()) :: Seo.head()
+  def page_seo(assigns, path, layout_tags, opts \\ []) do
+    %{page: page, private: private, page_languages: languages, query_params: params} = assigns
+    base = Seo.base(private[:host])
+
+    Seo.resolve(
+      page,
+      Keyword.merge(
+        [
+          site_id: private[:site_id],
+          url: Seo.absolute(canonical_path(path, params), base),
+          params: params,
+          record: Seo.record_of(assigns[:extra]),
+          base: base,
+          languages: languages,
+          restricted?: Seo.noindex?(acl_permissions(assigns[:acl]), assigns[:extra]),
+          layers: [layout_tags, stored_seo(page, :meta_tags)],
+          source: assigns[:page_source]
+        ],
+        opts
+      )
+    )
   end
 
   # THE HEAD OF AN ADDRESS THE SOCKET MOVED TO. The root layout draws `page_head/1` once, with the
@@ -1521,18 +1538,19 @@ defmodule MishkaCmsWeb.RuntimeLive do
   defp query_params(_not_a_map, _captured), do: %{}
 
   @doc """
-  The frame a database page with no layout is drawn in — `MishkaCmsWeb.Layouts.app/1` around
-  `@inner_content` — and the one a page whose layout will not compile falls back to.
+  Draws a database page with no layout, and a page whose layout will not compile: `@inner_content`
+  bare, exactly the markup the author wrote, followed by the flash group. No `main`, width or
+  padding is added, like a full-width canvas template; the author sets a width by wrapping the
+  content in a section, for example `max-w-4xl mx-auto`.
 
-  `MishkaCmsWeb.DraftPreviewLive` draws a page without a layout in it too, so a preview has the
-  widths and the padding the visitor gets.
+  `MishkaCmsWeb.DraftPreviewLive` draws a page without a layout through it too, and the editor's
+  canvas draws such a page bare, so the canvas, the preview and the published page match.
   """
   @spec default_layout(map()) :: Phoenix.LiveView.Rendered.t()
   def default_layout(assigns) do
     ~H"""
-    <Layouts.app flash={assigns[:flash] || %{}}>
-      {assigns[:inner_content] || ""}
-    </Layouts.app>
+    {assigns[:inner_content] || ""}
+    <Layouts.flash_group flash={assigns[:flash] || %{}} />
     """
   end
 end

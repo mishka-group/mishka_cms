@@ -84,11 +84,11 @@ RUN mix assets.deploy
 
 RUN mix compile
 
-# Precompile the RUNTIME SHELL's CSS (the layouts and `RuntimeLive`) into
-# priv/static/temp/static_base.css. A release ships no .ex files, so this is the only copy of those
-# classes at runtime. It is NOT the whole app: the dashboard and the marketing pages are in
-# admin.css and public.css, built by `mix admin_css` inside assets.deploy above. AFTER compile,
-# copy_js_assets and assets.deploy: it needs the app, the staged JS and the Tailwind binary.
+# Write the RUNTIME SHELL's classes (the `components/` tree and `RuntimeLive`) to
+# priv/static/temp/shell_classes.txt, with Tailwind's own scanner (@tailwindcss/oxide, which
+# assets.setup installed). A release ships no .ex files, so a site's runtime Tailwind run reads this
+# list in their place. It is NOT the whole app: the dashboard and the marketing pages are in
+# admin.css and public.css, built by `mix admin_css` inside assets.deploy above.
 RUN mix compile_static_css
 
 # THE MIGRATIONS GUARD. Without a migration `bin/migrate` has nothing to run and the server starts

@@ -240,15 +240,6 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       assert_raise NotFoundError, fn -> live(on_host("third.test"), "/_preview/page/#{token}") end
 
-      :ok =
-        AssetsState.save(%{
-          id: token,
-          type: "css",
-          value: "/* preview */",
-          hash: "p",
-          updated_at: DateTime.utc_now()
-        })
-
       assert ("third.test" |> on_host() |> get("/_preview/page/#{token}/css")).status == 404
       assert "elsewhere.test" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200)
       assert "localhost" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200)
@@ -397,21 +388,24 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       assert has_element?(view, "main #page-probe", "Page")
     end
 
-    # A PAGE WITH NO LAYOUT IS NOT A PAGE WITH NO FRAME. A visitor gets it inside
-    # `MishkaCmsWeb.RuntimeLive.default_layout/1` — a padded `main` and a `max-w-4xl` column — and the
-    # preview drew it edge to edge, so every width and height on it was a different page's.
-    test "a page with no layout is drawn in the frame a visitor gets it in", %{other: site} do
+    # A PAGE WITH NO LAYOUT IS DRAWN BARE, as a visitor gets it from
+    # `MishkaCmsWeb.RuntimeLive.default_layout/1`: the author's markup with no `main`, width or
+    # padding around it, and the flash group after it.
+    test "a page with no layout is drawn bare, as a visitor gets it", %{other: site} do
       page = create_page!(site_id: site.id, template: ~s(<p id="page-probe">Page</p>))
 
       {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{page.preview_token}")
 
-      assert has_element?(view, "main.px-4.py-20 > div.mx-auto.max-w-4xl #page-probe", "Page")
+      assert has_element?(view, "#page-probe", "Page")
+      refute has_element?(view, "main #page-probe")
+      refute has_element?(view, ".max-w-4xl #page-probe")
+      assert has_element?(view, "#flash-group")
     end
 
-    # A DRAFT IS PREVIEWED AS PUBLISHING IT WOULD LEAVE THE PAGE: in the layout the draft names, and in
-    # the visitor's frame when it names none — whatever the page has today, since the publish writes
-    # the draft's choice over it.
-    test "a draft is drawn in the layout it names, or the visitor's frame when it names none", %{
+    # A DRAFT IS PREVIEWED AS PUBLISHING IT WOULD LEAVE THE PAGE: in the layout the draft names, and
+    # bare when it names none — whatever the page has today, since the publish writes the draft's
+    # choice over it.
+    test "a draft is drawn in the layout it names, or bare when it names none", %{
       other: site
     } do
       layout =
@@ -443,12 +437,12 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{named.preview_token}")
       assert has_element?(view, "#layout-probe", "Shell")
       assert has_element?(view, "main #draft-probe", "Draft")
-      refute has_element?(view, "main.px-4")
 
       none = draft.(nil)
       {:ok, view, _html} = live(on_host("localhost"), "/_preview/page/#{none.preview_token}")
       refute has_element?(view, "#layout-probe")
-      assert has_element?(view, "main.px-4.py-20 > div.mx-auto.max-w-4xl #draft-probe", "Draft")
+      assert has_element?(view, "#draft-probe", "Draft")
+      refute has_element?(view, "main #draft-probe")
     end
 
     # The seeded and starter designs are written in the faces `/fonts/fonts.css` serves, and a public
@@ -460,6 +454,79 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       conn = get(on_host("localhost"), "/_preview/page/#{page.preview_token}")
 
       assert html_response(conn, 200) =~ ~s(href="/fonts/fonts.css")
+    end
+
+    # A LAYOUT REACHES `<head>` ONLY THROUGH ITS STORED TAGS, and the starter designs link their web
+    # fonts there. The published page draws them; the preview drew none, so its type fell back to the
+    # system's and its lines broke where the published page's do not.
+    test "a draft's preview carries the head its page will have, its layout's tags included", %{
+      other: site
+    } do
+      fonts = "https://fonts.googleapis.com/css2?family=Geist:wght@400;500&display=swap"
+
+      layout =
+        create_layout!(
+          site_id: site.id,
+          template: ~S|<main>{@inner_content}</main>|,
+          seo_tags: [
+            %{
+              tag: "link",
+              attrs: %{"rel" => "preconnect", "href" => "https://fonts.gstatic.com"}
+            },
+            %{tag: "link", attrs: %{"rel" => "stylesheet", "href" => fonts}}
+          ]
+        )
+
+      page = create_page!(site_id: site.id, template: "<b>live</b>")
+
+      draft =
+        PageDraft
+        |> Ash.Changeset.for_create(
+          :create,
+          %{
+            name: page.name,
+            title: page.title,
+            path: page.path,
+            template: ~s(<p id="draft-probe">Draft</p>),
+            source_page_id: page.id,
+            layout_id: layout.id,
+            seo_tags: [
+              %{tag: "meta", attrs: %{"name" => "description"}, content: "The draft's own"},
+              %{tag: "meta", attrs: %{"name" => "robots"}, content: "index, follow"}
+            ]
+          },
+          tenant: site.id
+        )
+        |> Ash.create!(authorize?: false)
+
+      conn = get(on_host("localhost"), "/_preview/page/#{draft.preview_token}")
+      doc = LazyHTML.from_document(html_response(conn, 200))
+      attr = fn selector, name -> doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name) end
+
+      assert attr.(~s(head link[rel="stylesheet"][data-mishka-seo]), "href") == [fonts]
+
+      assert attr.(~s(head link[rel="preconnect"][data-mishka-seo]), "href") == [
+               "https://fonts.gstatic.com"
+             ]
+
+      assert attr.(~s(head meta[name="description"][data-mishka-seo]), "content") == [
+               "The draft's own"
+             ]
+
+      # Kept out of an index, whatever the draft stores: the preview's own tag is the only one.
+      assert attr.(~s(meta[name="robots"]), "content") == ["noindex, nofollow"]
+      assert Enum.empty?(LazyHTML.query(doc, ~s(script[type="application/ld+json"])))
+
+      # And the policy the preview is served lets those fonts in, as a published page's does.
+      policy =
+        Enum.join(
+          get_resp_header(conn, "content-security-policy") ++
+            get_resp_header(conn, "content-security-policy-report-only"),
+          "\n"
+        )
+
+      assert policy =~ ~r/style-src-elem [^;]*https:\/\/fonts\.googleapis\.com/
+      assert policy =~ ~r/font-src [^;]*https:\/\/fonts\.gstatic\.com/
     end
 
     test "the sign-in pages render with their own helpers and Ash's live components", %{
@@ -575,22 +642,15 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
       |> AshAuthentication.Plug.Helpers.store_in_session(master)
     end
 
-    # A stylesheet saved under the token a preview of `page` was opened with, while its site is up.
+    # The token a preview of `page` was opened with, while its site is up.
     defp preview_css!(page) do
       {:ok, _view, _html} = preview(page, nil)
-
-      :ok =
-        AssetsState.save(%{
-          id: page.preview_token,
-          type: "css",
-          value: "/* preview */",
-          hash: "p",
-          updated_at: DateTime.utc_now()
-        })
-
       on_exit(fn -> DraftPreviewAssets.purge(page) end)
       page.preview_token
     end
+
+    # A stylesheet this route compiled, which ends with the rule that takes the overlay away.
+    defp compiled?(css), do: String.ends_with?(css, MishkaCmsWeb.DraftPreviewLive.ready_css())
 
     defp preview(record, viewer, resource \\ "page") do
       "localhost"
@@ -783,15 +843,6 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       :ok =
         AssetsState.save(%{
-          id: token,
-          type: "css",
-          value: "/* preview */",
-          hash: "p",
-          updated_at: DateTime.utc_now()
-        })
-
-      :ok =
-        AssetsState.save(%{
           id: closed.name,
           type: "css",
           value: "/* the site's live bundle */",
@@ -804,8 +855,11 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         AssetsState.delete(closed.name, "css")
       end)
 
-      assert "localhost" |> on_host() |> get("/_preview/page/#{token}/css") |> response(200) ==
-               "/* preview */"
+      assert "localhost"
+             |> on_host()
+             |> get("/_preview/page/#{token}/css")
+             |> response(200)
+             |> compiled?()
 
       assert ("localhost" |> on_host() |> get("/_preview/page/#{closed.name}/css")).status == 404,
              "a site's name read as a token handed out its live bundle"
@@ -821,8 +875,8 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
              |> on_host()
              |> signed_in(user!(nil, ["*"]))
              |> then(css)
-             |> response(200) ==
-               "/* preview */"
+             |> response(200)
+             |> compiled?()
     end
 
     # A PREVIEW IS THE PAGES' SIDE, as the site's files are: while its site is closed, its stylesheet
@@ -847,7 +901,7 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
           ] do
         close.()
 
-        assert css.(dashboard) |> response(200) == "/* preview */",
+        assert css.(dashboard) |> response(200) |> compiled?(),
                "#{state}: a dashboard master was refused the stylesheet"
 
         assert css.(api).status == 404, "#{state}: an API-only master was given the stylesheet"
@@ -867,10 +921,10 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
         build_conn()
         |> Plug.Conn.assign(:current_site, closed)
         |> Plug.Conn.assign(:current_user, user)
-        |> MishkaCmsWeb.DraftPreviewController.css(%{"token" => token})
+        |> MishkaCmsWeb.DraftPreviewController.css(%{"resource" => "page", "token" => token})
       end
 
-      assert css.(dashboard) |> response(200) == "/* preview */"
+      assert css.(dashboard) |> response(200) |> compiled?()
       assert css.(api).status == 404
     end
 
@@ -886,15 +940,6 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
 
       {:ok, _view, _html} = "closed.test" |> on_host() |> live("/_preview/layout/#{token}")
 
-      :ok =
-        AssetsState.save(%{
-          id: token,
-          type: "css",
-          value: "/* compiled against closed */",
-          hash: "c",
-          updated_at: DateTime.utc_now()
-        })
-
       offline!(closed)
       css = fn conn -> get(conn, "/_preview/layout/#{token}/css") end
 
@@ -904,13 +949,13 @@ defmodule MishkaCmsWeb.PagePreviewRouteTest do
              |> on_host()
              |> signed_in(user!(nil, ["*"]))
              |> then(css)
-             |> response(200) ==
-               "/* compiled against closed */"
+             |> response(200)
+             |> compiled?()
 
       {:ok, _view, _html} = "localhost" |> on_host() |> live("/_preview/layout/#{token}")
 
       assert DraftPreviewAssets.site(token) == {:ok, admin.id}
-      refute ("localhost" |> on_host() |> then(css)).resp_body == "/* compiled against closed */"
+      assert "localhost" |> on_host() |> then(css) |> response(200) |> compiled?()
     end
 
     # A site owner's plugin that answers a refused preview stylesheet with one of its own.
