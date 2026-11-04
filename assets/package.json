@@ -16,6 +16,7 @@
     "@tiptap/core": "3.32.0",
     "@tiptap/extension-code-block": "3.32.0",
     "@tiptap/extension-image": "3.32.0",
+    "@tiptap/extension-table": "3.32.0",
     "@tiptap/pm": "3.32.0",
     "@tiptap/starter-kit": "3.32.0",
     "codemirror": "^6.0.2",
