@@ -25,6 +25,7 @@ import { Fragment } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import CodeBlock from "@tiptap/extension-code-block";
 import Image from "@tiptap/extension-image";
+import { TableKit } from "@tiptap/extension-table";
 
 export const COMPONENT_MIME = "application/x-mishka-component";
 export const BLOCK_MIME = "application/x-mishka-block";
@@ -902,11 +903,14 @@ export const CodeBlockLanguage = CodeBlock.extend({
 const EXTRA = {
   h4: (controller) => controller.editor.chain().focus().toggleHeading({ level: 4 }).run(),
   link: (controller) => controller.link(),
+  table: (controller) =>
+    controller.editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
 };
 
 const EXTRA_ACTIVE = {
   h4: ["heading", { level: 4 }],
   link: ["link"],
+  table: ["table"],
 };
 
 export class ContentController {
@@ -1740,6 +1744,7 @@ export default {
     ContentDirection,
     CodeBlockLanguage,
     Image.configure({ inline: true }),
+    TableKit,
     MishkaComponent,
     ContentBridge,
     BlockHandle,

@@ -56,6 +56,7 @@ function fixture(stored) {
       <div data-part="toolbar">
         <button type="button" data-editor-command="bold">B</button>
         <button type="button" data-editor-command="h4">H4</button>
+        <button type="button" data-editor-command="table">T</button>
       </div>
       <textarea id="ed-value" data-part="value" name="form[content]" hidden></textarea>
       <div id="ed-surface" data-part="surface" data-root-id="ed" data-value-id="ed-value"
@@ -1256,6 +1257,33 @@ describe("the toolbar", () => {
 
     expect(editor.getHTML()).toMatch(/^<h4 dir="auto">Title<\/h4>/);
     expect(root.querySelector("[data-editor-command='h4']").hasAttribute("data-active")).toBe(true);
+  });
+
+  test("a stored table keeps its header and cells, and the Table command inserts one", async () => {
+    const stored =
+      "<table><tbody><tr><th><p>Name</p></th><th><p>Role</p></th></tr><tr><td><p>Mona</p></td><td><p>Tester</p></td></tr></tbody></table>";
+
+    const { root, editor } = await editorFor(stored, { segments: { segments: [] } });
+    const count = (type) => {
+      let found = 0;
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === type) found += 1;
+      });
+      return found;
+    };
+
+    expect(count("table")).toBe(1);
+    expect(count("tableHeader")).toBe(2);
+    expect(count("tableCell")).toBe(2);
+    expect(editor.getHTML()).toContain("<table");
+    expect(editor.getHTML()).toContain("Mona");
+
+    editor.commands.focus("end");
+    root.querySelector("[data-editor-command='table']").click();
+
+    expect(count("table")).toBe(2);
+    expect(count("tableHeader")).toBe(5);
+    expect(count("tableCell")).toBe(8);
   });
 
   test("Link asks for the address, and an empty answer takes the link away", async () => {
