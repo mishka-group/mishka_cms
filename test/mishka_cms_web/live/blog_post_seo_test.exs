@@ -206,10 +206,14 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     target = MishkaBlog.ShareCards.target(post)
     :ok = ShareCard.refresh(site.id, target)
 
-    [look] =
+    # The post's saves and the refresh above each queue a look, and Oban folds those into one only
+    # while they fall inside the worker's five-second unique window, so how many there are depends on
+    # how long the test took. Every look is run; the draw is unique for good, so one is queued.
+    looks =
       all_enqueued(worker: ShareCardRefreshWorker, args: %{target: %{"record" => "blog:post"}})
 
-    :ok = perform_job(ShareCardRefreshWorker, look.args)
+    assert looks != []
+    for look <- looks, do: :ok = perform_job(ShareCardRefreshWorker, look.args)
     assert [draw] = all_enqueued(worker: ShareCard)
     assert draw.args["card"]["eyebrow"] == "Engineering"
     assert [%{"name" => "Shahryar"}] = draw.args["card"]["people"]
