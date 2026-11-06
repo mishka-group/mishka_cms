@@ -18,6 +18,32 @@ defmodule MishkaCmsWeb.Layouts do
   embed_templates "layouts/*"
 
   @doc """
+  The versioned URL of the admin stylesheet.
+
+  With a digest manifest (production, after `mix phx.digest`) the verified route already carries the
+  file's digest. Without one (development) the file's modification time is added as `?v=`, so a
+  browser fetches the stylesheet again after `mix admin_css` rebuilds it instead of keeping an old copy.
+  """
+  @spec admin_css_href() :: String.t()
+  def admin_css_href do
+    case ~p"/assets/css/admin.css" do
+      "/assets/css/admin.css" = path -> path <> "?v=" <> admin_css_mtime()
+      digested -> digested
+    end
+  end
+
+  defp admin_css_mtime do
+    :mishka_cms
+    |> :code.priv_dir()
+    |> Path.join("static/assets/css/admin.css")
+    |> File.stat(time: :posix)
+    |> case do
+      {:ok, %File.Stat{mtime: mtime}} -> Integer.to_string(mtime)
+      {:error, _reason} -> "0"
+    end
+  end
+
+  @doc """
   Renders your app layout.
 
   This function is typically invoked from every template,

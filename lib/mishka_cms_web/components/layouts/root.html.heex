@@ -103,7 +103,7 @@ SPDX-License-Identifier: Apache-2.0
 
          Before this the dashboard had no compiled CSS at all: every utility came from the browser
          JIT below, regenerated on every admin page from a 275 KB script. --%>
-    <link :if={assigns[:admin_css]} rel="stylesheet" href={~p"/assets/css/admin.css"} />
+    <link :if={assigns[:admin_css]} rel="stylesheet" href={admin_css_href()} />
     <%!-- Admin dashboard type system: Manrope (body), Space Grotesk (numerals/display), Newsreader
          (headings). Vendored rather than fetched from Google: their stylesheet redirects to fifteen
          `fonts.gstatic.com` files, so it was two DNS lookups and sixteen round trips before the admin
