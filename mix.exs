@@ -148,7 +148,7 @@ defmodule MishkaCms.MixProject do
       {:phoenix_live_reload, "~> 1.7", only: :dev},
       {:file_system, "~> 1.1", only: [:test, :dev]},
       {:floki, "~> 0.38", only: :test},
-      {:lazy_html, "~> 0.1", only: :test},
+      {:lazy_html, "~> 0.1"},
       {:igniter, "~> 0.8", only: :dev},
       {:usage_rules, "~> 1.2", only: [:dev]},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false, warn_if_outdated: true},
@@ -172,7 +172,7 @@ defmodule MishkaCms.MixProject do
        compile: false,
        depth: 1},
       {:html_sanitize_ex, "~> 1.5"},
-      {:guarded_struct, "~> 0.1.6"},
+      mishka_dep(:guarded_struct, "~> 0.1.6"),
 
       # Extensions
       mishka_dep(:mishka_cms_core, "~> 0.0.5-alpha.4"),
@@ -180,6 +180,7 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:mishka_cms_builder, "~> 0.0.1-alpha.6"),
       mishka_dep(:mishka_blog, "~> 0.0.3-alpha.2"),
       mishka_dep(:mishka_document, "~> 0.0.2"),
+      mishka_dep(:mishka_cms_migration, "~> 0.0.1-alpha.1"),
       mishka_dep(:mishka_gervaz, "~> 0.0.3"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
