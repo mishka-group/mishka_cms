@@ -40,7 +40,9 @@ defmodule MishkaCmsWeb.RuntimeLive do
   frame and the head, the rows the page shows (`MishkaCmsCore.Runtime.PageSource.assign_source/1`):
 
   - `@page_source` — what the extension that owns the page's record read for this address, as the
-    visitor, or `nil`. The plugins of the frame and of the head are handed it as `source`, and the
+    visitor, or `nil`. When it answers that the record is not there
+    (`MishkaCmsCore.Runtime.PageSource.missing/0`), the next page that matches the address is
+    tried, and the site's 404 answers when none is left. The plugins of the frame and of the head are handed it as `source`, and the
     page's template hands it to its blocks as `page_source={assigns[:page_source]}`, so each row is
     read once per address rather than once by each of them.
 
@@ -434,33 +436,45 @@ defmodule MishkaCmsWeb.RuntimeLive do
         # `@query_params["category"]` and `@query_params["slug"]`, and a component reads the same
         # name whether the value came from the path or from `?slug=`. The path wins a collision,
         # as in Phoenix's router; see `query_params/2`.
-        {found, captured} = WebRunTimeMetaDataState.resolve!(joined_path, site_name, "Page")
-        page_module = Helpers.module_name(found.id, found.site, "Page")
-
         result =
-          ModuleCompilerHandler.compile_or_return_module(
-            page_module,
-            found.path,
-            site_name,
-            site_id
-          )
-          |> then(
-            &Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1,
-              cannot_run: {:error, :cannot_run}
-            )
-          )
-          |> admit(page_module, socket)
-          |> params_handled(page_module, %{
+          joined_path
+          |> WebRunTimeMetaDataState.resolve_all!(site_name, "Page")
+          |> serve_candidates(socket, %{
             params: params,
-            captured: captured,
             joined_path: joined_path,
             uri: uri,
-            site_name: site_name
+            site_name: site_name,
+            site_id: site_id
           })
 
         {result, %{}}
       end
     )
+  end
+
+  # EVERY PAGE THAT MATCHES THE ADDRESS, BEST FIRST, until one has something to show. A page whose
+  # record the extension that owns it did not find (`PageSource.missing/0`) hands the address to the
+  # next, so `/:year/:month/:slug` and `/:slug` can both stand as WordPress's addresses do; when none
+  # is left the visitor gets the site's 404. A literal page is the only candidate, and every page is
+  # read once, as before: the next costs its own read only when the one before it was missing.
+  defp serve_candidates([], _socket, _ctx), do: WebRunTimeMetaDataState.not_found!()
+
+  defp serve_candidates([{found, captured} | rest], socket, ctx) do
+    page_module = Helpers.module_name(found.id, found.site, "Page")
+
+    page_module
+    |> ModuleCompilerHandler.compile_or_return_module(found.path, ctx.site_name, ctx.site_id)
+    |> then(
+      &Hook.call("RuntimeLive.HandleParams.AclAfterCompile", &1,
+        cannot_run: {:error, :cannot_run}
+      )
+    )
+    |> admit(page_module, socket)
+    |> params_handled(page_module, Map.put(ctx, :captured, captured))
+    |> case do
+      :missing -> serve_candidates(rest, socket, ctx)
+      answer -> answer
+    end
   end
 
   defp params_handled({{:ok, _result}, socket}, page_module, ctx) do
@@ -484,12 +498,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
     |> assign(:current_path, joined_path)
     |> assign(:query_params, query_params(params, captured))
     |> PageSource.assign_source()
-    |> SiteLayout.assign_frame()
-    |> assign_page_seo(uri)
-    |> admit_record(page_module)
-    |> push_head(head_before)
-    |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
-    |> then(&{:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", &1)})
+    |> sourced(page_module, uri, head_before)
   end
 
   defp params_handled({:visitors_only, socket}, page_module, _ctx),
@@ -512,6 +521,22 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
     raise MishkaCmsCore.ErrorsExceptions.ServerError,
       message: "Sorry, unexpected error occurred. please try again later."
+  end
+
+  defp sourced(socket, page_module, uri, head_before) do
+    case PageSource.missing?(socket.assigns.page_source) do
+      true ->
+        :missing
+
+      false ->
+        socket
+        |> SiteLayout.assign_frame()
+        |> assign_page_seo(uri)
+        |> admit_record(page_module)
+        |> push_head(head_before)
+        |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
+        |> then(&{:noreply, Hook.call("RuntimeLive.HandleParams.AfterCompile", &1)})
+    end
   end
 
   # THE PATH A HOOK MAY REWRITE, joined and rooted: `mount/3` and `handle_params/3` both choose the
