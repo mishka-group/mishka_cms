@@ -28,7 +28,6 @@ defmodule MishkaCms.LanguageFieldHintTest do
     MishkaBlog.Tag,
     MishkaCmsCore.Runtime.Page,
     MishkaCmsCore.Runtime.Translation,
-    MishkaCmsMigration.MigrationRun,
     MishkaDocument.Section,
     MishkaDocument.SectionDraft,
     MishkaDocument.Tag,

@@ -68,8 +68,7 @@ config :mishka_cms, Oban,
     maintenance: 2,
     notify: 5,
     mail: 2,
-    share_cards: [limit: 1, paused: true],
-    migration: 1
+    share_cards: [limit: 1, paused: true]
   ],
   repo: MishkaCms.Repo,
   # A job a stopped node was running (a restart, a deploy) stays `executing` until this moves it
@@ -171,7 +170,6 @@ config :mishka_cms,
     MishkaCmsBuilder,
     MishkaDocument,
     MishkaBlog,
-    MishkaCmsMigration,
     MishkaCmsCore.Runtime,
     MishkaCmsCore.Accounts,
     MishkaCmsCore.Notify,
@@ -185,8 +183,7 @@ config :mishka_cms_core,
     MishkaCmsCoreWeb,
     MishkaBlogWeb,
     MishkaDocumentWeb,
-    MishkaCmsBuilderWeb,
-    MishkaCmsMigrationWeb
+    MishkaCmsBuilderWeb
   ]
 
 # Configures the endpoint
