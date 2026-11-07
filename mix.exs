@@ -148,7 +148,7 @@ defmodule MishkaCms.MixProject do
       {:phoenix_live_reload, "~> 1.7", only: :dev},
       {:file_system, "~> 1.1", only: [:test, :dev]},
       {:floki, "~> 0.38", only: :test},
-      {:lazy_html, "~> 0.1", only: :test},
+      {:lazy_html, "~> 0.1"},
       {:igniter, "~> 0.8", only: :dev},
       {:usage_rules, "~> 1.2", only: [:dev]},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false, warn_if_outdated: true},
