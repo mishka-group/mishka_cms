@@ -174,12 +174,12 @@ defmodule MishkaCms.MixProject do
       {:guarded_struct, "~> 0.1.6"},
 
       # Extensions
-      mishka_dep(:mishka_cms_core, "~> 0.0.5-alpha.5"),
+      mishka_dep(:mishka_cms_core, "~> 0.0.5-alpha.6"),
       # The visual page builder.
       mishka_dep(:mishka_cms_builder, "~> 0.0.1-alpha.6"),
       mishka_dep(:mishka_blog, "~> 0.0.3-alpha.2"),
       mishka_dep(:mishka_document, "~> 0.0.2"),
-      mishka_dep(:mishka_gervaz, "~> 0.0.6"),
+      mishka_dep(:mishka_gervaz, "~> 0.0.7"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
       # the ones the sites do not offer.
