@@ -107,7 +107,6 @@ defmodule MishkaCms.MixProject do
       {:ash_phoenix, "~> 2.3"},
       {:ash, "~> 3.37"},
       {:ash_paper_trail, "~> 0.8"},
-      {:ash_slug, "~> 0.2"},
       {:ash_oban, "~> 0.10"},
 
       # Queue Stuff
