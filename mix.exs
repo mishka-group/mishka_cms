@@ -171,7 +171,7 @@ defmodule MishkaCms.MixProject do
        compile: false,
        depth: 1},
       {:html_sanitize_ex, "~> 1.5"},
-      {:guarded_struct, "~> 0.1.6"},
+      mishka_dep(:guarded_struct, "~> 0.1.6"),
 
       # Extensions
       mishka_dep(:mishka_cms_core, "~> 0.0.5-alpha.8"),
