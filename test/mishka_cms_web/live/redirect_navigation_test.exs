@@ -17,7 +17,7 @@ defmodule MishkaCmsWeb.RedirectNavigationTest do
   import MishkaCms.Test.Factory
 
   alias MishkaCmsCore.Runtime.Redirect
-  alias MishkaCmsCore.Runtime.States.{SiteState, WebRunTimeMetaDataState}
+  alias MishkaCmsCore.Runtime.States.{RedirectsState, SiteState, WebRunTimeMetaDataState}
 
   @moduletag :integration
 
@@ -59,12 +59,18 @@ defmodule MishkaCmsWeb.RedirectNavigationTest do
     page
   end
 
+  # `RedirectsState` keeps a rule off the broadcast the create sends, which is already in its mailbox
+  # when `create!` returns; a call to it is handled after that message, so the rule is served by then.
   defp rule!(site, attrs) do
-    Redirect
-    |> Ash.Changeset.for_create(:master_create, Map.put(attrs, :site_id, site.id),
-      authorize?: false
-    )
-    |> Ash.create!()
+    rule =
+      Redirect
+      |> Ash.Changeset.for_create(:master_create, Map.put(attrs, :site_id, site.id),
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    _handled = :sys.get_state(RedirectsState)
+    rule
   end
 
   defp on_site do
