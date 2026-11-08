@@ -4,6 +4,7 @@
 - The visual editor is a package of its own. The host installs `mishka_cms_builder` 0.0.1-alpha.4 and `mishka_cms_core` 0.0.4 from Hex, imports the admin and editor hooks from their packages, and starts the runtime through the core's supervision API
 - A reader is told when the open page changed because its layout or a component it draws was rebuilt
 - The release workflow publishes a demo image to GHCR and a GitHub release for a tag, and the demo image is `ghcr.io/mishka-group/mishka_cms-demo:0.0.2`
+- A page rewritten by a redirect rule is served at the address asked for, a gone (410 or 404) rule draws the site's error page with its status, and when a page's record is missing the next page the address matches is tried before the 404 (needs the next `mishka_cms_core` and `mishka_blog` releases)
 
 ### Bug fixes:
 - The editor's canvas follows its rebuilt CSS, registers the site's runtime hooks on the admin's socket, and shows a page's preview framed and typeset as the published page is
