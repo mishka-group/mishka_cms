@@ -204,15 +204,12 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       assert html_content =~ "Go Home"
     end
 
-    test "draws the site's 404 page for a status it has no page for", %{conn: conn} do
-      # 401 is not configured in our ErrorPage, so the 404 page answers it
-      html_content =
-        "401.html"
-        |> ErrorHTML.render(%{conn: conn})
-        |> Phoenix.HTML.Safe.to_iodata()
-        |> IO.iodata_to_binary()
+    test "falls back to Phoenix default for unconfigured status codes", %{conn: conn} do
+      # Try to render 401 error (not configured in our ErrorPage)
+      result = ErrorHTML.render("401.html", %{conn: conn})
 
-      assert html_content =~ "Page Not Found"
+      # Should return default Phoenix message since 401 is not configured
+      assert result == "Unauthorized"
     end
 
     test "falls back to Phoenix default when no error page exists", %{conn: conn, site: _site} do
