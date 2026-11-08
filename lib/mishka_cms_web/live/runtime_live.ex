@@ -183,6 +183,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
       {:redirect, to} ->
         {:ok, push_navigate(socket, to: to <> query_of_params(params))}
 
+      {:rewrite, target, language} ->
+        socket
+        |> speaking(language, site.id)
+        |> serve_mount(Map.put(params, "path", target), session, site)
+
       {:serve, language} ->
         socket
         |> speaking(language, site.id)
@@ -382,6 +387,11 @@ defmodule MishkaCmsWeb.RuntimeLive do
       {:redirect, to} ->
         {:noreply, push_navigate(socket, to: to <> query_of(url))}
 
+      {:rewrite, target, language} ->
+        socket
+        |> speaking(language, site.id)
+        |> serve_params(Map.put(params, "path", target), url)
+
       {:serve, language} ->
         socket
         |> speaking(language, socket.assigns.current_site.id)
@@ -554,11 +564,36 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # request, but a click from one page to another never makes one — a patch reaches
   # `handle_params/3`, a navigate remounts through `mount/3` — so both ask the rule here, before the
   # address picks a page.
+  #
+  # A REWRITE IS RESOLVED HERE, on the first render and on the connect alike, because both choose the
+  # page from the address in the browser: the target's page is served at that address, never looked
+  # up again. A rewritten file is the plug's to send; a live navigation to one leaves for the file. A
+  # 410 or a 404 raises the site's error page with its status.
   defp moved_or_language_target(socket, path, address, query, site) do
     case MishkaCmsCore.Runtime.Redirects.lookup(site.id, address, query) do
-      {to, _status} -> {:moved, to}
+      {:redirect, to, _status} -> {:moved, to}
+      {:rewrite, "/uploads/" <> _ = to, _status} -> {:moved, to}
+      {:rewrite, to, _status} -> rewritten(socket, to, site)
+      {_gone_or_not_found, _to, status} -> refused!(status)
       nil -> language_target(socket, path, site)
     end
+  end
+
+  # THE TARGET'S OWN LANGUAGE, as its address names it; one written in another form than the site's
+  # is read in the visitor's language, since the address the browser shows is not the target's.
+  defp rewritten(socket, to, site) do
+    target = String.split(to, "/", trim: true)
+
+    case language_target(socket, target, site) do
+      {:serve, language} -> {:rewrite, target, language}
+      {:redirect, _elsewhere} -> {:rewrite, target, socket.assigns[:site_language]}
+    end
+  end
+
+  defp refused!(status) do
+    raise MishkaCmsCore.ErrorsExceptions.NotFoundError,
+      message: "Sorry, the page you are looking for does not exist or has been moved.",
+      plug_status: status
   end
 
   def handle_event(event_name, event_params, socket) do
