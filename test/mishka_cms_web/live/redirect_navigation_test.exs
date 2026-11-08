@@ -17,7 +17,7 @@ defmodule MishkaCmsWeb.RedirectNavigationTest do
   import MishkaCms.Test.Factory
 
   alias MishkaCmsCore.Runtime.Redirect
-  alias MishkaCmsCore.Runtime.States.{SiteState, WebRunTimeMetaDataState}
+  alias MishkaCmsCore.Runtime.States.{RedirectsState, SiteState, WebRunTimeMetaDataState}
 
   @moduletag :integration
 
@@ -59,12 +59,18 @@ defmodule MishkaCmsWeb.RedirectNavigationTest do
     page
   end
 
+  # `RedirectsState` keeps a rule off the broadcast the create sends, which is already in its mailbox
+  # when `create!` returns; a call to it is handled after that message, so the rule is served by then.
   defp rule!(site, attrs) do
-    Redirect
-    |> Ash.Changeset.for_create(:master_create, Map.put(attrs, :site_id, site.id),
-      authorize?: false
-    )
-    |> Ash.create!()
+    rule =
+      Redirect
+      |> Ash.Changeset.for_create(:master_create, Map.put(attrs, :site_id, site.id),
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    _handled = :sys.get_state(RedirectsState)
+    rule
   end
 
   defp on_site do
@@ -114,5 +120,75 @@ defmodule MishkaCmsWeb.RedirectNavigationTest do
     {:ok, view, _html} = live(conn, page.path)
 
     assert render_patch(view, page.path <> "?again=1") =~ "here"
+  end
+
+  describe "a rewrite" do
+    test "answers the target's page at the address asked for, on the first load and the connect",
+         %{conn: conn, site: site, page: page} do
+      rule!(site, %{kind: :rewrite, from_path: "/", from_query: "p=55", to: page.path})
+      rule!(site, %{kind: :rewrite, from_path: "/alias", to: page.path})
+
+      html = conn |> get("/alias") |> html_response(200)
+      assert html =~ ~s(data-role="here")
+
+      {:ok, view, _html} = live(on_site(), "/?p=55")
+      assert has_element?(view, ~s([data-role="here"]))
+    end
+
+    test "a live navigation to a rewritten address keeps it and shows the target", %{
+      conn: conn,
+      site: site,
+      page: page
+    } do
+      other = published!(site, ~S|<p data-role="there">there</p>|)
+      rule!(site, %{kind: :rewrite, from_path: "/alias", to: other.path})
+
+      {:ok, view, _html} = live(conn, page.path)
+
+      assert render_patch(view, "/alias") =~ ~s(data-role="there")
+    end
+
+    @tag :capture_log
+    test "two rules rewriting each other serve each other's page, once", %{
+      conn: conn,
+      site: site,
+      page: page
+    } do
+      rule!(site, %{kind: :rewrite, from_path: "/a", to: "/b"})
+      rule!(site, %{kind: :rewrite, from_path: "/b", to: "/a"})
+      rule!(site, %{kind: :rewrite, from_path: "/c", to: page.path})
+
+      assert_error_sent(404, fn -> get(conn, "/a") end)
+      assert on_site() |> get("/c") |> html_response(200) =~ ~s(data-role="here")
+    end
+  end
+
+  describe "a rule that answers 410 or 404" do
+    @tag :capture_log
+    test "answers the site's error page with that status", %{conn: conn, site: site} do
+      rule!(site, %{kind: :gone, from_path: "/retired"})
+      rule!(site, %{kind: :not_found, from_path: "/never"})
+
+      assert_error_sent(410, fn -> get(conn, "/retired") end)
+      assert_error_sent(404, fn -> get(on_site(), "/never") end)
+    end
+
+    @tag :capture_log
+    test "a live navigation to it is refused with that status", %{
+      conn: conn,
+      site: site,
+      page: page
+    } do
+      rule!(site, %{kind: :gone, from_path: "/retired"})
+
+      {:ok, view, _html} = live(conn, page.path)
+      Process.flag(:trap_exit, true)
+      ref = Process.monitor(view.pid)
+
+      catch_exit(render_patch(view, "/retired"))
+
+      assert_receive {:DOWN, ^ref, :process, _pid,
+                      {%MishkaCmsCore.ErrorsExceptions.NotFoundError{plug_status: 410}, _stack}}
+    end
   end
 end

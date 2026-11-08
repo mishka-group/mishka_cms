@@ -26,6 +26,7 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
 
   alias MishkaBlog.Plugins.PageSeo
   alias MishkaBlog.Provision
+  alias MishkaCmsCore.Runtime.Handlers.BootHandler
   alias MishkaCmsCore.Runtime.Page
   alias MishkaCmsCore.Runtime.{Seo, ShareCard}
   alias MishkaCmsCore.Runtime.Workers.ShareCardRefreshWorker
@@ -78,23 +79,18 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     %{site: site, conn: on_site(site)}
   end
 
+  # Each page's routing row as the CMS puts it in memory when it boots or saves a page
+  # (`BootHandler.web_metadata_row/2`), with its language and the record its `extra` names, so the
+  # site's page for a kind, such as `"blog:home"`, is found as it is outside a test.
   defp register_routes!(site) do
     Page
     |> Ash.Query.for_read(:read_any, %{}, authorize?: false)
     |> Ash.Query.filter(site_id == ^site.id)
+    |> Ash.Query.load(:site)
     |> Ash.read!(page: [limit: 100])
     |> then(& &1.results)
     |> Enum.each(fn page ->
-      :ok =
-        WebRunTimeMetaDataState.save(%{
-          id: page.id,
-          site: site.name,
-          path: page.path,
-          title: page.name,
-          created_at: DateTime.utc_now(),
-          section: "Page",
-          priority: 0
-        })
+      :ok = page |> BootHandler.web_metadata_row("Page") |> WebRunTimeMetaDataState.save()
     end)
   end
 
@@ -303,13 +299,13 @@ defmodule MishkaCmsWeb.BlogPostSeoTest do
     assert page_title(view) == "Ash in production"
   end
 
-  test "another blog page keeps its own head", %{url_mode: url_mode, conn: conn} do
+  test "the blog's front page is a collection of posts", %{url_mode: url_mode, conn: conn} do
     doc =
       conn |> get(english(url_mode, "/blog")) |> html_response(200) |> LazyHTML.from_document()
 
     assert attr(doc, ~s(meta[property="og:type"]), "content") == ["website"]
 
-    assert [%{"@type" => "WebPage"}, %{"@type" => "WebSite"}, %{"@type" => "Organization"}] =
+    assert [%{"@type" => "CollectionPage"}, %{"@type" => "WebSite"}, %{"@type" => "Organization"}] =
              json_ld(doc)
   end
 end
