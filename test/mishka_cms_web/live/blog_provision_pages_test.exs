@@ -36,6 +36,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
 
   alias MishkaBlog.Provision
   alias MishkaCmsCore.ErrorsExceptions.NotFoundError
+  alias MishkaCmsCore.Runtime.Handlers.BootHandler
   alias MishkaCmsCore.Runtime.Page
   alias MishkaCmsCore.Runtime.RuntimePreview
   alias MishkaCmsBuilder.Snippet
@@ -98,20 +99,12 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     register_routes!(site)
   end
 
+  # Each page's routing row as the CMS puts it in memory when it boots or saves a page
+  # (`BootHandler.web_metadata_row/2`), with its language and the record its `extra` names, so the
+  # site's page for a kind, such as `"blog:home"`, is found as it is outside a test.
   defp register_routes!(site) do
     for page <- pages(site) do
-      :ok =
-        WebRunTimeMetaDataState.save(%{
-          id: page.id,
-          site: site.name,
-          path: page.path,
-          title: page.name,
-          created_at: DateTime.utc_now(),
-          # The routing table's own kind — Page, Layout, ErrorPage — not the page's `section`
-          # attribute, which is "blog" on every one of these.
-          section: "Page",
-          priority: 0
-        })
+      :ok = page |> BootHandler.web_metadata_row("Page") |> WebRunTimeMetaDataState.save()
     end
 
     :ok
@@ -136,6 +129,7 @@ defmodule MishkaCmsWeb.BlogProvisionPagesTest do
     Page
     |> Ash.Query.for_read(:read_any, %{}, authorize?: false)
     |> Ash.Query.filter(site_id == ^site.id)
+    |> Ash.Query.load(:site)
     |> Ash.read!(page: [limit: 100])
     |> then(& &1.results)
   end
