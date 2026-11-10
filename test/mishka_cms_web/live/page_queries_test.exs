@@ -216,7 +216,7 @@ defmodule MishkaCmsWeb.PageQueriesTest do
 
     head =
       doc
-      |> LazyHTML.query(~s|head link[rel="alternate"]:not([hreflang="x-default"])|)
+      |> LazyHTML.query(~s|head link[rel="alternate"][hreflang]:not([hreflang="x-default"])|)
       |> Enum.map(&hd(LazyHTML.attribute(&1, "hreflang")))
 
     {menu, head}
