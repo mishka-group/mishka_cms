@@ -380,8 +380,11 @@ defmodule MishkaCmsWeb.RuntimeHeadTest do
       assert attr(doc, ~s(meta[name="twitter:card"]), "content") == ["summary"]
       assert attr(doc, ~s(meta[name="twitter:title"]), "content") == ["Plain page"]
 
-      for absent <- ~w(meta[name="description"] meta[property="og:description"]
-                       meta[property="og:image"] meta[name="twitter:image"] link[rel="alternate"]) do
+      absent_tags =
+        ~w(meta[name="description"] meta[property="og:description"] meta[property="og:image"]
+           meta[name="twitter:image"] link[rel="alternate"][hreflang])
+
+      for absent <- absent_tags do
         assert Enum.empty?(LazyHTML.query(doc, absent)), "#{absent} was emitted with no value"
       end
 
