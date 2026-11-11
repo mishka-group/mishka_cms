@@ -16,6 +16,11 @@ defmodule MishkaCmsWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # A deploy's health check, before anything that reads the host, a site or the session:
+  # `GET /_health` answers 200 only once the boot has compiled the sites and their CSS and JS are
+  # built, and 503 until then — see `MishkaCmsCore.Runtime.Plugs.HealthPlug`.
+  plug MishkaCmsCore.Runtime.Plugs.HealthPlug
+
   # LiveView socket with dynamic origin checking for multi-tenant. The sign-in pages' forms are rate
   # limited by the address `RemoteIp` reads off `:x_headers`, or `:peer_data` names — see
   # `MishkaCmsWeb.RuntimeLive`'s `@client_request`. Sobelow cannot read the validator, so
