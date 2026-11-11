@@ -53,6 +53,21 @@ defmodule MishkaCmsWeb.Router do
     plug :forget_site
   end
 
+  # What an extension answers that is not a page — a feed, a JSON endpoint — at `routes(:api)`: the
+  # site its host names and the offline gate, with no CSRF check and no sign-in. Each extension's
+  # routes are behind `MishkaCmsCore.Runtime.Plugs.ExtensionGatePlug`, which answers 404 for a site
+  # that switched it off and writes no session back. A route answering anything but JSON names it
+  # under `private: %{accepts: ...}`.
+  pipeline :extension_api do
+    plug :route_accepts, ["json"]
+    plug :fetch_session
+    plug :put_secure_browser_headers
+
+    plug MishkaCms.Plugs.InstallGate
+    plug MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
+    plug MishkaCms.Plugs.MaintenanceGate
+  end
+
   pipeline :oban_admin do
     plug :require_oban_admin
   end
@@ -229,6 +244,13 @@ defmodule MishkaCmsWeb.Router do
     live_session :install, session: {MishkaCmsCore.Runtime.CspNonce, :session, []} do
       live "/", InstallLive
     end
+  end
+
+  # Before the `/*path` catch-all below, so an extension's API route wins the match.
+  scope "/" do
+    pipe_through :extension_api
+
+    extension_routes(:api)
   end
 
   # Needs [] permissions

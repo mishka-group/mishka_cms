@@ -20,6 +20,8 @@ config :mishka_cms, MishkaCmsWeb.Endpoint,
     rewrite_on: [:x_forwarded_proto],
     # IMPORTANT: nil allows dynamic hosts for multi-tenant
     host: nil,
+    # The health check (`MishkaCmsCore.Runtime.Plugs.HealthPlug`) answers plain http on any host.
+    exclude: [hosts: ["localhost", "127.0.0.1"], paths: ["/_health"]],
     hsts: true,
     expires: 31_536_000,
     preload: false

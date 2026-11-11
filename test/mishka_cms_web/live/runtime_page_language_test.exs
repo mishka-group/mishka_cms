@@ -433,7 +433,7 @@ defmodule MishkaCmsWeb.RuntimePageLanguageTest do
 
   defp alternates(doc) do
     doc
-    |> LazyHTML.query(~s|head link[rel="alternate"]:not([hreflang="x-default"])|)
+    |> LazyHTML.query(~s|head link[rel="alternate"][hreflang]:not([hreflang="x-default"])|)
     |> Enum.map(&{hd(LazyHTML.attribute(&1, "hreflang")), hd(LazyHTML.attribute(&1, "href"))})
   end
 

@@ -5,6 +5,7 @@
 - A reader is told when the open page changed because its layout or a component it draws was rebuilt
 - The release workflow publishes a demo image to GHCR and a GitHub release for a tag, and the demo image is `ghcr.io/mishka-group/mishka_cms-demo:0.0.2`
 - A page rewritten by a redirect rule is served at the address asked for, a gone (410 or 404) rule draws the site's error page with its status, and when a page's record is missing the next page the address matches is tried before the 404 (needs the next `mishka_cms_core` and `mishka_blog` releases)
+- Every extension's API routes (`extension_routes(:api)`) are mounted before the page catch-all through the `:extension_api` pipeline: the site its host names, the install and offline gates, no CSRF check and no sign-in. The Blog's RSS, Atom and JSON feeds are served there (`/feed`, `/feed/atom`, `/feed.json`), and a site with the Blog switched off answers them 404 (needs the next `mishka_cms_core` and `mishka_blog` releases)
 
 ### Bug fixes:
 - The editor's canvas follows its rebuilt CSS, registers the site's runtime hooks on the admin's socket, and shows a page's preview framed and typeset as the published page is
