@@ -163,10 +163,23 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
 
   # Mirrors `MishkaCmsWeb.RuntimeLive`, which assigns `@query_params` in `handle_params/3` for the
   # same reason: a `<.link patch>` runs this again and nothing else, so the page is drawn here.
+  #
+  # `?preview_state=` is the preview state an extension named
+  # (`MishkaCmsCore.Runtime.PreviewStates`): assigned as `@preview_state` and kept out of
+  # `@query_params`. `MishkaCmsWeb.RuntimeLive` never assigns it, so only a preview draws it.
   def handle_params(params, uri, socket) do
-    %{record: record, module: module, asset_site: asset_site} = socket.assigns
     path = URI.parse(uri).path
-    query_params = Map.drop(params, ["resource", "token"])
+
+    {preview_state, query_params} =
+      params |> Map.drop(["resource", "token"]) |> Map.pop("preview_state")
+
+    preview_state = if is_binary(preview_state), do: preview_state
+
+    # The page's template reads it, as `assigns[:preview_state]`.
+    # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
+    socket = assign(socket, :preview_state, preview_state)
+
+    %{record: record, module: module, asset_site: asset_site} = socket.assigns
 
     case module in @compiled && DraftPreviewAssets.ensure_module(record, asset_site) do
       {:ok, preview_module} ->
