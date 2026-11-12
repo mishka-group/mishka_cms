@@ -15,12 +15,13 @@ defmodule MishkaCmsWeb.PreviewStateTest do
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 
-  alias MishkaCmsCore.Runtime.States.{SiteState, WebRunTimeMetaDataState}
+  alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
 
   @template ~S"""
   <div>
     <span id="state">{assigns[:preview_state] || "none"}</span>
     <span id="query">{@query_params["preview_state"] || "none"}</span>
+    <span id="language">{@page.language}</span>
   </div>
   """
 
@@ -37,8 +38,10 @@ defmodule MishkaCmsWeb.PreviewStateTest do
       master: site.master
     })
 
+    snapshot = SettingsState.snapshot()
     :persistent_term.put(:mishka_installed, true)
     MishkaCmsCore.Settings.put("cms.offline", false)
+    MishkaCmsCore.Settings.put("site.languages", ["en", "fr"], site_id: site.id)
 
     page = create_page!(site_id: site.id, path: "/confirm-state", template: @template)
 
@@ -54,6 +57,7 @@ defmodule MishkaCmsWeb.PreviewStateTest do
       })
 
     on_exit(fn ->
+      SettingsState.restore(snapshot)
       :persistent_term.erase(:mishka_installed)
       WebRunTimeMetaDataState.delete_by_site(site.name)
       SiteState.clear()
@@ -95,5 +99,15 @@ defmodule MishkaCmsWeb.PreviewStateTest do
     {:ok, view, _html} = live(on_localhost(), page.path <> "?preview_state=confirmed")
 
     assert text(view, "#state") == "none"
+  end
+
+  # A record sample names its language as the live route's `:lang` capture would.
+  test "a sample's language draws the page in it, when the site publishes in it", %{page: page} do
+    preview = "/_preview/page/#{page.preview_token}"
+    {:ok, view, _html} = live(on_localhost(), preview <> "?lang=fr&slug=a-post")
+    assert text(view, "#language") == "fr"
+
+    {:ok, view, _html} = live(on_localhost(), preview <> "?lang=de")
+    assert text(view, "#language") == page.language
   end
 end
