@@ -6,7 +6,7 @@ the way Ash keeps `ash-ci.yml` in the ash repository. Each repository calls them
 | Workflow | What it does |
 | --- | --- |
 | `workflows/mishka-ci.yml` | build, then format + audit + lint side by side, then the tests and the custom jobs (only when those pass) |
-| `workflows/mishka-release.yml` | the Release button: bump mix.exs and CHANGELOG + tag; CI on that commit beside the ebin and NIF builds; GitHub release; Hex publish (staged: an owner approves it on hex.pm with 2FA); the hex `.tar` added to the GitHub release; notify dependents |
+| `workflows/mishka-release.yml` | the Release button bumps mix.exs and CHANGELOG, commits and pushes tag `vX` (with the GitHub App's token); the tag push is the release: CI on the tag's commit beside the ebin and NIF builds; GitHub release; Hex publish (staged: an owner approves it on hex.pm with 2FA); the hex `.tar` added to the GitHub release; notify dependents |
 | `workflows/mishka-deps-bump.yml` | on `upstream-released`, move the dependency in mix.exs, `mix deps.update`, open a PR (never merged by itself) |
 | `mishka-dependents.json` | which repositories `notify` tells about a new release of each package |
 
@@ -19,7 +19,6 @@ exception: Hex does not let a workload identity create a package.
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `allowed-owners` | `mishka-group` | owners allowed to run it, space separated |
-| `ref` | commit of the run | what to check out (release.yml passes the tagged commit) |
 | `elixir`, `otp` | `.tool-versions` | pin other versions, e.g. to test the oldest supported pair |
 | `mishka-deps` | `hex` | exported as `MISHKA_DEPS` for mix.exs |
 | `rustler` | `false` | install a Rust toolchain before compiling and testing |
@@ -54,7 +53,7 @@ All the `mishka-ci.yml` inputs (passed through), and:
 
 | Input | Default | Meaning |
 | --- | --- | --- |
-| `version` | | the Release button: bump, commit, tag `v<version>`, release it. Empty: release the pushed tag, or a dry run without a tag |
+| `version` | | the Release button: bump, commit and push tag `v<version>` with the GitHub App's token, nothing else; the tag push then runs the release. Empty: release the pushed tag, or a dry run without a tag |
 | `publish` | `true` | `true`: `mix hex.publish --yes --wait` through the workload identity (staged; you approve it on hex.pm with 2FA). `false`: `mix hex.build` + `mix hex.publish --dry-run`. A run without a tag (Release with no version) is always a dry run |
 | `package` | repository name | the Hex package name `notify` sends |
 | `github-release` | `false` | GitHub release for the tag with every file below and the hex `.tar` |
@@ -145,8 +144,11 @@ jobs:
 `.github/workflows/release.yml` (keep this exact file name: the hex.pm workload identity names it).
 "Run workflow" with a version is the release button: it bumps `@version` in mix.exs, adds a
 CHANGELOG heading for the plain version if the top one is another (alphas stay under their plain
-version), commits to the default branch, tags `v<version>`, runs CI on that commit and publishes.
-Pushing a `v*` tag by hand releases that tag; "Run workflow" with no version is a dry run.
+version), commits to the default branch and pushes the tag `v<version>`, nothing more. It pushes
+with the GitHub App's token, because a push made with `GITHUB_TOKEN` starts no workflow; without the
+App it stops with "GitHub App not configured: push the tag vX yourself". The tag push is the
+release run: CI on the tag's own commit, the GitHub release, the Hex publish and notify. Pushing a
+`v*` tag by hand does the same; "Run workflow" with no version is a dry run.
 
 ```yaml
 name: Release
@@ -212,8 +214,9 @@ which is this repository at the ref the caller pinned.
    permissions Contents: Read and write, Pull requests: Read and write, Actions: Read and write
    (Metadata read is automatic). Install it on all mishka-group repositories. Then save its
    Client ID as the org variable `MISHKA_CI_APP_CLIENT_ID` and a generated private key as the org
-   secret `MISHKA_CI_APP_PRIVATE_KEY`. Without them, release's `notify` and deps-bump's App PR are
-   skipped with a notice, and deps-bump falls back to `GITHUB_TOKEN` + a `workflow_dispatch` of CI.
+   secret `MISHKA_CI_APP_PRIVATE_KEY`. The Release button needs them to push its tag; without them
+   it stops and you push the tag yourself. Release's `notify` and deps-bump's App PR are skipped with
+   a notice, and deps-bump falls back to `GITHUB_TOKEN` + a `workflow_dispatch` of CI.
 3. **Each package repository**: Settings → Environments → New `release`; add yourself as a
    required reviewer if every publish should wait for a click.
 4. **hex.pm, per package** (you must be a full owner with 2FA on). A brand-new package's very

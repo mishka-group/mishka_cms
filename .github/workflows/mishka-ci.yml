@@ -25,14 +25,6 @@ on:
         description: 'JSON list of jobs run after format, audit and lint pass; fields in the README'
         type: string
         default: ""
-      ref:
-        # Trusted: only mishka-release.yml sets it, to the SHA its prepare job committed and tagged on
-        # the default branch. No caller runs these workflows on pull_request_target, so the caches
-        # (keyed per ref by GitHub) and the steps after this checkout never see a fork's code with
-        # write access.
-        description: Commit, branch or tag to check out (empty is the commit that started the run)
-        type: string
-        default: ""
       elixir:
         description: Elixir version (empty reads .tool-versions)
         type: string
@@ -197,8 +189,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -226,7 +216,7 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-
 
       - run: mix deps.get
@@ -238,8 +228,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -263,7 +251,7 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # After deps: import_deps in .formatter.exs reads the DSLs from the fetched deps.
@@ -274,8 +262,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -299,7 +285,7 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # Retired releases and releases with a Hex security advisory.
@@ -317,8 +303,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -342,7 +326,7 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       - if: inputs.credo
@@ -418,8 +402,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -451,7 +433,7 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       # The binaries the tailwind, esbuild and bun packages download into _build; the build job
@@ -484,7 +466,6 @@ jobs:
     needs: guard
     runs-on: ubuntu-latest
     steps:
-      # The commit of the run: a release's version commit changes only mix.exs and the CHANGELOG.
       - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -520,8 +501,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
@@ -544,7 +523,7 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ runner.os }}-mix-${{ matrix.pair.elixir }}-${{ matrix.pair.otp }}-${{ hashFiles('mix.lock') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-mix-${{ matrix.pair.elixir }}-${{ matrix.pair.otp }}-${{ hashFiles('mix.lock') }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}-mix-${{ matrix.pair.elixir }}-${{ matrix.pair.otp }}-${{ hashFiles('mix.lock') }}-
 
       - run: mix deps.get
@@ -575,8 +554,6 @@ jobs:
         working-directory: ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -600,7 +577,7 @@ jobs:
           path: |
             ${{ matrix.dir }}/deps
             ${{ matrix.dir }}/_build
-          key: ${{ runner.os }}-sub-${{ matrix.dir }}-${{ hashFiles(format('{0}/mix.lock', matrix.dir), '.tool-versions') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-sub-${{ matrix.dir }}-${{ hashFiles(format('{0}/mix.lock', matrix.dir), '.tool-versions') }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}-sub-${{ matrix.dir }}-${{ hashFiles(format('{0}/mix.lock', matrix.dir), '.tool-versions') }}-
 
       - run: mix deps.get
@@ -625,8 +602,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -650,7 +625,7 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ inputs.ref || github.sha }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
           fail-on-cache-miss: true
 
       - env:
@@ -664,7 +639,6 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      # The commit of the run: a release's version commit changes only mix.exs and the CHANGELOG.
       - uses: actions/checkout@v7
 
       - env:
@@ -677,7 +651,6 @@ jobs:
     needs: guard
     runs-on: ubuntu-latest
     steps:
-      # The commit of the run: a release's version commit changes only mix.exs and the CHANGELOG.
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
@@ -711,8 +684,6 @@ jobs:
 
       - if: steps.on.outputs.run == 'true'
         uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - if: steps.on.outputs.run == 'true'
         env:

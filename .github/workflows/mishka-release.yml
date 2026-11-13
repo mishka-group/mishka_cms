@@ -4,10 +4,12 @@
 
 name: Mishka release
 
-# prepare (bump mix.exs + CHANGELOG, tag) -> ci.yml on that commit (with its custom jobs), beside
-# the ebin and NIF builds -> GitHub release with those files -> publish to Hex (the hex .tar is then
-# added to the GitHub release) -> notify the packages in dependents.json. The caller's own file must be named release.yml: Hex's workload
-# identity matches the calling repository's workflow file name.
+# Release button (workflow_dispatch with a version): bump mix.exs + CHANGELOG, commit, tag vX and
+# push them with the GitHub App's token; nothing else. The tag push starts the release run:
+# mishka-ci.yml on the tag's commit, beside the ebin and NIF builds -> GitHub release with those
+# files -> Hex publish (staged) and the hex .tar added to the release -> notify the packages in
+# .github/mishka-dependents.json. A run without a version and without a tag is a dry run.
+# The caller's own file must be named release.yml: Hex's workload identity matches it.
 on:
   workflow_call:
     inputs:
@@ -188,7 +190,6 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.v.outputs.version }}
-      sha: ${{ steps.v.outputs.sha }}
       tagged: ${{ steps.v.outputs.tagged }}
     steps:
       - name: Only allowed owners run this workflow
@@ -201,7 +202,29 @@ jobs:
             exit 1
           fi
 
+      # The Release button only commits and tags; the tag push starts the release run. A push made
+      # with GITHUB_TOKEN starts no workflow, so it is made with the GitHub App's token.
+      - if: inputs.version != ''
+        env:
+          CLIENT_ID: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -z "$CLIENT_ID" ]; then
+            echo "::error::GitHub App not configured: push the tag v$VERSION yourself"
+            exit 1
+          fi
+
+      - id: token
+        if: inputs.version != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MISHKA_CI_APP_PRIVATE_KEY }}
+          permission-contents: write
+
       - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.token.outputs.token || github.token }}
 
       - id: v
         env:
@@ -219,7 +242,6 @@ jobs:
               exit 1
             fi
             echo "version=$current" >> "$GITHUB_OUTPUT"
-            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
             echo "tagged=$([ "$GITHUB_REF_TYPE" = tag ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -257,17 +279,15 @@ jobs:
           git commit -am "chore(release): v$VERSION"
           git tag "v$VERSION"
           git push origin "HEAD:$DEFAULT_BRANCH" "v$VERSION"
+          echo "### v$VERSION tagged; the tag push starts the release run" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "tagged=true" >> "$GITHUB_OUTPUT"
-
+  # Everything below runs on a tag push (the release) or a run without a version (dry run).
   ci:
+    if: inputs.version == ''
     needs: prepare
-    # ./ is this repository at the same ref the caller asked for.
+    # ./ is this repository at the same ref the caller asked for; it checks out the run's commit.
     uses: ./.github/workflows/mishka-ci.yml
     with:
-      ref: ${{ needs.prepare.outputs.sha }}
       version: ${{ needs.prepare.outputs.version }}
       release: true
       custom-jobs: ${{ inputs.custom-jobs }}
@@ -310,7 +330,7 @@ jobs:
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
   ebin:
-    if: inputs.ebin
+    if: inputs.ebin && inputs.version == ''
     needs: prepare
     runs-on: ubuntu-latest
     env:
@@ -320,8 +340,6 @@ jobs:
       RUSTLER_PRECOMPILED_FORCE_BUILD_ALL: ${{ inputs.rustler-precompiled != '' }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -370,7 +388,7 @@ jobs:
 
   # rustler_precompiled's standard build: one NIF tarball per target.
   nifs:
-    if: inputs.rustler-precompiled != ''
+    if: inputs.rustler-precompiled != '' && inputs.version == ''
     needs: prepare
     runs-on: ${{ matrix.job.os }}
     strategy:
@@ -379,8 +397,6 @@ jobs:
         job: ${{ fromJSON(inputs.nif-targets) }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -412,7 +428,7 @@ jobs:
 
   # Before Hex: rustler_precompiled's checksum file is made from the NIFs on this release.
   github-release:
-    if: ${{ !failure() && !cancelled() && needs.prepare.outputs.tagged == 'true' && (inputs.github-release || inputs.rustler-precompiled != '') }}
+    if: ${{ !failure() && !cancelled() && inputs.version == '' && needs.prepare.outputs.tagged == 'true' && (inputs.github-release || inputs.rustler-precompiled != '') }}
     needs: [prepare, ci, ebin, nifs]
     runs-on: ubuntu-latest
     permissions:
@@ -440,7 +456,7 @@ jobs:
           files: release/*
 
   publish:
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ !failure() && !cancelled() && inputs.version == '' }}
     needs: [prepare, ci, github-release]
     runs-on: ubuntu-latest
     # Must match the environment set on the package's hex.pm Workload identities tab.
@@ -452,8 +468,6 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
