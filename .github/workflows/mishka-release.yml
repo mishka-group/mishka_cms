@@ -329,14 +329,13 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
 
       - if: inputs.rustler || inputs.rustler-precompiled != ''
-        uses: dtolnay/rust-toolchain@stable
-
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - run: mix deps.get
 
       - env:
@@ -379,7 +378,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.job.target }}
 
@@ -390,7 +389,7 @@ jobs:
         run: echo "name=$(basename "$CRATE")" >> "$GITHUB_OUTPUT"
 
       - id: build
-        uses: philss/rustler-precompiled-action@v1.1.5
+        uses: philss/rustler-precompiled-action@67ed0cc2d6a423e4c4cd9ad651dcc6c90f802cdb # v1.1.5
         with:
           project-name: ${{ steps.crate.outputs.name }}
           project-version: ${{ needs.prepare.outputs.version }}
@@ -427,7 +426,7 @@ jobs:
           ( cd release && if [ -n "$(ls -A)" ]; then sha256sum -- * > SHA256SUMS.txt; fi )
           ls -la release
 
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: v${{ needs.prepare.outputs.version }}
           name: v${{ needs.prepare.outputs.version }}
@@ -462,14 +461,13 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
 
       - if: inputs.rustler || inputs.rustler-precompiled != ''
-        uses: dtolnay/rust-toolchain@stable
-
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       # Workload identity and staged publishing need Hex 2.7 or later.
       - run: mix local.hex --force && mix hex.info
 

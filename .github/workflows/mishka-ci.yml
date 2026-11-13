@@ -206,15 +206,14 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - if: inputs.rustler
-        uses: dtolnay/rust-toolchain@stable
-
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       # Keyed on the commit: each run saves its build and the next starts from the nearest one.
       # priv/native holds a Rustler NIF built into the checkout, which _build only links to.
       - uses: actions/cache@v6
@@ -248,7 +247,7 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -284,7 +283,7 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -327,7 +326,7 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -428,20 +427,19 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - if: inputs.test-bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
 
       - if: inputs.rustler
-        uses: dtolnay/rust-toolchain@stable
-
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: actions/cache/restore@v6
         with:
           path: |
@@ -485,7 +483,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
 
@@ -520,7 +518,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           elixir-version: ${{ matrix.pair.elixir }}
           otp-version: ${{ matrix.pair.otp }}
@@ -528,13 +526,12 @@ jobs:
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
       - if: inputs.test-bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
 
       - if: inputs.rustler
-        uses: dtolnay/rust-toolchain@stable
-
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: actions/cache@v6
         with:
           path: |
@@ -586,7 +583,7 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -635,7 +632,7 @@ jobs:
           if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -728,7 +725,7 @@ jobs:
           if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
 
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'elixir')
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -744,7 +741,7 @@ jobs:
           java-version: ${{ matrix.job.java-version || '17' }}
 
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'gradle')
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           gradle-version: ${{ matrix.job.gradle-version || 'current' }}
 
@@ -754,21 +751,19 @@ jobs:
           node-version: ${{ matrix.job.node-version || '24' }}
 
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'bun')
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
 
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'zig')
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ matrix.job.zig-version || 'latest' }}
 
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'rust')
-        uses: dtolnay/rust-toolchain@stable
-
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'android-sdk')
-        uses: android-actions/setup-android@v4
-
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'android-sdk') && matrix.job.ndk-version
         env:
           NDK: ${{ matrix.job.ndk-version }}
@@ -800,7 +795,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - if: steps.on.outputs.run == 'true' && matrix.job.emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.job.emulator.api-level || 34 }}
           target: ${{ matrix.job.emulator.target || 'google_apis' }}
