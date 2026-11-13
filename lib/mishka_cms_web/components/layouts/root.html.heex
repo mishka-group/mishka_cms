@@ -20,6 +20,10 @@ SPDX-License-Identifier: Apache-2.0
       :if={assigns[:runtime_page]}
       seo={assigns[:page_seo]}
       csp_nonce={assigns[:csp_nonce]}
+    /><MishkaCmsCore.Runtime.HeadCodes.tags
+      :if={assigns[:runtime_page] && !assigns[:admin_css]}
+      items={assigns[:page_head_code] || []}
+      csp_nonce={assigns[:csp_nonce]}
     />
     <%!-- `nil` until the site's first compile, so a page asked for while the bundle is still building
          takes no link at all rather than one to `/assets/css/<site>/.css`. The CSS arrives on the
