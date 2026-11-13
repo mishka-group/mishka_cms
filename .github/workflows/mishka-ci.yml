@@ -64,6 +64,14 @@ on:
         description: Extra arguments for mix test
         type: string
         default: ""
+      warnings-as-errors:
+        description: Compile and test with --warnings-as-errors (the subprojects too)
+        type: boolean
+        default: true
+      test-bun:
+        description: Install Bun (bun-version) in the test jobs, for tests that run it
+        type: boolean
+        default: false
       hex-audit:
         description: mix hex.audit (retired releases and Hex advisories)
         type: boolean
@@ -138,12 +146,22 @@ on:
       bun-version:
         type: string
         default: latest
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
 
 permissions:
   contents: read
 
 env:
   MISHKA_DEPS: ${{ inputs.mishka-deps }}
+  WAE: ${{ inputs.warnings-as-errors && '--warnings-as-errors' || '' }}
   # setup-beam tries these in order, so one slow builds.hex.pm cannot fail the run.
   HEXPM_MIRRORS: |
     https://builds.hex.pm
@@ -210,7 +228,7 @@ jobs:
 
       - run: mix deps.get
 
-      - run: MIX_ENV=test mix compile --warnings-as-errors
+      - run: MIX_ENV=test mix compile $WAE
 
   format:
     needs: build
@@ -416,6 +434,11 @@ jobs:
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
+      - if: inputs.test-bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+
       - if: inputs.rustler
         uses: dtolnay/rust-toolchain@stable
 
@@ -449,7 +472,7 @@ jobs:
       - env:
           N: ${{ inputs.partitions }}
           ARGS: ${{ inputs.test-args }}
-        run: mix test --warnings-as-errors --partitions "$N" $ARGS
+        run: mix test $WAE --partitions "$N" $ARGS
 
   assets:
     if: inputs.assets
@@ -502,6 +525,11 @@ jobs:
           version-type: strict
           hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
 
+      - if: inputs.test-bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+
       - if: inputs.rustler
         uses: dtolnay/rust-toolchain@stable
 
@@ -516,7 +544,7 @@ jobs:
 
       - run: mix deps.get
 
-      - run: MIX_ENV=test mix compile --warnings-as-errors
+      - run: MIX_ENV=test mix compile $WAE
 
       - if: inputs.pre-test != ''
         env:
@@ -525,7 +553,7 @@ jobs:
 
       - env:
           ARGS: ${{ inputs.test-args }}
-        run: mix test --warnings-as-errors $ARGS
+        run: mix test $WAE $ARGS
 
   subprojects:
     if: inputs.subprojects != ''
@@ -577,12 +605,12 @@ jobs:
       - if: inputs.mix-audit
         run: MIX_ENV=test mix deps.audit
 
-      - run: MIX_ENV=test mix compile --warnings-as-errors
+      - run: MIX_ENV=test mix compile $WAE
 
       - run: MIX_ENV=test mix format --check-formatted
 
       # A step the subproject needs before its tests (assets.setup, say) belongs in its `test` alias.
-      - run: mix test --warnings-as-errors
+      - run: mix test $WAE
 
   extra-checks:
     if: inputs.extra-checks != ''
@@ -659,6 +687,7 @@ jobs:
   # setup: elixir, java, gradle, node, bun, zig, rust, android-sdk. `artifacts` are uploaded, and a
   # release attaches them to its GitHub release. `emulator` boots an Android emulator for `run`.
   custom-jobs:
+    name: ${{ matrix.job.name }}
     if: inputs.custom-jobs != ''
     needs: [format, audit, lint]
     runs-on: ${{ matrix.job.runs-on || 'ubuntu-latest' }}
@@ -743,6 +772,11 @@ jobs:
         name: Run
         env:
           RUN: ${{ matrix.job.run }}
+          # Android signing, from the caller's secrets (`secrets: inherit`); empty when unset.
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bash -euo pipefail -c "$RUN"
 
       # The SDK, an NDK and a system image leave too little disk for the emulator's userdata.

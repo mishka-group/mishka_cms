@@ -28,7 +28,11 @@ exception: Hex does not let a workload identity create a package.
 | `partitions` | `1` | test machines; each has its own Postgres and `MIX_TEST_PARTITION` |
 | `pre-test` | | shell run before `mix test` with `MIX_ENV=test`, e.g. `mix ash.codegen ci` |
 | `test-args` | | extra `mix test` arguments |
-| `mix-audit` | `true` | `mix deps.audit` (needs `mix_audit`); `hex.audit` and `deps.unlock --check-unused` always run |
+| `mix-audit` | `true` | `mix deps.audit` (needs `mix_audit`) |
+| `hex-audit` | `true` | `mix hex.audit` |
+| `unused-deps` | `true` | `mix deps.unlock --check-unused` |
+| `warnings-as-errors` | `true` | `--warnings-as-errors` on compile and test |
+| `test-bun` | `false` | install Bun (`bun-version`) in the test jobs, for tests that run it |
 | `credo` | `true` | `mix credo --strict` |
 | `credence-task` | | e.g. `mishka_cms_core.credence`; empty skips |
 | `sobelow` | `false` | `mix sobelow --config` |
@@ -51,7 +55,7 @@ All the `mishka-ci.yml` inputs (passed through), and:
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `version` | | the Release button: bump, commit, tag `v<version>`, release it. Empty: release the pushed tag, or a dry run without a tag |
-| `publish` | `true` | `true`: `mix hex.publish --yes --wait` through the workload identity (staged; you approve it on hex.pm with 2FA). `false`: `mix hex.build` + `mix hex.publish --dry-run` |
+| `publish` | `true` | `true`: `mix hex.publish --yes --wait` through the workload identity (staged; you approve it on hex.pm with 2FA). `false`: `mix hex.build` + `mix hex.publish --dry-run` | A run without a tag (Release with no version) is always a dry run.
 | `package` | repository name | the Hex package name `notify` sends |
 | `github-release` | `false` | GitHub release for the tag with every file below and the hex `.tar` |
 | `ebin`, `ebin-paths` | `false`, `priv` | `MIX_ENV=prod` compile, `tar -czh` of `ebin` + `ebin-paths` (+ `consolidated`), checked to hold `<app>.app` and `.beam` files |
@@ -85,7 +89,7 @@ after format, audit and lint pass (like the tests). `custom-jobs` is a JSON list
 | `runs-on` | runner, default `ubuntu-latest` (`macos-15` for an Xcode build) |
 | `setup` | any of `elixir` (setup-beam + `mix deps.get`), `java`, `gradle`, `node`, `bun`, `zig`, `rust`, `android-sdk` |
 | `java-version`, `gradle-version`, `node-version`, `zig-version`, `ndk-version` | versions for those setups (`ndk-version` also installs cmake 3.22.1) |
-| `run` | bash, with `$VERSION` (the release version, or mix.exs's in plain CI) |
+| `run` | bash, with `$VERSION` (the release version, or mix.exs's in plain CI) and the caller's `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` secrets when the caller passes `secrets: inherit` |
 | `emulator` | `{"api-level":34, "script":"..."}`: enables KVM, boots an x86_64 Android emulator (reactivecircus/android-emulator-runner) and runs `script` in it, after `run` |
 | `artifacts` | paths/globs uploaded as `release-custom-<name>`; a release puts them on its GitHub release |
 | `release-only` | `true`: only in release runs (bundles, store builds) |

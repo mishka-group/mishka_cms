@@ -100,6 +100,18 @@ on:
       mix-audit:
         type: boolean
         default: true
+      hex-audit:
+        type: boolean
+        default: true
+      unused-deps:
+        type: boolean
+        default: true
+      warnings-as-errors:
+        type: boolean
+        default: true
+      test-bun:
+        type: boolean
+        default: false
       credo:
         type: boolean
         default: true
@@ -153,6 +165,14 @@ on:
         default: ""
     secrets:
       MISHKA_CI_APP_PRIVATE_KEY:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
         required: false
 
 permissions:
@@ -262,6 +282,10 @@ jobs:
       pre-test: ${{ inputs.pre-test }}
       test-args: ${{ inputs.test-args }}
       mix-audit: ${{ inputs.mix-audit }}
+      hex-audit: ${{ inputs.hex-audit }}
+      unused-deps: ${{ inputs.unused-deps }}
+      warnings-as-errors: ${{ inputs.warnings-as-errors }}
+      test-bun: ${{ inputs.test-bun }}
       credo: ${{ inputs.credo }}
       credence-task: ${{ inputs.credence-task }}
       sobelow: ${{ inputs.sobelow }}
@@ -279,6 +303,7 @@ jobs:
       extra-checks: ${{ inputs.extra-checks }}
       semgrep-path: ${{ inputs.semgrep-path }}
       retire-path: ${{ inputs.retire-path }}
+    secrets: inherit
 
   ebin:
     if: inputs.ebin
@@ -399,6 +424,7 @@ jobs:
       - run: |
           set -euo pipefail
           mkdir -p release
+          ( cd release && if [ -n "$(ls -A)" ]; then sha256sum -- * > SHA256SUMS.txt; fi )
           ls -la release
 
       - uses: softprops/action-gh-release@v3
@@ -461,12 +487,13 @@ jobs:
 
       - run: mix hex.build
 
-      - if: ${{ !inputs.publish }}
+      # A run without a tag (Release with no version) is always a dry run.
+      - if: ${{ !inputs.publish || needs.prepare.outputs.tagged != 'true' }}
         run: mix hex.publish --dry-run --yes
 
       # No HEX_API_KEY here: with one set, Hex would publish with the key instead of the identity.
       # --wait waits for a staged release to be approved on hex.pm.
-      - if: inputs.publish
+      - if: inputs.publish && needs.prepare.outputs.tagged == 'true'
         run: mix hex.publish --yes --wait
 
       - if: needs.github-release.result == 'success'
