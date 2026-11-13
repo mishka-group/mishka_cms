@@ -437,6 +437,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
+          no-cache: true
 
       - if: inputs.rustler
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -486,6 +487,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
+          no-cache: true
 
       - run: bun install --frozen-lockfile && bun run test
         working-directory: ${{ inputs.assets-dir }}
@@ -529,6 +531,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
+          no-cache: true
 
       - if: inputs.rustler
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -679,6 +682,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          package-manager-cache: false
 
       - run: npm install -g retire
 
@@ -749,11 +753,13 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.job.node-version || '24' }}
+          package-manager-cache: false
 
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'bun')
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun-version }}
+          no-cache: true
 
       - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'zig')
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
