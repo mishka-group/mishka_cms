@@ -21,18 +21,18 @@ defmodule MishkaCmsWeb.Endpoint do
   # built, and 503 until then — see `MishkaCmsCore.Runtime.Plugs.HealthPlug`.
   plug MishkaCmsCore.Runtime.Plugs.HealthPlug
 
-  # LiveView socket with dynamic origin checking for multi-tenant. The sign-in pages' forms are rate
-  # limited by the address `RemoteIp` reads off `:x_headers`, or `:peer_data` names — see
-  # `MishkaCmsWeb.RuntimeLive`'s `@client_request`. Sobelow cannot read the validator, so
-  # `.sobelow-skips` marks this socket (Config.CSWH).
+  # LiveView socket with dynamic origin checking for multi-tenant. Sign-in forms are rate limited by
+  # the address `RemoteIp` reads off `:x_headers` or `:peer_data` (`MishkaCmsWeb.RuntimeLive`'s
+  # `@client_request`); `:user_agent` lets the blog leave a bot's view uncounted. Sobelow cannot read
+  # the validator, so `.sobelow-skips` marks this socket (Config.CSWH).
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [
-      connect_info: [:peer_data, :x_headers, session: @session_options],
+      connect_info: [:peer_data, :x_headers, :user_agent, session: @session_options],
       check_origin: {MishkaCmsCore.Runtime.OriginValidator, :verify_origin?, []},
       timeout: 60_000
     ],
     longpoll: [
-      connect_info: [:peer_data, :x_headers, session: @session_options],
+      connect_info: [:peer_data, :x_headers, :user_agent, session: @session_options],
       check_origin: {MishkaCmsCore.Runtime.OriginValidator, :verify_origin?, []}
     ]
 

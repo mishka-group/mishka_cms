@@ -973,8 +973,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
       tags: 3,
       collections: 2,
       bloggers: 3,
-      teams: 2,
-      auto_postings: 1
+      teams: 2
     )
 
     posts = seeded_posts(site.id)
