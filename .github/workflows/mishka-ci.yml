@@ -26,6 +26,10 @@ on:
         type: string
         default: ""
       ref:
+        # Trusted: only mishka-release.yml sets it, to the SHA its prepare job committed and tagged on
+        # the default branch. No caller runs these workflows on pull_request_target, so the caches
+        # (keyed per ref by GitHub) and the steps after this checkout never see a fork's code with
+        # write access.
         description: Commit, branch or tag to check out (empty is the commit that started the run)
         type: string
         default: ""
@@ -480,9 +484,8 @@ jobs:
     needs: guard
     runs-on: ubuntu-latest
     steps:
+      # The commit of the run: a release's version commit changes only mix.exs and the CHANGELOG.
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -661,9 +664,8 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
+      # The commit of the run: a release's version commit changes only mix.exs and the CHANGELOG.
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - env:
           SCAN_PATH: ${{ inputs.semgrep-path }}
@@ -675,9 +677,8 @@ jobs:
     needs: guard
     runs-on: ubuntu-latest
     steps:
+      # The commit of the run: a release's version commit changes only mix.exs and the CHANGELOG.
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-node@v7
         with:
