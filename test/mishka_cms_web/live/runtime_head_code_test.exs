@@ -19,6 +19,9 @@ defmodule MishkaCmsWeb.RuntimeHeadCodeTest do
   import Phoenix.LiveViewTest
   import MishkaCms.Test.Factory
 
+  require Ash.Query
+
+  alias MishkaCmsCore.Accounts.Permission
   alias MishkaCmsCore.Runtime.HeadCode
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
@@ -141,13 +144,51 @@ defmodule MishkaCmsWeb.RuntimeHeadCodeTest do
            ) == 1
   end
 
-  test "an admin page never gets head code", %{site: site} do
-    entry!(site, %{})
+  test "an admin page and the editor carry no head code and no extra CSP origin", %{
+    site: site,
+    about: about
+  } do
+    entry!(site, %{origins: ["https://plausible.io"]})
+    master = master!()
 
-    html = on_site() |> get("/admin/dashboard") |> then(&(&1.resp_body || ""))
+    for path <- [
+          "/admin/dashboard",
+          "/admin/dashboard/runtime/pages",
+          "/admin/dashboard/runtime/builder/page/#{about.id}"
+        ] do
+      conn = master |> signed_in() |> get(path)
+      html = html_response(conn, 200)
+      [policy] = Plug.Conn.get_resp_header(conn, "content-security-policy")
 
-    refute html =~ "plausible.io"
-    refute html =~ "data-mishka-head"
+      refute html =~ "plausible.io/js/script.js", path
+      refute html =~ "data-mishka-head", path
+      refute policy =~ "plausible.io", path
+    end
+
+    # The same entry does reach the site's public page, so the admin pages above are refused it.
+    assert get_page(about.path) =~ "plausible.io/js/script.js"
+  end
+
+  defp master! do
+    permission =
+      case Permission |> Ash.Query.filter(name == "*") |> Ash.read_one(authorize?: false) do
+        {:ok, nil} -> create_permission!(name: "*")
+        {:ok, found} -> found
+      end
+
+    [site_id: nil]
+    |> create_user!()
+    |> Ash.Changeset.for_update(:assign_permissions, %{permission_ids: [permission.id]},
+      authorize?: false
+    )
+    |> Ash.update!()
+  end
+
+  defp signed_in(user) do
+    on_site()
+    |> Plug.Test.init_test_session(%{})
+    |> Plug.Conn.put_session(:master_mode, true)
+    |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
   defp entry!(site, attrs) do
