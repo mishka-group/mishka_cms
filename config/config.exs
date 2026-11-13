@@ -75,7 +75,11 @@ config :mishka_cms, Oban,
   # back to `available`. Longer than any compile or asset build, so a running job is not rescued.
   lifeline: [rescue_after: {30, :minutes}],
   plugins: [
-    {Oban.Plugins.Cron, crontab: [{"0 4 * * *", MishkaCmsCore.Notify.Workers.PruneWorker}]},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 4 * * *", MishkaCmsCore.Notify.Workers.PruneWorker},
+       {"* * * * *", MishkaBlog.Workers.PublishScheduledWorker}
+     ]},
     {Oban.Plugins.Pruner, max_age: 604_800}
   ]
 

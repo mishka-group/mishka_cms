@@ -128,6 +128,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   alias MishkaCmsCore.Runtime.{
     Component,
+    HeadCodes,
     Languages,
     Layout,
     Page,
@@ -489,7 +490,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
 
   defp params_handled({{:ok, _result}, socket}, page_module, ctx) do
     %{params: params, captured: captured, joined_path: joined_path, uri: uri} = ctx
-    head_before = socket.assigns[:page_seo]
+    head_before = {socket.assigns[:page_seo], socket.assigns[:page_head_code]}
 
     # A LIVE NAVIGATION LANDS ON A DIFFERENT PAGE, and that page's uploads are not the
     # ones mount registered. `allow_upload/3` refuses a name already registered, so
@@ -542,6 +543,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
         socket
         |> SiteLayout.assign_frame()
         |> assign_page_seo(uri)
+        |> assign_page_head_code(uri)
         |> admit_record(page_module)
         |> push_head(head_before)
         |> MishkaCmsCore.Runtime.PageUpload.allow(page_module)
@@ -1070,6 +1072,14 @@ defmodule MishkaCmsWeb.RuntimeLive do
     assign(socket, page_seo: seo, page_title: seo.title)
   end
 
+  # THE SITE'S HEAD CODE for this address, and what extensions add on `runtime:page:head`, from
+  # memory with no query (`MishkaCmsCore.Runtime.HeadCodes`). The root layout draws it with the
+  # response, and a live navigation pushes it with the rest of the head.
+  defp assign_page_head_code(%{assigns: assigns} = socket, %URI{path: path}) do
+    items = HeadCodes.head(assigns.private[:site_id], path, assigns.page, assigns[:csp_nonce])
+    assign(socket, :page_head_code, items)
+  end
+
   @doc """
   The head a database page has at `path`, which `page_head/1` draws:
   `MishkaCmsCore.Runtime.Seo.resolve/2` over the `page`, `private`, `page_languages` and
@@ -1112,15 +1122,23 @@ defmodule MishkaCmsWeb.RuntimeLive do
   # (`note_navigation/1`) is sent too, since the page it came from drew the head the browser has.
   # Nothing is sent for the address of a full load, whose head the response carries, or for one with
   # the same head.
-  defp push_head(socket, nil) do
+  #
+  # The site's head code travels with it (`HeadCodes.payload/2`): the client adds the items of a key
+  # it does not have and removes those of a key no longer listed, so an item on every page is never
+  # drawn twice.
+  defp push_head(socket, {nil, _head_code}) do
     case socket.private[@navigated] do
       true -> socket |> put_private(@navigated, false) |> send_head()
       _first_load_or_consumed -> socket
     end
   end
 
-  defp push_head(%{assigns: %{page_seo: seo}} = socket, before) do
-    case {seo.tags, seo.schema} == {before.tags, before.schema} do
+  defp push_head(%{assigns: %{page_seo: seo}} = socket, {before, head_code_before}) do
+    same? =
+      {seo.tags, seo.schema} == {before.tags, before.schema} and
+        head_code_keys(socket.assigns[:page_head_code]) == head_code_keys(head_code_before)
+
+    case same? do
       true -> socket
       false -> send_head(socket)
     end
@@ -1129,9 +1147,14 @@ defmodule MishkaCmsWeb.RuntimeLive do
   defp send_head(%{assigns: %{page_seo: seo}} = socket) do
     push_event(socket, "mishka:head", %{
       tags: for({name, attrs} <- seo.tags, do: %{tag: name, attrs: Map.new(attrs)}),
-      schema: seo.schema
+      schema: seo.schema,
+      head_code:
+        HeadCodes.payload(socket.assigns[:page_head_code] || [], socket.assigns[:csp_nonce])
     })
   end
+
+  defp head_code_keys(items) when is_list(items), do: Enum.map(items, & &1.key)
+  defp head_code_keys(_none), do: []
 
   # A CONNECTED MOUNT THAT A LIVE NAVIGATION MADE: the client sends the page it came from as
   # `_live_referer` when it navigates from one LiveView to another, and on no other mount. A full load

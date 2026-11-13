@@ -95,3 +95,54 @@ describe("syncHead", () => {
     expect(attrs("[data-mishka-seo]")).toHaveLength(0);
   });
 });
+
+describe("syncHeadCode", () => {
+  const everyPage = { key: "plausible", tag: "script", attrs: { defer: "defer", src: "https://plausible.io/js/script.js" }, content: "" };
+  const pricing = { key: "pricing", tag: "meta", attrs: { name: "pricing-pixel", content: "1" }, content: null };
+
+  beforeEach(() => {
+    document.head.innerHTML =
+      FIRST + `<script defer src="https://plausible.io/js/script.js" data-mishka-head="plausible"></script>`;
+  });
+
+  test("adds a page's entry and keeps the one on every page as it is", () => {
+    const before = document.head.querySelector('[data-mishka-head="plausible"]');
+
+    syncHead({ tags: [], schema: [], head_code: { nonce: "n0nce", items: [everyPage, pricing] } });
+
+    expect(document.head.querySelector('[data-mishka-head="plausible"]')).toBe(before);
+    expect(document.head.querySelectorAll('[data-mishka-head="plausible"]')).toHaveLength(1);
+    expect(document.head.querySelector('meta[name="pricing-pixel"]').getAttribute("data-mishka-head")).toBe("pricing");
+  });
+
+  test("takes a page's entry out when the visitor leaves that page", () => {
+    syncHead({ tags: [], schema: [], head_code: { nonce: "n0nce", items: [everyPage, pricing] } });
+    syncHead({ tags: [], schema: [], head_code: { nonce: "n0nce", items: [everyPage] } });
+
+    expect(document.head.querySelector('meta[name="pricing-pixel"]')).toBeNull();
+    expect(document.head.querySelectorAll('[data-mishka-head="plausible"]')).toHaveLength(1);
+  });
+
+  test("gives an added script the nonce and drops handlers and a nonce of its own", () => {
+    document.head.innerHTML = FIRST;
+
+    syncHead({
+      tags: [],
+      schema: [],
+      head_code: {
+        nonce: "n0nce",
+        items: [{ key: "k", tag: "script", attrs: { src: "/a.js", onload: "x()", nonce: "other" }, content: "" }],
+      },
+    });
+
+    const script = document.head.querySelector('[data-mishka-head="k"]');
+    expect(script.getAttribute("nonce")).toBe("n0nce");
+    expect(script.hasAttribute("onload")).toBe(false);
+  });
+
+  test("leaves head code alone when the push carries none", () => {
+    syncHead({ tags: [], schema: [] });
+
+    expect(document.head.querySelectorAll("[data-mishka-head]")).toHaveLength(1);
+  });
+});

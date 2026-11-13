@@ -18,10 +18,14 @@
 // dashboard's widget grid and `sortablejs` in order never to mount any of them. Two entry points
 // with a shared `boot/1` is what keeps that honest: neither side can grow into the other's bundle
 // without somebody writing the import.
+//
+// Gervaz's colocated hooks (its form's search select, for one) are admin-only too, so they come in
+// here rather than in `boot.js`: esbuild finds them under `phoenix-colocated/` in the build path.
 
 import { boot } from "./boot";
 import SharedHooks from "./shared_hooks";
 import CoreHooks from "mishka_cms_core";
 import BuilderHooks from "mishka_cms_builder";
+import { hooks as GervazHooks } from "phoenix-colocated/mishka_gervaz";
 
-boot({ ...SharedHooks, ...CoreHooks, ...BuilderHooks });
+boot({ ...GervazHooks, ...SharedHooks, ...CoreHooks, ...BuilderHooks });
