@@ -1,0 +1,71 @@
+{
+  "guarded_struct": [
+    "mishka-group/mishka_blog",
+    "mishka-group/mishka_chelekom",
+    "mishka-group/mishka_cms",
+    "mishka-group/mishka_cms_builder",
+    "mishka-group/mishka_cms_core",
+    "mishka-group/mishka_cms_migration",
+    "mishka-group/mishka_document",
+    "mishka-group/mishka_installer",
+    "mishka-group/mishka_slug"
+  ],
+  "mishka_blog": [
+    "mishka-group/mishka_cms",
+    "mishka-group/mishka_cms_migration"
+  ],
+  "mishka_chelekom": [
+    "mishka-group/kati"
+  ],
+  "mishka_cms_auth_discord": [
+    "mishka-group/mishka_cms"
+  ],
+  "mishka_cms_auth_github": [
+    "mishka-group/mishka_cms"
+  ],
+  "mishka_cms_auth_google": [
+    "mishka-group/mishka_cms"
+  ],
+  "mishka_cms_auth_slack": [
+    "mishka-group/mishka_cms"
+  ],
+  "mishka_cms_builder": [
+    "mishka-group/mishka_cms"
+  ],
+  "mishka_cms_core": [
+    "mishka-group/mishka_blog",
+    "mishka-group/mishka_cms",
+    "mishka-group/mishka_cms_auth_discord",
+    "mishka-group/mishka_cms_auth_github",
+    "mishka-group/mishka_cms_auth_google",
+    "mishka-group/mishka_cms_auth_slack",
+    "mishka-group/mishka_cms_builder",
+    "mishka-group/mishka_cms_migration",
+    "mishka-group/mishka_document"
+  ],
+  "mishka_document": [
+    "mishka-group/mishka_cms"
+  ],
+  "mishka_gervaz": [
+    "mishka-group/mishka_blog",
+    "mishka-group/mishka_cms",
+    "mishka-group/mishka_cms_builder",
+    "mishka-group/mishka_cms_core",
+    "mishka-group/mishka_cms_migration",
+    "mishka-group/mishka_document"
+  ],
+  "mishka_installer": [
+    "mishka-group/mishka_blog",
+    "mishka-group/mishka_cms",
+    "mishka-group/mishka_cms_builder",
+    "mishka-group/mishka_cms_core",
+    "mishka-group/mishka_cms_migration",
+    "mishka-group/mishka_document"
+  ],
+  "mishka_slug": [
+    "mishka-group/mishka_blog",
+    "mishka-group/mishka_cms_core",
+    "mishka-group/mishka_cms_migration",
+    "mishka-group/mishka_document"
+  ]
+}

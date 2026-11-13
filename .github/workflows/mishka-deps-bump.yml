@@ -1,0 +1,140 @@
+name: Mishka deps bump
+
+# Called on `repository_dispatch: upstream-released` with {package, version}. Moves the package's
+# requirement in mix.exs to the new version (`"~> X"`, or `tag: "vX"` for a git dep), runs
+# `mix deps.update <package>` and opens a PR from deps/<package>-<version>. Never merges it.
+on:
+  workflow_call:
+    inputs:
+      package:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      allowed-owners:
+        type: string
+        default: mishka-group
+      ci-workflow:
+        description: The caller's CI file, started on the bump branch when no App token can start it
+        type: string
+        default: ci.yml
+      mishka-deps:
+        type: string
+        default: hex
+      elixir:
+        description: Elixir version (empty reads .tool-versions)
+        type: string
+        default: ""
+      otp:
+        description: OTP version (empty reads .tool-versions)
+        type: string
+        default: ""
+    secrets:
+      MISHKA_CI_APP_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      PACKAGE: ${{ inputs.package }}
+      VERSION: ${{ inputs.version }}
+      MISHKA_DEPS: ${{ inputs.mishka-deps }}
+    steps:
+      - name: Only allowed owners, and a sane package and version
+        env:
+          OWNER: ${{ github.repository_owner }}
+          ALLOWED: ${{ inputs.allowed-owners }}
+        run: |
+          if [[ " $ALLOWED " != *" $OWNER "* ]]; then
+            echo "::error::$OWNER may not use this workflow (allowed: $ALLOWED)"
+            exit 1
+          fi
+          [[ "$PACKAGE" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "::error::bad package name: $PACKAGE"; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::bad version: $VERSION"; exit 1; }
+
+      # With the App, the PR is opened by the App and its pull_request CI starts on its own (a PR
+      # opened with GITHUB_TOKEN starts no workflow).
+      - id: token
+        if: vars.MISHKA_CI_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MISHKA_CI_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.token.outputs.token || github.token }}
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - id: edit
+        run: |
+          set -euo pipefail
+          branch="deps/$PACKAGE-$VERSION"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if [ -n "$(git ls-remote --heads origin "$branch")" ]; then
+            echo "::notice::$branch exists already; nothing to do"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          line="$(grep -nE "\{:$PACKAGE," mix.exs | head -1 | cut -d: -f1 || true)"
+          [ -n "$line" ] || { echo "::notice::mix.exs does not depend on $PACKAGE"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          if sed -n "${line}p" mix.exs | grep -q 'tag: "'; then
+            sed -i -E "${line}s/tag: \"[^\"]*\"/tag: \"v$VERSION\"/" mix.exs
+          else
+            sed -i -E "${line}s/\"~> [^\"]*\"/\"~> $VERSION\"/" mix.exs
+          fi
+          mix deps.update "$PACKAGE"
+
+          if git diff --quiet; then
+            echo "::notice::$PACKAGE is at $VERSION already"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.edit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token || github.token }}
+          BRANCH: ${{ steps.edit.outputs.branch }}
+          CI_WORKFLOW: ${{ inputs.ci-workflow }}
+          APP: ${{ steps.token.outputs.token != '' }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git commit -am "deps: update $PACKAGE to $VERSION"
+          git push -u origin "$BRANCH"
+          gh pr create --head "$BRANCH" \
+            --title "deps: update $PACKAGE to $VERSION" \
+            --body "$PACKAGE $VERSION was released. This PR moves mix.exs and mix.lock to it; merge it by hand once CI is green."
+          # GITHUB_TOKEN may start a workflow_dispatch, so CI still runs on the PR's commit.
+          if [ "$APP" != "true" ]; then
+            gh workflow run "$CI_WORKFLOW" --ref "$BRANCH"
+          fi
