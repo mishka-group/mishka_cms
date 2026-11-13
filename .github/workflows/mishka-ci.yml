@@ -466,7 +466,9 @@ jobs:
       - if: inputs.pre-test != ''
         env:
           MIX_ENV: test
-        run: ${{ inputs.pre-test }}
+          PRE_TEST: ${{ inputs.pre-test }}
+        # Through env, not interpolated into the script, like every other caller-supplied shell here.
+        run: bash -eo pipefail -c "$PRE_TEST"
 
       # `mix test`, not `MIX_ENV=test mix test`: an exported MIX_ENV outranks a dep's project_env.
       - env:
@@ -549,7 +551,9 @@ jobs:
       - if: inputs.pre-test != ''
         env:
           MIX_ENV: test
-        run: ${{ inputs.pre-test }}
+          PRE_TEST: ${{ inputs.pre-test }}
+        # Through env, not interpolated into the script, like every other caller-supplied shell here.
+        run: bash -eo pipefail -c "$PRE_TEST"
 
       - env:
           ARGS: ${{ inputs.test-args }}
@@ -646,7 +650,9 @@ jobs:
           key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ inputs.ref || github.sha }}
           fail-on-cache-miss: true
 
-      - run: ${{ inputs.extra-checks }}
+      - env:
+          EXTRA_CHECKS: ${{ inputs.extra-checks }}
+        run: bash -eo pipefail -c "$EXTRA_CHECKS"
 
   semgrep:
     if: inputs.semgrep-path != ''
