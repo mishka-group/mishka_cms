@@ -20,4 +20,5 @@ jobs:
     with:
       package: ${{ github.event.client_payload.package }}
       version: ${{ github.event.client_payload.version }}
-    secrets: inherit
+    secrets:
+      MISHKA_CI_APP_PRIVATE_KEY: ${{ secrets.MISHKA_CI_APP_PRIVATE_KEY }}

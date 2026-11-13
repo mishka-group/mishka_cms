@@ -89,7 +89,7 @@ after format, audit and lint pass (like the tests). `custom-jobs` is a JSON list
 | `runs-on` | runner, default `ubuntu-latest` (`macos-15` for an Xcode build) |
 | `setup` | any of `elixir` (setup-beam + `mix deps.get`), `java`, `gradle`, `node`, `bun`, `zig`, `rust`, `android-sdk` |
 | `java-version`, `gradle-version`, `node-version`, `zig-version`, `ndk-version` | versions for those setups (`ndk-version` also installs cmake 3.22.1) |
-| `run` | bash, with `$VERSION` (the release version, or mix.exs's in plain CI) and the caller's `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` secrets when the caller passes `secrets: inherit` |
+| `run` | bash, with `$VERSION` (the release version, or mix.exs's in plain CI) and the caller's `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` secrets when the caller passes them (`secrets:` map, or `secrets: inherit`) |
 | `emulator` | `{"api-level":34, "script":"..."}`: enables KVM, boots an x86_64 Android emulator (reactivecircus/android-emulator-runner) and runs `script` in it, after `run` |
 | `artifacts` | paths/globs uploaded as `release-custom-<name>`; a release puts them on its GitHub release |
 | `release-only` | `true`: only in release runs (bundles, store builds) |

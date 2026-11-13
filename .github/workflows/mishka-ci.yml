@@ -773,7 +773,7 @@ jobs:
         name: Run
         env:
           RUN: ${{ matrix.job.run }}
-          # Android signing, from the caller's secrets (`secrets: inherit`); empty when unset.
+          # Android signing, from the secrets the caller passes (declared above); empty when unset.
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
