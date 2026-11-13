@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Deps bump
+
+# A Mishka package this one depends on was released: open a PR that moves mix.exs and mix.lock to it.
+on:
+  repository_dispatch:
+    types: [upstream-released]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  bump:
+    uses: ./.github/workflows/mishka-deps-bump.yml
+    with:
+      package: ${{ github.event.client_payload.package }}
+      version: ${{ github.event.client_payload.version }}
+    secrets: inherit

@@ -5,7 +5,7 @@
 name: Mishka deps bump
 
 # Called on `repository_dispatch: upstream-released` with {package, version}. Moves the package's
-# requirement in mix.exs to the new version (`"~> X"`, or `tag: "vX"` for a git dep), runs
+# requirement in mix.exs (`{:pkg, "~> X"}` or `mishka_dep(:pkg, "~> X")`) to the new version (`"~> X"`, or `tag: "vX"` for a git dep), runs
 # `mix deps.update <package>` and opens a PR from deps/<package>-<version>. Never merges it.
 on:
   workflow_call:
@@ -104,7 +104,7 @@ jobs:
             exit 0
           fi
 
-          line="$(grep -nE "\{:$PACKAGE," mix.exs | head -1 | cut -d: -f1 || true)"
+          line="$(grep -nE "(\{|\()[[:space:]]*:$PACKAGE," mix.exs | head -1 | cut -d: -f1 || true)"
           [ -n "$line" ] || { echo "::notice::mix.exs does not depend on $PACKAGE"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; }
 
           if sed -n "${line}p" mix.exs | grep -q 'tag: "'; then
