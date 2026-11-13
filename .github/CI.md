@@ -55,7 +55,7 @@ All the `mishka-ci.yml` inputs (passed through), and:
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `version` | | the Release button: bump, commit, tag `v<version>`, release it. Empty: release the pushed tag, or a dry run without a tag |
-| `publish` | `true` | `true`: `mix hex.publish --yes --wait` through the workload identity (staged; you approve it on hex.pm with 2FA). `false`: `mix hex.build` + `mix hex.publish --dry-run` | A run without a tag (Release with no version) is always a dry run.
+| `publish` | `true` | `true`: `mix hex.publish --yes --wait` through the workload identity (staged; you approve it on hex.pm with 2FA). `false`: `mix hex.build` + `mix hex.publish --dry-run`. A run without a tag (Release with no version) is always a dry run |
 | `package` | repository name | the Hex package name `notify` sends |
 | `github-release` | `false` | GitHub release for the tag with every file below and the hex `.tar` |
 | `ebin`, `ebin-paths` | `false`, `priv` | `MIX_ENV=prod` compile, `tar -czh` of `ebin` + `ebin-paths` (+ `consolidated`), checked to hold `<app>.app` and `.beam` files |
