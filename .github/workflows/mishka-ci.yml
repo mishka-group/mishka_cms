@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 name: Mishka CI
 
 # Shared CI for the Mishka Elixir repositories, called from each one's ci.yml (see ../CI.md). Order: build, then format + audit + lint side by side,

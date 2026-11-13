@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 name: Mishka release
 
 # prepare (bump mix.exs + CHANGELOG, tag) -> ci.yml on that commit (with its custom jobs), beside
