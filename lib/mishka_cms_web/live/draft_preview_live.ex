@@ -163,10 +163,23 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
 
   # Mirrors `MishkaCmsWeb.RuntimeLive`, which assigns `@query_params` in `handle_params/3` for the
   # same reason: a `<.link patch>` runs this again and nothing else, so the page is drawn here.
+  #
+  # `?preview_state=` is the preview state an extension named
+  # (`MishkaCmsCore.Runtime.PreviewStates`): assigned as `@preview_state` and kept out of
+  # `@query_params`. `MishkaCmsWeb.RuntimeLive` never assigns it, so only a preview draws it.
   def handle_params(params, uri, socket) do
-    %{record: record, module: module, asset_site: asset_site} = socket.assigns
     path = URI.parse(uri).path
-    query_params = Map.drop(params, ["resource", "token"])
+
+    {preview_state, query_params} =
+      params |> Map.drop(["resource", "token"]) |> Map.pop("preview_state")
+
+    preview_state = if is_binary(preview_state), do: preview_state
+
+    # The page's template reads it, as `assigns[:preview_state]`.
+    # credo:disable-for-next-line Jump.CredoChecks.UnusedLiveViewAssign
+    socket = assign(socket, :preview_state, preview_state)
+
+    %{record: record, module: module, asset_site: asset_site} = socket.assigns
 
     case module in @compiled && DraftPreviewAssets.ensure_module(record, asset_site) do
       {:ok, preview_module} ->
@@ -206,7 +219,7 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
     |> assign(
       preview_module: preview_module,
       layout_module: layout_module,
-      page: Map.put(info.page, :path, path),
+      page: info.page |> Map.put(:path, path) |> asked_language(query_params, asset_site),
       private: info.private,
       acl: info.acl,
       extra: info.extra,
@@ -325,6 +338,19 @@ defmodule MishkaCmsWeb.DraftPreviewLive do
 
   defp site_id(%{id: id}), do: id
   defp site_id(_site), do: nil
+
+  # A RECORD SAMPLE NAMES ITS LANGUAGE, `?lang=fr&slug=…`, as the live route's `:lang` capture does:
+  # the page is drawn in it, so its blocks read the record in that language, when the site publishes
+  # in it. Any other value leaves the page in its own.
+  defp asked_language(page, query_params, site) do
+    with language when is_binary(language) <- Map.get(query_params, Languages.capture()),
+         true <- language in Languages.site(site_id(site)) do
+      :ok = speaking(language, site)
+      Map.put(page, :language, language)
+    else
+      _not_served -> page
+    end
+  end
 
   # ErrorPage holds many status codes; `?status=404` selects which to render (nil → first).
   defp parse_status(status) when is_binary(status) do
