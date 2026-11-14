@@ -174,10 +174,10 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:guarded_struct, "~> 0.1.7"),
 
       # Extensions
-      mishka_dep(:mishka_cms_core, "~> 0.0.5-alpha.16"),
+      mishka_dep(:mishka_cms_core, "~> 0.0.5-alpha.18"),
       # The visual page builder.
       mishka_dep(:mishka_cms_builder, "~> 0.0.1-alpha.8"),
-      mishka_dep(:mishka_blog, "~> 0.0.3-alpha.8"),
+      mishka_dep(:mishka_blog, "~> 0.0.3-alpha.9"),
       mishka_dep(:mishka_document, "~> 0.0.3-alpha.4"),
       mishka_dep(:mishka_gervaz, "~> 0.0.9"),
 
