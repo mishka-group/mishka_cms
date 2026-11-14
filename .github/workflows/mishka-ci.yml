@@ -1,0 +1,793 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Mishka CI
+
+# Shared CI for the Mishka Elixir repositories, called from each one's ci.yml (see ../CI.md). Order: build, then format + audit + lint side by side,
+# then the tests, which start only when those three pass.
+on:
+  workflow_call:
+    inputs:
+      allowed-owners:
+        description: Space separated owners allowed to run this workflow
+        type: string
+        default: mishka-group
+      version:
+        description: Release version custom jobs see as $VERSION (release.yml sets it; empty reads mix.exs)
+        type: string
+        default: ""
+      release:
+        description: Set by release.yml; custom jobs with "release-only" run only then
+        type: boolean
+        default: false
+      custom-jobs:
+        description: 'JSON list of jobs run after format, audit and lint pass; fields in the README'
+        type: string
+        default: ""
+      elixir:
+        description: Elixir version (empty reads .tool-versions)
+        type: string
+        default: ""
+      otp:
+        description: OTP version (empty reads .tool-versions)
+        type: string
+        default: ""
+      mishka-deps:
+        description: MISHKA_DEPS for mix.exs (hex, or path for sibling checkouts)
+        type: string
+        default: hex
+      rustler:
+        description: Install a Rust toolchain before compiling
+        type: boolean
+        default: false
+      postgres:
+        description: Start a Postgres service for the tests
+        type: boolean
+        default: false
+      postgres-image:
+        type: string
+        default: postgres:18
+      partitions:
+        description: Test machines; each gets its own Postgres and MIX_TEST_PARTITION
+        type: number
+        default: 1
+      pre-test:
+        description: Shell run before mix test, e.g. "mix ash.codegen ci"
+        type: string
+        default: ""
+      test-args:
+        description: Extra arguments for mix test
+        type: string
+        default: ""
+      warnings-as-errors:
+        description: Compile and test with --warnings-as-errors (the subprojects too)
+        type: boolean
+        default: true
+      test-bun:
+        description: Install Bun (bun-version) in the test jobs, for tests that run it
+        type: boolean
+        default: false
+      hex-audit:
+        description: mix hex.audit (retired releases and Hex advisories)
+        type: boolean
+        default: true
+      unused-deps:
+        description: mix deps.unlock --check-unused
+        type: boolean
+        default: true
+      mix-audit:
+        description: mix deps.audit (needs the mix_audit dep)
+        type: boolean
+        default: true
+      credo:
+        type: boolean
+        default: true
+      credence-task:
+        description: Mix task that runs Credence, e.g. mishka_cms_core.credence (empty skips)
+        type: string
+        default: ""
+      sobelow:
+        type: boolean
+        default: false
+      dialyzer:
+        type: boolean
+        default: true
+      ex_dna:
+        type: boolean
+        default: true
+      ex-dna-args:
+        description: Arguments for mix ex_dna, e.g. "--max-clones 92"
+        type: string
+        default: ""
+      spark-cheat-sheets:
+        description: mix spark.cheat_sheets --check
+        type: boolean
+        default: false
+      ash-codegen-check:
+        description: mix ash.codegen --check
+        type: boolean
+        default: false
+      tailwind-cache:
+        description: Cache the tailwind/esbuild/bun binaries in _build between partitions and runs
+        type: boolean
+        default: false
+      versions:
+        description: 'More Elixir/OTP pairs to compile and test, JSON: [{"elixir":"1.17.1","otp":"27.0"}]'
+        type: string
+        default: ""
+      subprojects:
+        description: 'Mix projects in subdirectories, JSON: ["development/web"]; each gets deps, compile, format, test and audits'
+        type: string
+        default: ""
+      extra-checks:
+        description: Shell run after the build with deps fetched, e.g. "cd development/web && mix run --no-start idempotency_check.exs"
+        type: string
+        default: ""
+      semgrep-path:
+        description: Path for "semgrep scan --config auto" (empty skips)
+        type: string
+        default: ""
+      retire-path:
+        description: Path for "retire --severity medium" (empty skips)
+        type: string
+        default: ""
+      assets:
+        description: Run "bun install && bun run test" in assets-dir
+        type: boolean
+        default: false
+      assets-dir:
+        type: string
+        default: assets
+      bun-version:
+        type: string
+        default: latest
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  MISHKA_DEPS: ${{ inputs.mishka-deps }}
+  WAE: ${{ inputs.warnings-as-errors && '--warnings-as-errors' || '' }}
+  # setup-beam tries these in order, so one slow builds.hex.pm cannot fail the run.
+  HEXPM_MIRRORS: |
+    https://builds.hex.pm
+    https://cdn.jsdelivr.net/hex
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      partitions: ${{ steps.p.outputs.list }}
+    steps:
+      - name: Only allowed owners run this workflow
+        env:
+          OWNER: ${{ github.repository_owner }}
+          ALLOWED: ${{ inputs.allowed-owners }}
+        run: |
+          if [[ " $ALLOWED " != *" $OWNER "* ]]; then
+            echo "::error::$OWNER may not use this workflow (allowed: $ALLOWED)"
+            exit 1
+          fi
+
+      - id: p
+        env:
+          N: ${{ inputs.partitions }}
+        run: echo "list=[$(seq -s, 1 "$N")]" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - if: inputs.rustler
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      # Keyed on the commit: each run saves its build and the next starts from the nearest one.
+      # priv/native holds a Rustler NIF built into the checkout, which _build only links to.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-
+
+      - run: mix deps.get
+
+      - run: MIX_ENV=test mix compile $WAE
+
+  format:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      # After deps: import_deps in .formatter.exs reads the DSLs from the fetched deps.
+      - run: MIX_ENV=test mix format --check-formatted
+
+  audit:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      # Retired releases and releases with a Hex security advisory.
+      - if: inputs.hex-audit
+        run: mix hex.audit
+
+      - if: inputs.unused-deps
+        run: mix deps.unlock --check-unused
+
+      - if: inputs.mix-audit
+        run: MIX_ENV=test mix deps.audit
+
+  lint:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - if: inputs.credo
+        run: MIX_ENV=test mix credo --strict
+
+      - if: inputs.credence-task != ''
+        env:
+          TASK: ${{ inputs.credence-task }}
+        run: MIX_ENV=test mix "$TASK"
+
+      - if: inputs.sobelow
+        run: MIX_ENV=test mix sobelow --config
+
+      - if: inputs.spark-cheat-sheets
+        run: MIX_ENV=test mix spark.cheat_sheets --check
+
+      - if: inputs.ash-codegen-check
+        run: MIX_ENV=test mix ash.codegen --check
+
+      - if: inputs.ex_dna
+        env:
+          ARGS: ${{ inputs.ex-dna-args }}
+        run: MIX_ENV=test mix ex_dna $ARGS
+
+      # The PLTs take minutes to build, so they are cached on what they are made from and saved
+      # even when dialyzer then reports a warning.
+      - id: plt
+        if: inputs.dialyzer
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.mix/dialyxir_*
+            _build/test/dialyxir_*
+          key: ${{ runner.os }}-plt-${{ hashFiles('mix.lock', '.tool-versions') }}
+
+      - if: inputs.dialyzer
+        run: MIX_ENV=test mix dialyzer --plt
+
+      - if: inputs.dialyzer && steps.plt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.mix/dialyxir_*
+            _build/test/dialyxir_*
+          key: ${{ runner.os }}-plt-${{ hashFiles('mix.lock', '.tool-versions') }}
+
+      - if: inputs.dialyzer
+        run: MIX_ENV=test mix dialyzer
+
+  test:
+    needs: [guard, build, format, audit, lint]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: ${{ fromJSON(needs.guard.outputs.partitions) }}
+
+    # An empty image starts no service.
+    services:
+      postgres:
+        image: ${{ inputs.postgres && inputs.postgres-image || '' }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    env:
+      POSTGRES_HOST: ${{ inputs.postgres && 'localhost' || '' }}
+      DB_HOST: ${{ inputs.postgres && 'localhost' || '' }}
+      MIX_TEST_PARTITION: ${{ matrix.partition }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - if: inputs.test-bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun-version }}
+          no-cache: true
+
+      - if: inputs.rustler
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      # The binaries the tailwind, esbuild and bun packages download into _build; the build job
+      # never downloads them, so they are kept apart from its cache, keyed on the config that
+      # names their versions. Restored after _build, which only adds files.
+      - if: inputs.tailwind-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            _build/tailwind-*
+            _build/esbuild-*
+            _build/bun-*
+          key: asset-bins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('config/*.exs') }}
+
+      - if: inputs.pre-test != ''
+        env:
+          MIX_ENV: test
+          PRE_TEST: ${{ inputs.pre-test }}
+        # Through env, not interpolated into the script, like every other caller-supplied shell here.
+        run: bash -eo pipefail -c "$PRE_TEST"
+
+      # `mix test`, not `MIX_ENV=test mix test`: an exported MIX_ENV outranks a dep's project_env.
+      - env:
+          N: ${{ inputs.partitions }}
+          ARGS: ${{ inputs.test-args }}
+        run: mix test $WAE --partitions "$N" $ARGS
+
+  assets:
+    if: inputs.assets
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun-version }}
+          no-cache: true
+
+      - run: bun install --frozen-lockfile && bun run test
+        working-directory: ${{ inputs.assets-dir }}
+
+  # Extra Elixir/OTP pairs: compile and test only; format, audit and lint ran on the main pair.
+  versions:
+    if: inputs.versions != ''
+    needs: [format, audit, lint]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: ${{ fromJSON(inputs.versions || '[]') }}
+
+    services:
+      postgres:
+        image: ${{ inputs.postgres && inputs.postgres-image || '' }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    env:
+      POSTGRES_HOST: ${{ inputs.postgres && 'localhost' || '' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          elixir-version: ${{ matrix.pair.elixir }}
+          otp-version: ${{ matrix.pair.otp }}
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - if: inputs.test-bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun-version }}
+          no-cache: true
+
+      - if: inputs.rustler
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ runner.os }}-mix-${{ matrix.pair.elixir }}-${{ matrix.pair.otp }}-${{ hashFiles('mix.lock') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-mix-${{ matrix.pair.elixir }}-${{ matrix.pair.otp }}-${{ hashFiles('mix.lock') }}-
+
+      - run: mix deps.get
+
+      - run: MIX_ENV=test mix compile $WAE
+
+      - if: inputs.pre-test != ''
+        env:
+          MIX_ENV: test
+          PRE_TEST: ${{ inputs.pre-test }}
+        # Through env, not interpolated into the script, like every other caller-supplied shell here.
+        run: bash -eo pipefail -c "$PRE_TEST"
+
+      - env:
+          ARGS: ${{ inputs.test-args }}
+        run: mix test $WAE $ARGS
+
+  subprojects:
+    if: inputs.subprojects != ''
+    needs: guard
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJSON(inputs.subprojects || '[]') }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        working-directory: .
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ${{ matrix.dir }}/deps
+            ${{ matrix.dir }}/_build
+          key: ${{ runner.os }}-sub-${{ matrix.dir }}-${{ hashFiles(format('{0}/mix.lock', matrix.dir), '.tool-versions') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-sub-${{ matrix.dir }}-${{ hashFiles(format('{0}/mix.lock', matrix.dir), '.tool-versions') }}-
+
+      - run: mix deps.get
+
+      - run: mix deps.unlock --check-unused
+
+      - run: mix hex.audit
+
+      - if: inputs.mix-audit
+        run: MIX_ENV=test mix deps.audit
+
+      - run: MIX_ENV=test mix compile $WAE
+
+      - run: MIX_ENV=test mix format --check-formatted
+
+      # A step the subproject needs before its tests (assets.setup, say) belongs in its `test` alias.
+      - run: mix test $WAE
+
+  extra-checks:
+    if: inputs.extra-checks != ''
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock', '.tool-versions') }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - env:
+          EXTRA_CHECKS: ${{ inputs.extra-checks }}
+        run: bash -eo pipefail -c "$EXTRA_CHECKS"
+
+  semgrep:
+    if: inputs.semgrep-path != ''
+    needs: guard
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v7
+
+      - env:
+          SCAN_PATH: ${{ inputs.semgrep-path }}
+        # Findings are reported, not fatal, as in chelekom's release; add --error to fail on them.
+        run: semgrep scan --config auto "$SCAN_PATH"
+
+  retire:
+    if: inputs.retire-path != ''
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - run: npm install -g retire
+
+      - env:
+          SCAN_PATH: ${{ inputs.retire-path }}
+        run: retire --path "$SCAN_PATH" --severity medium
+
+  # A repository's special builds (CMS bundles, Android APKs, ...), declared as data and run here.
+  # setup: elixir, java, gradle, node, bun, zig, rust, android-sdk. `artifacts` are uploaded, and a
+  # release attaches them to its GitHub release. `emulator` boots an Android emulator for `run`.
+  custom-jobs:
+    name: ${{ matrix.job.name }}
+    if: inputs.custom-jobs != ''
+    needs: [format, audit, lint]
+    runs-on: ${{ matrix.job.runs-on || 'ubuntu-latest' }}
+    timeout-minutes: ${{ matrix.job.timeout || 60 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(inputs.custom-jobs || '[]') }}
+    steps:
+      - if: ${{ !matrix.job.release-only || inputs.release }}
+        id: on
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - if: steps.on.outputs.run == 'true'
+        uses: actions/checkout@v7
+
+      - if: steps.on.outputs.run == 'true'
+        env:
+          V: ${{ inputs.version }}
+        run: echo "VERSION=${V:-$(sed -n 's/^  @version "\(.*\)"$/\1/p' mix.exs | head -1)}" >> "$GITHUB_ENV"
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: steps.on.outputs.run == 'true' && (inputs.elixir != '' || inputs.otp != '')
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'elixir')
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'elixir')
+        run: mix deps.get
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'java')
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.job.java-version || '17' }}
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'gradle')
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: ${{ matrix.job.gradle-version || 'current' }}
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'node')
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.job.node-version || '24' }}
+          package-manager-cache: false
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'bun')
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun-version }}
+          no-cache: true
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'zig')
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ matrix.job.zig-version || 'latest' }}
+
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'rust')
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'android-sdk')
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - if: steps.on.outputs.run == 'true' && contains(matrix.job.setup, 'android-sdk') && matrix.job.ndk-version
+        env:
+          NDK: ${{ matrix.job.ndk-version }}
+        run: sdkmanager --install "ndk;$NDK" "cmake;3.22.1"
+
+      - if: steps.on.outputs.run == 'true'
+        name: Run
+        env:
+          RUN: ${{ matrix.job.run }}
+          # Android signing, from the secrets the caller passes (declared above); empty when unset.
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash -euo pipefail -c "$RUN"
+
+      # The SDK, an NDK and a system image leave too little disk for the emulator's userdata.
+      - if: steps.on.outputs.run == 'true' && matrix.job.emulator
+        name: Free disk for the emulator
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL /usr/local/.ghcup
+          df -h /
+
+      - if: steps.on.outputs.run == 'true' && matrix.job.emulator
+        name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - if: steps.on.outputs.run == 'true' && matrix.job.emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.job.emulator.api-level || 34 }}
+          target: ${{ matrix.job.emulator.target || 'google_apis' }}
+          arch: x86_64
+          profile: ${{ matrix.job.emulator.profile || 'pixel_6' }}
+          ram-size: 4096M
+          disk-size: ${{ matrix.job.emulator.disk-size || '4096M' }}
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: ${{ matrix.job.emulator.script }}
+
+      - if: steps.on.outputs.run == 'true' && matrix.job.artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-custom-${{ matrix.job.name }}
+          path: ${{ matrix.job.artifacts }}
+          if-no-files-found: error

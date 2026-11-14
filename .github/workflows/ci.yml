@@ -2,7 +2,7 @@ name: CI
 
 # Every pull request, and every push to master. The Actions tab can start it by hand as well. A tag
 # does not run it: the commit a tag points at already ran here on master, and release.yml takes the
-# tag from there.
+# tag from there. The jobs live in mishka-ci.yml, which the other Mishka repositories call too.
 on:
   push:
     branches: [master]
@@ -14,228 +14,25 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# No job writes to the repository, so the token can only read it.
 permissions:
   contents: read
 
-env:
-  MIX_ENV: test
-  # setup-beam installs Hex from builds.hex.pm, and one slow response there failed a whole run
-  # ("Could not mix hex from any hex.pm mirror"). It tries these in order.
-  HEXPM_MIRRORS: |
-    https://builds.hex.pm
-    https://cdn.jsdelivr.net/hex
-
 jobs:
-  # Compiled once; the jobs below start from this build.
-  #
-  # A cache entry can never be changed once saved, so the key carries the commit: each run saves the
-  # build it made, and the next one starts from the nearest one before it (`restore-keys`) and
-  # compiles only what changed.
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      # Only this repository. The Mishka packages come from Hex at the versions mix.lock pins, as
-      # they do for any user of Mishka CMS, and mix.exs would use an __extensions/ checkout over Hex
-      # if it found one, so none is ever checked out here.
-      - uses: actions/checkout@v7
-
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
-
-      - uses: actions/cache@v6
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
-          restore-keys: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-
-
-      - run: mix deps.get
-
-      - run: mix compile --warnings-as-errors
-
-  # Beside the tests rather than in front of them.
-  format:
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v7
-
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
-
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
-          fail-on-cache-miss: true
-
-      # The formatter takes the DSL's paren-free calls (`table "pages"`, `reference :site, ...`)
-      # from the dependencies in .formatter.exs's import_deps, so it runs once they are fetched.
-      - run: mix format --check-formatted
-
-  # mix_audit checks mix.lock against the elixir-security-advisories database. It runs a task from a
-  # dependency, so it starts from the build like the format check. Hex's own audit is hex-audit.yml.
-  audit:
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v7
-
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
-
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
-          fail-on-cache-miss: true
-
-      - run: mix deps.audit
-
-  # SIX MACHINES, A SIXTH OF THE TEST FILES EACH. Most of the suite is `async: false` — it shares
-  # the runtime's global state — and runs one module at a time, so more cores do not make it faster
-  # and more machines do. Mix deals the test files out by `--partitions`, and each partition has its
-  # own Postgres and its own database (`config/test.exs` names it after MIX_TEST_PARTITION, for
-  # whatever number there is). The matrix and `--partitions` below must name the same number; nothing
-  # else depends on it: the build cache key is the same for every partition.
-  test:
-    needs: build
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        partition: [1, 2, 3, 4, 5, 6]
-
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-
-    env:
-      MIX_TEST_PARTITION: ${{ matrix.partition }}
-
-    steps:
-      - uses: actions/checkout@v7
-
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
-
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
-          fail-on-cache-miss: true
-
-      # The migrations are generated, not in git (they belong to the copy that loads the extensions):
-      # the Oban tables and the resources', before the test alias's `ash.setup` migrates the test
-      # database. The same script generates them for the image job below and for the release.
-      - run: .github/scripts/generate_migrations.sh ci
-
-      # --warnings-as-errors also fails on warnings in the test files, which a plain run can print
-      # while a test captures stderr, where nobody sees them — each in the partition that compiles it.
-      #
-      # THE SLOWEST FILES ARE TAGGED `:slow` AND LEFT OUT OF A PULL REQUEST (`test/test_helper.exs`
-      # excludes them by default): each takes over thirty seconds on its own, compiling a whole site,
-      # its pages and its components or running the dev seeds, and together they were most of the
-      # time a pull request waited. They run on a push to master, on a tag and when started by hand,
-      # i.e. whenever the event is not a pull request, so what a pull request skips is run once it
-      # is merged.
-      - run: mix test --warnings-as-errors --partitions 6 ${{ github.event_name != 'pull_request' && '--include slow' || '' }}
-        env:
-          POSTGRES_HOST: localhost
-          DB_HOST: localhost
-
-  assets:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.4"
-      - run: bun install --frozen-lockfile && bun run test
-        working-directory: assets
-
-  # The image, end to end, from a clean checkout: generate the migrations (they are not in git),
-  # build it, and boot it the way a deploy does. The smoke test migrates an empty PostgreSQL, waits for
-  # the HEALTHCHECK and asks the server what it answers before the CMS is installed, so a build that
-  # starts but cannot migrate or serve fails here and not in a deploy. The Dockerfile's own guard
-  # checks that the migrations generated here are the ones the resources describe.
-  #
-  # amd64 only: release.yml builds and tests both architectures, natively, and publishes the image.
-  #
-  # Not on a pull request: it is the slowest job, and a pull request that passes the tests builds the
-  # same image once it is merged. It runs on a push to master and when started by hand.
-  docker:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/master')
-    runs-on: ubuntu-latest
-    needs: [test, assets]
-    steps:
-      - uses: actions/checkout@v7
-
-      # .tool-versions names the same Elixir and OTP as the Dockerfile's builder image.
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          hexpm-mirrors: ${{ env.HEXPM_MIRRORS }}
-
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions', 'mix.lock') }}-${{ github.sha }}
-          fail-on-cache-miss: true
-
-      # Generated once, here, and sent to Docker with the rest of the checkout: the image takes the
-      # migrations and the snapshots from the build context, as it does for anybody's own copy.
-      - run: .github/scripts/generate_migrations.sh ci
-
-      - uses: docker/setup-buildx-action@v4
-
-      # `load: true` puts the image in the local Docker, for the smoke test. Nothing is pushed.
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          load: true
-          tags: mishka-cms:ci
-          provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - run: .github/scripts/smoke_test.sh mishka-cms:ci
+  ci:
+    uses: ./.github/workflows/mishka-ci.yml
+    with:
+      postgres: true
+      partitions: 6
+      # The migrations are not in git: each partition generates them before its tests.
+      pre-test: .github/scripts/generate_migrations.sh ci
+      test-args: ${{ github.event_name != 'pull_request' && '--include slow' || '' }}
+      credo: false
+      dialyzer: false
+      ex_dna: false
+      assets: true
+      bun-version: "1.4.4"
+      # The image is built and smoke-tested on master and by hand; nothing is pushed.
+      custom-jobs: >-
+        ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
+        && '[{"name":"docker","setup":["elixir"],"run":"MIX_ENV=test .github/scripts/generate_migrations.sh ci && docker build -t mishka-cms:ci . && .github/scripts/smoke_test.sh mishka-cms:ci"}]'
+        || '' }}

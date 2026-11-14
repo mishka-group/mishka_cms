@@ -1,0 +1,565 @@
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Mishka release
+
+# Release button (workflow_dispatch with a version): bump mix.exs + CHANGELOG, commit, tag vX and
+# push them with the GitHub App's token; nothing else. The tag push starts the release run:
+# mishka-ci.yml on the tag's commit, beside the ebin and NIF builds -> GitHub release with those
+# files -> Hex publish (staged) and the hex .tar added to the release -> notify the packages in
+# .github/mishka-dependents.json. A run without a version and without a tag is a dry run.
+# The caller's own file must be named release.yml: Hex's workload identity matches it.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version to release (empty releases the pushed tag, or dry-runs mix.exs's version)
+        type: string
+        default: ""
+      publish:
+        description: Publish to Hex, staged until an owner approves it on hex.pm (false runs mix hex.publish --dry-run)
+        type: boolean
+        default: true
+      package:
+        description: Hex package name (empty is the repository name)
+        type: string
+        default: ""
+      github-release:
+        description: Create a GitHub release for the tag with the hex .tar and the files below (always on with rustler-precompiled)
+        type: boolean
+        default: false
+      ebin:
+        description: Add a compiled (:prod) ebin tarball to the GitHub release
+        type: boolean
+        default: false
+      ebin-paths:
+        description: What goes in the ebin tarball besides ebin, relative to _build/prod/lib/<app>
+        type: string
+        default: priv
+      custom-jobs:
+        description: ci.yml's custom-jobs; their artifacts go on the GitHub release
+        type: string
+        default: ""
+      rustler-precompiled:
+        description: The RustlerPrecompiled module (e.g. MyLib.Native); empty skips the NIF builds
+        type: string
+        default: ""
+      rustler-crate:
+        description: The crate's directory, e.g. native/my_lib_nif; its name is the crate name
+        type: string
+        default: ""
+      nif-version:
+        description: NIF version the NIFs are built for; must be in the module's nif_versions
+        type: string
+        default: "2.15"
+      nif-targets:
+        description: 'JSON list of {target, os, cross, cross-version}; add aarch64-linux-android or aarch64-apple-ios here'
+        type: string
+        default: >-
+          [{"target":"x86_64-unknown-linux-gnu","os":"ubuntu-24.04"},
+          {"target":"x86_64-unknown-linux-musl","os":"ubuntu-24.04","cross":true},
+          {"target":"aarch64-unknown-linux-gnu","os":"ubuntu-24.04","cross":true},
+          {"target":"aarch64-unknown-linux-musl","os":"ubuntu-24.04","cross":true},
+          {"target":"aarch64-apple-darwin","os":"macos-15"},
+          {"target":"x86_64-apple-darwin","os":"macos-15"},
+          {"target":"x86_64-pc-windows-msvc","os":"windows-2025"}]
+      ci-repo:
+        description: Repository that holds .github/mishka-dependents.json
+        type: string
+        default: mishka-group/mishka_cms
+      allowed-owners:
+        type: string
+        default: mishka-group
+      # The ci.yml inputs, passed through unchanged.
+      elixir:
+        type: string
+        default: ""
+      otp:
+        type: string
+        default: ""
+      mishka-deps:
+        type: string
+        default: hex
+      rustler:
+        type: boolean
+        default: false
+      postgres:
+        type: boolean
+        default: false
+      postgres-image:
+        type: string
+        default: postgres:18
+      partitions:
+        type: number
+        default: 1
+      pre-test:
+        type: string
+        default: ""
+      test-args:
+        type: string
+        default: ""
+      mix-audit:
+        type: boolean
+        default: true
+      hex-audit:
+        type: boolean
+        default: true
+      unused-deps:
+        type: boolean
+        default: true
+      warnings-as-errors:
+        type: boolean
+        default: true
+      test-bun:
+        type: boolean
+        default: false
+      credo:
+        type: boolean
+        default: true
+      credence-task:
+        type: string
+        default: ""
+      sobelow:
+        type: boolean
+        default: false
+      dialyzer:
+        type: boolean
+        default: true
+      ex_dna:
+        type: boolean
+        default: true
+      ex-dna-args:
+        type: string
+        default: ""
+      spark-cheat-sheets:
+        type: boolean
+        default: false
+      ash-codegen-check:
+        type: boolean
+        default: false
+      assets:
+        type: boolean
+        default: false
+      assets-dir:
+        type: string
+        default: assets
+      bun-version:
+        type: string
+        default: latest
+      tailwind-cache:
+        type: boolean
+        default: false
+      versions:
+        type: string
+        default: ""
+      subprojects:
+        type: string
+        default: ""
+      extra-checks:
+        type: string
+        default: ""
+      semgrep-path:
+        type: string
+        default: ""
+      retire-path:
+        type: string
+        default: ""
+    secrets:
+      MISHKA_CI_APP_PRIVATE_KEY:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  MISHKA_DEPS: ${{ inputs.mishka-deps }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tagged: ${{ steps.v.outputs.tagged }}
+    steps:
+      - name: Only allowed owners run this workflow
+        env:
+          OWNER: ${{ github.repository_owner }}
+          ALLOWED: ${{ inputs.allowed-owners }}
+        run: |
+          if [[ " $ALLOWED " != *" $OWNER "* ]]; then
+            echo "::error::$OWNER may not use this workflow (allowed: $ALLOWED)"
+            exit 1
+          fi
+
+      # The Release button only commits and tags; the tag push starts the release run. A push made
+      # with GITHUB_TOKEN starts no workflow, so it is made with the GitHub App's token.
+      - if: inputs.version != ''
+        env:
+          CLIENT_ID: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -z "$CLIENT_ID" ]; then
+            echo "::error::GitHub App not configured: push the tag v$VERSION yourself"
+            exit 1
+          fi
+
+      - id: token
+        if: inputs.version != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MISHKA_CI_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.token.outputs.token || github.token }}
+
+      - id: v
+        env:
+          VERSION: ${{ inputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          current="$(sed -n 's/^  @version "\(.*\)"$/\1/p' mix.exs | head -1)"
+          [ -n "$current" ] || { echo "::error file=mix.exs::no @version in mix.exs"; exit 1; }
+
+          if [ -z "$VERSION" ]; then
+            # A pushed tag must match mix.exs; a run without a tag is a dry run of mix.exs's version.
+            if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$current" ]; then
+              echo "::error file=mix.exs::tag $GITHUB_REF_NAME does not match @version $current"
+              exit 1
+            fi
+            echo "version=$current" >> "$GITHUB_OUTPUT"
+            echo "tagged=$([ "$GITHUB_REF_TYPE" = tag ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::$VERSION is not a version like 0.1.2 or 0.1.2-alpha.1"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::release from $DEFAULT_BRANCH, not $GITHUB_REF_NAME"
+            exit 1
+          fi
+          if [ -n "$(git ls-remote --tags origin "refs/tags/v$VERSION")" ]; then
+            echo "::error::tag v$VERSION already exists"
+            exit 1
+          fi
+
+          sed -i "s/^  @version \".*\"$/  @version \"$VERSION\"/" mix.exs
+
+          # Mishka rule: the CHANGELOG heading is the plain version (0.0.5); its alphas go under it.
+          base="${VERSION%%-*}"
+          if [ ! -f CHANGELOG.md ]; then
+            printf '# Changelog for %s %s\n' "$GITHUB_REPOSITORY" "$base" > CHANGELOG.md
+          else
+            top="$(grep -m1 '^# ' CHANGELOG.md || true)"
+            if [ "${top##* }" != "$base" ]; then
+              name="$(echo "$top" | sed -n 's/^# Changelog for \(.*\) [^ ]*$/\1/p')"
+              { printf '# Changelog for %s %s\n\n' "${name:-$GITHUB_REPOSITORY}" "$base"; cat CHANGELOG.md; } > CHANGELOG.new
+              mv CHANGELOG.new CHANGELOG.md
+            fi
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): v$VERSION"
+          git tag "v$VERSION"
+          git push origin "HEAD:$DEFAULT_BRANCH" "v$VERSION"
+          echo "### v$VERSION tagged; the tag push starts the release run" >> "$GITHUB_STEP_SUMMARY"
+
+  # Everything below runs on a tag push (the release) or a run without a version (dry run).
+  ci:
+    if: inputs.version == ''
+    needs: prepare
+    # ./ is this repository at the same ref the caller asked for; it checks out the run's commit.
+    uses: ./.github/workflows/mishka-ci.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      release: true
+      custom-jobs: ${{ inputs.custom-jobs }}
+      allowed-owners: ${{ inputs.allowed-owners }}
+      elixir: ${{ inputs.elixir }}
+      otp: ${{ inputs.otp }}
+      mishka-deps: ${{ inputs.mishka-deps }}
+      rustler: ${{ inputs.rustler }}
+      postgres: ${{ inputs.postgres }}
+      postgres-image: ${{ inputs.postgres-image }}
+      partitions: ${{ inputs.partitions }}
+      pre-test: ${{ inputs.pre-test }}
+      test-args: ${{ inputs.test-args }}
+      mix-audit: ${{ inputs.mix-audit }}
+      hex-audit: ${{ inputs.hex-audit }}
+      unused-deps: ${{ inputs.unused-deps }}
+      warnings-as-errors: ${{ inputs.warnings-as-errors }}
+      test-bun: ${{ inputs.test-bun }}
+      credo: ${{ inputs.credo }}
+      credence-task: ${{ inputs.credence-task }}
+      sobelow: ${{ inputs.sobelow }}
+      dialyzer: ${{ inputs.dialyzer }}
+      ex_dna: ${{ inputs.ex_dna }}
+      ex-dna-args: ${{ inputs.ex-dna-args }}
+      spark-cheat-sheets: ${{ inputs.spark-cheat-sheets }}
+      ash-codegen-check: ${{ inputs.ash-codegen-check }}
+      assets: ${{ inputs.assets }}
+      assets-dir: ${{ inputs.assets-dir }}
+      bun-version: ${{ inputs.bun-version }}
+      tailwind-cache: ${{ inputs.tailwind-cache }}
+      versions: ${{ inputs.versions }}
+      subprojects: ${{ inputs.subprojects }}
+      extra-checks: ${{ inputs.extra-checks }}
+      semgrep-path: ${{ inputs.semgrep-path }}
+      retire-path: ${{ inputs.retire-path }}
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  ebin:
+    if: inputs.ebin && inputs.version == ''
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      MIX_ENV: prod
+      # A precompiled NIF is not released yet here, so build it from source.
+      RUSTLER_PRECOMPILED_FORCE_BUILD_ALL: ${{ inputs.rustler-precompiled != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - if: inputs.rustler || inputs.rustler-precompiled != ''
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - run: mix deps.get
+
+      - env:
+          PATHS: ${{ inputs.ebin-paths }}
+        run: |
+          set -euo pipefail
+          mix compile
+          app="$(sed -n 's/^ *app: :\([a-z0-9_]*\),.*/\1/p' mix.exs | head -1)"
+          src="_build/prod/lib/$app"
+          out="dist/$app-$VERSION-ebin.tar.gz"
+          test -f "$src/ebin/$app.app" || { echo "::error::$src/ebin/$app.app not found"; exit 1; }
+          mkdir -p dist
+          extra=""
+          [ -d "$src/consolidated" ] && extra="consolidated"
+          # -h follows the priv link into the checkout; PATHS names only what the package ships.
+          # shellcheck disable=SC2086
+          tar -czhf "$out" -C "$src" ebin $PATHS $extra
+          beams="$(tar -tzf "$out" | grep -c '^ebin/.*\.beam$' || true)"
+          [ "$beams" -gt 0 ] || { echo "::error::$out has no .beam files"; exit 1; }
+          echo "$out: $beams modules"
+          echo "ebin: $beams modules, OTP $(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().'), $(elixir -v | tail -1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-ebin
+          path: dist/*
+          if-no-files-found: error
+
+  # rustler_precompiled's standard build: one NIF tarball per target.
+  nifs:
+    if: inputs.rustler-precompiled != '' && inputs.version == ''
+    needs: prepare
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(inputs.nif-targets) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: ${{ matrix.job.target }}
+
+      - id: crate
+        shell: bash
+        env:
+          CRATE: ${{ inputs.rustler-crate }}
+        run: echo "name=$(basename "$CRATE")" >> "$GITHUB_OUTPUT"
+
+      - id: build
+        uses: philss/rustler-precompiled-action@67ed0cc2d6a423e4c4cd9ad651dcc6c90f802cdb # v1.1.5
+        with:
+          project-name: ${{ steps.crate.outputs.name }}
+          project-version: ${{ needs.prepare.outputs.version }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ inputs.nif-version }}
+          # Empty, not false: the action reads any non-empty string as true.
+          use-cross: ${{ matrix.job.cross }}
+          cross-version: ${{ matrix.job.cross-version || 'v0.2.4' }}
+          project-dir: ${{ inputs.rustler-crate }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-nif-${{ matrix.job.target }}
+          path: ${{ steps.build.outputs.file-path }}
+          if-no-files-found: error
+
+  # Before Hex: rustler_precompiled's checksum file is made from the NIFs on this release.
+  github-release:
+    if: ${{ !failure() && !cancelled() && inputs.version == '' && needs.prepare.outputs.tagged == 'true' && (inputs.github-release || inputs.rustler-precompiled != '') }}
+    needs: [prepare, ci, ebin, nifs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      - run: |
+          set -euo pipefail
+          mkdir -p release
+          ( cd release && if [ -n "$(ls -A)" ]; then sha256sum -- * > SHA256SUMS.txt; fi )
+          ls -la release
+
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: v${{ needs.prepare.outputs.version }}
+          generate_release_notes: true
+          # 0.0.5-alpha.1 and the like are pre-releases, so they never become "Latest".
+          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
+          files: release/*
+
+  publish:
+    if: ${{ !failure() && !cancelled() && inputs.version == '' }}
+    needs: [prepare, ci, github-release]
+    runs-on: ubuntu-latest
+    # Must match the environment set on the package's hex.pm Workload identities tab.
+    environment: release
+    permissions:
+      id-token: write
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pin the requested Elixir and OTP in .tool-versions
+        if: inputs.elixir != '' || inputs.otp != ''
+        env:
+          ELIXIR: ${{ inputs.elixir }}
+          OTP: ${{ inputs.otp }}
+        run: |
+          touch .tool-versions
+          if [ -n "$OTP" ]; then sed -i '/^erlang /d' .tool-versions; echo "erlang $OTP" >> .tool-versions; fi
+          if [ -n "$ELIXIR" ]; then sed -i '/^elixir /d' .tool-versions; echo "elixir $ELIXIR" >> .tool-versions; fi
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - if: inputs.rustler || inputs.rustler-precompiled != ''
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      # Workload identity and staged publishing need Hex 2.7 or later.
+      - run: mix local.hex --force && mix hex.info
+
+      - run: mix deps.get
+
+      # The checksum file the package ships, from the NIFs on the GitHub release. The module is
+      # compiled from source for this; GITHUB_TOKEN is there for a base_url that reads a private
+      # release.
+      - if: inputs.rustler-precompiled != '' && needs.prepare.outputs.tagged == 'true'
+        env:
+          MODULE: ${{ inputs.rustler-precompiled }}
+          RUSTLER_PRECOMPILED_FORCE_BUILD_ALL: "true"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mix rustler_precompiled.download "$MODULE" --all --print
+
+      - run: mix hex.build
+
+      # A run without a tag (Release with no version) is always a dry run.
+      - if: ${{ !inputs.publish || needs.prepare.outputs.tagged != 'true' }}
+        run: mix hex.publish --dry-run --yes
+
+      # No HEX_API_KEY here: with one set, Hex would publish with the key instead of the identity.
+      # --wait waits for a staged release to be approved on hex.pm.
+      - if: inputs.publish && needs.prepare.outputs.tagged == 'true'
+        run: mix hex.publish --yes --wait
+
+      - if: needs.github-release.result == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          app="$(sed -n 's/^ *app: :\([a-z0-9_]*\),.*/\1/p' mix.exs | head -1)"
+          gh release upload "v$VERSION" "$app-$VERSION.tar" --clobber
+
+      - env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          echo "### $GITHUB_REPOSITORY v$VERSION, published to Hex: $PUBLISH" >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    # Skipped jobs earlier in the chain (ebin, nifs, ...) would skip this one without the if.
+    if: ${{ !failure() && !cancelled() && needs.publish.result == 'success' }}
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - id: app
+        env:
+          CLIENT_ID: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
+        run: |
+          if [ -z "$CLIENT_ID" ]; then
+            echo "::notice::notify skipped: no GitHub App (set vars.MISHKA_CI_APP_CLIENT_ID and secrets.MISHKA_CI_APP_PRIVATE_KEY)"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: token
+        if: steps.app.outputs.ok == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MISHKA_CI_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - if: steps.app.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          CI_REPO: ${{ inputs.ci-repo }}
+          PACKAGE: ${{ inputs.package || github.event.repository.name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$CI_REPO/contents/.github/mishka-dependents.json" -H "Accept: application/vnd.github.raw" > dependents.json
+          for repo in $(jq -r --arg p "$PACKAGE" '.[$p] // [] | .[]' dependents.json); do
+            echo "upstream-released $PACKAGE $VERSION -> $repo"
+            gh api "repos/$repo/dispatches" -f event_type=upstream-released \
+              -f "client_payload[package]=$PACKAGE" -f "client_payload[version]=$VERSION"
+          done
