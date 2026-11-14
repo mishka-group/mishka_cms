@@ -34,7 +34,7 @@ Done = Hex shows the version, the GitHub release has the ebin tarball, the hex `
 
 ## 3. After the release
 
-`notify` sends `upstream-released` to every repo in `mishka-dependents.json`; each opens a PR `deps/<package>-<version>`. Check them with `gh pr list -R mishka-group/<dep> --head deps/<package>-<version>`. They never merge themselves; merge only on the owner's word, when green.
+`notify` sends `upstream-released` to every repo in `mishka-dependents.json`; each adds the bump to its one rolling PR `deps/mishka` ("deps: update Mishka packages", opened if none is open), so releases made one after the other are tested together. Check them with `gh pr list -R mishka-group/<dep> --head deps/mishka`. They never merge themselves; merge only on the owner's word, when green. Release tags stay the owner's.
 
 Order across the CMS: mishka_slug / gervaz / installer → mishka_cms_core → blog, document, builder, migration, auth extensions → the mishka_cms host. The mishka.tools site takes new releases only when the owner says so.
 
@@ -45,4 +45,4 @@ When a release problem is solved, add one line here — symptom → cause → fi
 - Release button run failed at `git commit` with nothing to commit → mix.exs already held the typed version → fixed: the button tags the current commit then.
 - Hex publish went out without asking → staged publishing was off for that package → enable it before the first CI release.
 - A tag pushed before its workflow could parse leaves no release → after the CI fix, the owner deletes and re-pushes the tag: `git push origin :refs/tags/v<version> && git push origin v<version>` (nothing was published, so this is safe).
-- The host's bump PR fails `record_labels_gettext_test` (`labels missing from …errors.pot`) → core's .pot already dropped labels that the Hex release of an extension still declares (core alpha.18 vs blog alpha.8) → release the extensions that core's change follows before bumping the host; add their bumps to the host's PR.
+- The host's bump PR fails `record_labels_gettext_test` (`labels missing from …errors.pot`) → core's .pot already dropped labels that the Hex release of an extension still declares (core alpha.18 vs blog alpha.8) → release the extensions that core's change follows before bumping the host; the rolling `deps/mishka` PR now collects them on its own.
