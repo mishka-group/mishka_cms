@@ -6,7 +6,8 @@ name: Mishka deps bump
 
 # Called on `repository_dispatch: upstream-released` with {package, version}. Moves the package's
 # requirement in mix.exs (`{:pkg, "~> X"}` or `mishka_dep(:pkg, "~> X")`) to the new version (`"~> X"`, or `tag: "vX"` for a git dep), runs
-# `mix deps.update <package>` and opens a PR from deps/<package>-<version>. Never merges it.
+# `mix deps.update <package>` and commits it to the one rolling branch deps/mishka, whose PR collects
+# every Mishka release until someone merges it by hand. Never merges it.
 on:
   workflow_call:
     inputs:
@@ -52,6 +53,7 @@ jobs:
       PACKAGE: ${{ inputs.package }}
       VERSION: ${{ inputs.version }}
       MISHKA_DEPS: ${{ inputs.mishka-deps }}
+      BRANCH: deps/mishka
     steps:
       - name: Only allowed owners, and a sane package and version
         env:
@@ -74,9 +76,11 @@ jobs:
           client-id: ${{ vars.MISHKA_CI_APP_CLIENT_ID }}
           private-key: ${{ secrets.MISHKA_CI_APP_PRIVATE_KEY }}
 
+      # Full history: the rolling branch is merged with the default branch, never rebuilt.
       - uses: actions/checkout@v7
         with:
           token: ${{ steps.token.outputs.token || github.token }}
+          fetch-depth: 0
 
       - name: Pin the requested Elixir and OTP in .tool-versions
         if: inputs.elixir != '' || inputs.otp != ''
@@ -93,55 +97,152 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
+      # Puts the bump on deps/mishka: an open PR's branch takes the default branch merged in; a
+      # branch whose PR was merged or closed starts again from the default branch. Plain pushes
+      # only, so commits a person added to the branch stay. Two releases at once: the later push is
+      # refused, and the run starts over from a fresh fetch.
       - id: edit
         env:
           GH_TOKEN: ${{ steps.token.outputs.token || github.token }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          branch="deps/$PACKAGE-$VERSION"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          [ -n "$DEFAULT" ] || DEFAULT="$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)"
           echo "pushed=false" >> "$GITHUB_OUTPUT"
-          if [ -n "$(git ls-remote --heads origin "$branch")" ]; then
-            # An earlier run may have pushed the branch and failed before its PR; open the PR then.
-            if [ -n "$(gh pr list --head "$branch" --state all --json number --jq '.[].number')" ]; then
-              echo "::notice::$branch has its PR already; nothing to do"
-              echo "changed=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "::notice::$branch exists without a PR; opening it"
-              echo "changed=true" >> "$GITHUB_OUTPUT"
-              echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "open-pr=false" >> "$GITHUB_OUTPUT"
+
+          # Prints lt, eq or gt for the version mix.exs asks for ("1.7" reads as 1.7.0) against $2.
+          compare() {
+            elixir -e '
+              [current, new] = System.argv()
+              [base | pre] = String.split(current, "-", parts: 2)
+              base = if length(String.split(base, ".")) == 2, do: base <> ".0", else: base
+              case {Version.parse(Enum.join([base | pre], "-")), Version.parse(new)} do
+                {{:ok, a}, {:ok, b}} -> IO.puts(Version.compare(a, b))
+                _ -> IO.puts("lt")
+              end' "$1" "$2" < /dev/null
+          }
+
+          # Moves one package's requirement in mix.exs to a version; skips a version that mix.exs
+          # already asks for, or a newer one. Adds the package to $touched when mix.exs changed.
+          bump() {
+            local pkg="$1" ver="$2" line text current=""
+            local re_tag='tag: "v?([^"]+)"' re_req='"~> ([^"]+)"'
+            line="$(grep -nE "(\{|\()[[:space:]]*:$pkg," mix.exs | head -1 | cut -d: -f1 || true)"
+            [ -n "$line" ] || { echo "::notice::mix.exs does not depend on $pkg"; return 0; }
+            text="$(sed -n "${line}p" mix.exs)"
+            if [[ "$text" == *path:* ]]; then
+              echo "::notice::mix.exs takes $pkg from a path; nothing to bump"
+              return 0
             fi
-            exit 0
-          fi
+            if [[ "$text" =~ $re_tag ]] || [[ "$text" =~ $re_req ]]; then current="${BASH_REMATCH[1]}"; fi
+            if [ -n "$current" ] && [ "$(compare "$current" "$ver")" != lt ]; then
+              echo "::notice::mix.exs asks for $pkg $current already; skipping $ver"
+              return 0
+            fi
+            if [[ "$text" =~ $re_tag ]]; then
+              sed -i -E "${line}s/tag: \"[^\"]*\"/tag: \"v$ver\"/" mix.exs
+            else
+              sed -i -E "${line}s/\"~> [^\"]*\"/\"~> $ver\"/" mix.exs
+            fi
+            touched+=("$pkg")
+          }
 
-          line="$(grep -nE "(\{|\()[[:space:]]*:$PACKAGE," mix.exs | head -1 | cut -d: -f1 || true)"
-          [ -n "$line" ] || { echo "::notice::mix.exs does not depend on $PACKAGE"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          # "package version" per line, from the bump commits the branch holds over the default branch.
+          bumps_on() {
+            git log --reverse --format=%s "origin/$DEFAULT..$1" \
+              | sed -nE 's/^deps: update ([a-z][a-z0-9_]*) to ([0-9A-Za-z.+-]+)$/\1 \2/p'
+          }
 
-          if sed -n "${line}p" mix.exs | grep -q 'path:'; then
-            echo "::notice::mix.exs takes $PACKAGE from a path; nothing to bump"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          for attempt in 1 2 3 4 5; do
+            git merge --abort 2>/dev/null || true
+            git reset -q --hard
+            git fetch -q origin "+refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT"
+            tip="$(git ls-remote --heads origin "$BRANCH" | cut -f1)"
+            open_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+            fresh=true
+            delete=false
+            if [ -n "$tip" ]; then
+              git fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+              if [ -n "$open_pr" ]; then
+                fresh=false
+              elif git merge-base --is-ancestor "$tip" "origin/$DEFAULT"; then
+                echo "::notice::$BRANCH was merged already; starting again from $DEFAULT"
+              elif [[ " $(gh pr list --head "$BRANCH" --state all --json headRefOid --jq '[.[].headRefOid] | join(" ")') " == *" $tip "* ]]; then
+                echo "::notice::$BRANCH's PR was closed; starting again from $DEFAULT"
+                delete=true
+              else
+                # Pushed by a run that has not opened its PR yet, or failed before it.
+                fresh=false
+              fi
+            fi
 
-          if sed -n "${line}p" mix.exs | grep -q 'tag: "'; then
-            sed -i -E "${line}s/tag: \"[^\"]*\"/tag: \"v$VERSION\"/" mix.exs
-          else
-            sed -i -E "${line}s/\"~> [^\"]*\"/\"~> $VERSION\"/" mix.exs
-          fi
-          mix deps.update "$PACKAGE"
+            touched=()
+            resolved=false
+            if $fresh; then
+              git checkout -q -B "$BRANCH" "origin/$DEFAULT"
+            else
+              git checkout -q -B "$BRANCH" "origin/$BRANCH"
+              earlier="$(bumps_on HEAD)"
+              if ! git merge -q --no-edit "origin/$DEFAULT"; then
+                others="$(git diff --name-only --diff-filter=U | grep -vxE 'mix\.(exs|lock)' || true)"
+                if [ -n "$others" ]; then
+                  git merge --abort
+                  echo "::error::merging $DEFAULT into $BRANCH conflicts in: $others. Merge it by hand."
+                  exit 1
+                fi
+                echo "::notice::merging $DEFAULT conflicts in mix.exs or mix.lock; taking $DEFAULT's and applying the bumps again"
+                git checkout "origin/$DEFAULT" -- mix.exs mix.lock
+                git commit -q --no-edit
+                resolved=true
+                while read -r pkg ver; do
+                  [ -n "$pkg" ] && bump "$pkg" "$ver"
+                done <<< "$earlier"
+              fi
+            fi
 
-          if git diff --quiet; then
-            echo "::notice::$PACKAGE is at $VERSION already"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            git diff
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
+            bump "$PACKAGE" "$VERSION"
+            if [ "${#touched[@]}" -gt 0 ]; then
+              mix deps.update "${touched[@]}"
+            fi
+            if git diff --quiet; then
+              if ! $resolved; then
+                echo "::notice::nothing to commit for $PACKAGE $VERSION"
+                if ! $fresh && [ -z "$open_pr" ]; then
+                  git reset -q --hard "origin/$BRANCH"
+                  echo "open-pr=true" >> "$GITHUB_OUTPUT"
+                fi
+                exit 0
+              fi
+            else
+              git diff
+              if [[ " ${touched[*]} " == *" $PACKAGE "* ]]; then
+                git commit -qam "deps: update $PACKAGE to $VERSION"
+              else
+                git commit -qam "deps: apply the Mishka bumps again on $DEFAULT's mix.exs and mix.lock"
+              fi
+            fi
 
-      - if: steps.edit.outputs.changed == 'true'
+            if $delete; then
+              git push -q origin --delete "$BRANCH" || true
+            fi
+            if git push origin "HEAD:refs/heads/$BRANCH"; then
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+              echo "open-pr=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::warning::push $attempt of $BRANCH was refused; fetching again"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push $BRANCH after 5 tries"
+          exit 1
+
+      - if: steps.edit.outputs.open-pr == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token || github.token }}
-          BRANCH: ${{ steps.edit.outputs.branch }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
           CI_WORKFLOW: ${{ inputs.ci-workflow }}
           APP: ${{ steps.token.outputs.token != '' }}
           PUSHED: ${{ steps.edit.outputs.pushed }}
@@ -150,28 +251,40 @@ jobs:
           REVIEWERS: ${{ vars.MISHKA_CI_PR_REVIEWERS }}
         run: |
           set -euo pipefail
-          if [ "$PUSHED" != "true" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git switch -c "$BRANCH"
-            git commit -am "deps: update $PACKAGE to $VERSION"
-            git push -u origin "$BRANCH"
+          [ -n "$DEFAULT" ] || DEFAULT="$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)"
+          git fetch -q origin "+refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT" "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          # The newest version per package, from the branch's own bump commits.
+          rows="$(git log --reverse --format=%s "origin/$DEFAULT..origin/$BRANCH" \
+            | sed -nE 's/^deps: update ([a-z][a-z0-9_]*) to ([0-9A-Za-z.+-]+)$/\1 \2/p' \
+            | awk '{ if (!($1 in v)) k[++n] = $1; v[$1] = $2 } END { for (i = 1; i <= n; i++) print "| " k[i] " | " v[k[i]] " |" }')"
+          body="$(printf '%s\n\n%s\n%s\n%s\n\n%s' \
+            "Mishka packages released since this PR opened. Each new release lands here as one more commit." \
+            "| Package | Version |" "| --- | --- |" "$rows" \
+            "Merge it by hand once CI is green.")"
+
+          url="$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')"
+          new=false
+          if [ -z "$url" ]; then
+            # Another run may open it at the same moment; take that one then.
+            url="$(gh pr create --head "$BRANCH" --title "deps: update Mishka packages" --body "$body")" \
+              && new=true \
+              || url="$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url')"
           fi
-          url="$(gh pr create --head "$BRANCH" \
-            --title "deps: update $PACKAGE to $VERSION" \
-            --body "$PACKAGE $VERSION was released. This PR moves mix.exs and mix.lock to it; merge it by hand once CI is green.")"
+          gh pr edit "$url" --body "$body"
           echo "$url"
-          # A login GitHub refuses leaves the PR open with a warning rather than failing the run.
-          logins='^[A-Za-z0-9-]+(,[A-Za-z0-9-]+)*$'
-          if [ -n "$ASSIGNEES" ]; then
-            [[ "$ASSIGNEES" =~ $logins ]] && gh pr edit "$url" --add-assignee "$ASSIGNEES" \
-              || echo "::warning::could not assign $ASSIGNEES"
+          if $new; then
+            # A login GitHub refuses leaves the PR open with a warning rather than failing the run.
+            logins='^[A-Za-z0-9-]+(,[A-Za-z0-9-]+)*$'
+            if [ -n "$ASSIGNEES" ]; then
+              [[ "$ASSIGNEES" =~ $logins ]] && gh pr edit "$url" --add-assignee "$ASSIGNEES" \
+                || echo "::warning::could not assign $ASSIGNEES"
+            fi
+            if [ -n "$REVIEWERS" ]; then
+              [[ "$REVIEWERS" =~ $logins ]] && gh pr edit "$url" --add-reviewer "$REVIEWERS" \
+                || echo "::warning::could not request a review from $REVIEWERS"
+            fi
           fi
-          if [ -n "$REVIEWERS" ]; then
-            [[ "$REVIEWERS" =~ $logins ]] && gh pr edit "$url" --add-reviewer "$REVIEWERS" \
-              || echo "::warning::could not request a review from $REVIEWERS"
-          fi
-          # GITHUB_TOKEN may start a workflow_dispatch, so CI still runs on the PR's commit.
-          if [ "$APP" != "true" ]; then
+          # GITHUB_TOKEN may start a workflow_dispatch, so CI still runs on the PR's new commit.
+          if [ "$APP" != "true" ] && [ "$PUSHED" = "true" ]; then
             gh workflow run "$CI_WORKFLOW" --ref "$BRANCH"
           fi

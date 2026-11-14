@@ -15,7 +15,7 @@ One CI for every public mishka-group repo, kept in `mishka-group/mishka_cms/.git
 |---|---|
 | `workflows/mishka-ci.yml` | build → format/audit/lint → tests (partitions) → custom jobs |
 | `workflows/mishka-release.yml` | Release button pushes `v<version>`; the tag push runs CI, ebin/NIFs, GitHub release, staged Hex publish, notify |
-| `workflows/mishka-deps-bump.yml` | on `upstream-released`, bumps the dep and opens a PR (never merges) |
+| `workflows/mishka-deps-bump.yml` | on `upstream-released`, bumps the dep in the one rolling PR `deps/mishka` per repo (never merges); rules in CI.md |
 | `mishka-dependents.json` | who `notify` tells about each package |
 
 Callers in each repo: `.github/workflows/ci.yml`, `release.yml` (this exact name, hex.pm's workload identity names it), `deps-bump.yml`. They pin `@ci-vN`.
@@ -48,6 +48,7 @@ When a CI problem is solved, add one line here — symptom → cause → fix —
 - Bump PRs land unassigned → set org variables `MISHKA_CI_PR_ASSIGNEES` / `MISHKA_CI_PR_REVIEWERS`; a refused login only warns.
 - deps-bump `pull request create failed: GraphQL: Resource not accessible by integration` → the GitHub App lacks Pull requests: Read and write (or the new permission wasn't accepted on the installation) → fix the App, then `gh run rerun <id>` in each dependent.
 - deps-bump rerun says `deps/<pkg>-<ver> exists already; nothing to do` but no PR is open → an earlier run pushed the branch and then failed at the PR → fixed: the workflow now opens the PR for a branch that has none; just `gh run rerun <id>`.
+- Two upstream releases close together (core alpha.18, then blog alpha.9) opened two bump PRs per dependent; neither passed alone and they conflicted in mix.lock → one PR per package → fixed: every release lands in the one rolling PR `deps/mishka`, which merges the default branch in and re-applies its bumps on a mix.exs/mix.lock conflict. Close leftover `deps/<pkg>-<ver>` PRs by hand.
 - After a gervaz bump, LiveView tests fail with `does not have phx-focus attribute` on a relation select → gervaz 0.0.10 opens it through its colocated hook (rendered as `MishkaGervaz.UIAdapters.Tailwind.SearchSelect`, not `.SearchSelect`) → open it with `element("#search-select-<form>-<field>") |> render_hook("relation_focus", %{"filter" => "<field>"})`; the root's exact id, because the open list's options share its prefix and filter. Reproduce such a failure locally before pushing a guess.
 - A test reading the DB through a leftover shared sandbox crashes with `owner #PID<…> exited` → the test must check out its own sandbox (`use <App>.DataCase`), never rely on another test's.
 - A protected branch with a review rule (mishka_chelekom) blocks `gh pr merge` even when green → the owner approves or merges; never use `--admin` without the owner's word.
