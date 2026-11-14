@@ -94,13 +94,23 @@ jobs:
           version-type: strict
 
       - id: edit
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token || github.token }}
         run: |
           set -euo pipefail
           branch="deps/$PACKAGE-$VERSION"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
           if [ -n "$(git ls-remote --heads origin "$branch")" ]; then
-            echo "::notice::$branch exists already; nothing to do"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            # An earlier run may have pushed the branch and failed before its PR; open the PR then.
+            if [ -n "$(gh pr list --head "$branch" --state all --json number --jq '.[].number')" ]; then
+              echo "::notice::$branch has its PR already; nothing to do"
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::$branch exists without a PR; opening it"
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -134,16 +144,33 @@ jobs:
           BRANCH: ${{ steps.edit.outputs.branch }}
           CI_WORKFLOW: ${{ inputs.ci-workflow }}
           APP: ${{ steps.token.outputs.token != '' }}
+          PUSHED: ${{ steps.edit.outputs.pushed }}
+          # Comma-separated GitHub logins, e.g. "octocat,hubot"; empty assigns nobody.
+          ASSIGNEES: ${{ vars.MISHKA_CI_PR_ASSIGNEES }}
+          REVIEWERS: ${{ vars.MISHKA_CI_PR_REVIEWERS }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
-          git commit -am "deps: update $PACKAGE to $VERSION"
-          git push -u origin "$BRANCH"
-          gh pr create --head "$BRANCH" \
+          if [ "$PUSHED" != "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$BRANCH"
+            git commit -am "deps: update $PACKAGE to $VERSION"
+            git push -u origin "$BRANCH"
+          fi
+          url="$(gh pr create --head "$BRANCH" \
             --title "deps: update $PACKAGE to $VERSION" \
-            --body "$PACKAGE $VERSION was released. This PR moves mix.exs and mix.lock to it; merge it by hand once CI is green."
+            --body "$PACKAGE $VERSION was released. This PR moves mix.exs and mix.lock to it; merge it by hand once CI is green.")"
+          echo "$url"
+          # A login GitHub refuses leaves the PR open with a warning rather than failing the run.
+          logins='^[A-Za-z0-9-]+(,[A-Za-z0-9-]+)*$'
+          if [ -n "$ASSIGNEES" ]; then
+            [[ "$ASSIGNEES" =~ $logins ]] && gh pr edit "$url" --add-assignee "$ASSIGNEES" \
+              || echo "::warning::could not assign $ASSIGNEES"
+          fi
+          if [ -n "$REVIEWERS" ]; then
+            [[ "$REVIEWERS" =~ $logins ]] && gh pr edit "$url" --add-reviewer "$REVIEWERS" \
+              || echo "::warning::could not request a review from $REVIEWERS"
+          fi
           # GITHUB_TOKEN may start a workflow_dispatch, so CI still runs on the PR's commit.
           if [ "$APP" != "true" ]; then
             gh workflow run "$CI_WORKFLOW" --ref "$BRANCH"

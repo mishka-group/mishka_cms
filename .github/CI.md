@@ -196,6 +196,10 @@ jobs:
 
 Then list the repository under each package it depends on in `.github/mishka-dependents.json` here.
 
+The bump PR is assigned to the logins in the org variable `MISHKA_CI_PR_ASSIGNEES` and asks for a
+review from `MISHKA_CI_PR_REVIEWERS` (comma-separated, e.g. `octocat,hubot`; unset means nobody). A run
+that finds its branch pushed but no PR, left by an earlier run that failed before the PR, opens it.
+
 Callers pin the tag `ci-v1`, moved forward (`git tag -f ci-v1 && git push -f origin ci-v1`) for
 compatible changes; a breaking change gets `ci-v2`. mishka_cms's own `ci.yml` calls
 `./.github/workflows/mishka-ci.yml`, and `mishka-release.yml` calls `./.github/workflows/mishka-ci.yml`,
@@ -230,5 +234,6 @@ which is this repository at the ref the caller pinned.
 5. Remove any `HEX_API_KEY` secret: with one set, Hex publishes with the key, not the identity.
 6. A protected default branch must let the release job push its version commit (allow GitHub
    Actions, or the App, to bypass), or release by pushing a tag you made yourself.
-7. After this merges: `git tag ci-v1 && git push origin ci-v1` on mishka_cms, then change each
-   repository's callers from `@ci/shared-workflows` to `@ci-v1` (one line per workflow file).
+7. Optional: org variables `MISHKA_CI_PR_ASSIGNEES` and `MISHKA_CI_PR_REVIEWERS` (GitHub logins) for
+   the bump PRs. Tags `ci-vN` are lightweight (`git tag ci-v1 <sha>`, no `-a`): with an annotated
+   tag GitHub cannot find the release's nested `./.github/workflows/mishka-ci.yml`.

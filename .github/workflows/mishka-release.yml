@@ -276,7 +276,12 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): v$VERSION"
+          # mix.exs and CHANGELOG may hold this version already; then the tag goes on the current commit.
+          if git diff --quiet; then
+            echo "::notice::mix.exs is at $VERSION already; tagging $DEFAULT_BRANCH as it is"
+          else
+            git commit -am "chore(release): v$VERSION"
+          fi
           git tag "v$VERSION"
           git push origin "HEAD:$DEFAULT_BRANCH" "v$VERSION"
           echo "### v$VERSION tagged; the tag push starts the release run" >> "$GITHUB_STEP_SUMMARY"
