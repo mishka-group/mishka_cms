@@ -45,3 +45,4 @@ When a release problem is solved, add one line here — symptom → cause → fi
 - Release button run failed at `git commit` with nothing to commit → mix.exs already held the typed version → fixed: the button tags the current commit then.
 - Hex publish went out without asking → staged publishing was off for that package → enable it before the first CI release.
 - A tag pushed before its workflow could parse leaves no release → after the CI fix, the owner deletes and re-pushes the tag: `git push origin :refs/tags/v<version> && git push origin v<version>` (nothing was published, so this is safe).
+- The host's bump PR fails `record_labels_gettext_test` (`labels missing from …errors.pot`) → core's .pot already dropped labels that the Hex release of an extension still declares (core alpha.18 vs blog alpha.8) → release the extensions that core's change follows before bumping the host; add their bumps to the host's PR.
