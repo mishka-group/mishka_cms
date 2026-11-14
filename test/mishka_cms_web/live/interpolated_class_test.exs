@@ -213,7 +213,10 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
   end
 
   # Every clause of a local function, as `{byte_offset, source_text}` — from its `def`/`defp` to the
-  # next one at the same indentation, which is where a clause reliably ends in this codebase.
+  # next line at the module's own indentation: the clause's `end`, or the next clause, `@doc`,
+  # `@spec`, `attr` or comment. Running on to the next `def` instead swallowed the following
+  # function's `@spec name(...)` and read it as a call, which walked the scan into JS selectors and
+  # URL queries that never reach a class.
   defp bodies_of(source, name) do
     ~r/\n  defp?\s+#{Regex.escape(name)}[\s(]/
     |> Regex.scan(source, return: :index)
@@ -221,7 +224,7 @@ defmodule MishkaCmsWeb.InterpolatedClassTest do
       rest = binary_part(source, at + 1, byte_size(source) - at - 1)
 
       body =
-        case Regex.run(~r/\n  defp?\s/, rest, return: :index, offset: 1) do
+        case Regex.run(~r/\n  \S/, rest, return: :index, offset: 1) do
           [{stop, _length} | _] -> binary_part(rest, 0, stop)
           nil -> rest
         end
