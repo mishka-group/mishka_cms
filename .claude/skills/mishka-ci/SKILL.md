@@ -23,7 +23,7 @@ Callers in each repo: `.github/workflows/ci.yml`, `release.yml` (this exact name
 ## Changing the shared workflows
 
 1. Branch in mishka_cms (`--no-track origin/master`), one open PR per repo.
-2. Prove it in the owner's private CI test repos (ask the owner for them) — point their callers at the branch. Never publish to Hex from them.
+2. Prove it in temporary private test repos: copy the changed workflow into one (with `allowed-owners` set to its owner), point a second repo's caller at it, trigger the path you changed, then delete them. Never publish to Hex from them.
 3. Third-party actions pinned by full SHA with a version comment; secrets passed by name, never `secrets: inherit` inside the shared files; job `permissions:` no wider than the caller grants.
 4. After merge the owner moves or creates the tag (Claude's tag delete/move is blocked by the permission check, so hand the owner the command):
    - compatible change: `git tag -f ci-v1 <merge-sha> && git push -f origin ci-v1`
