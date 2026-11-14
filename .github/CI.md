@@ -7,7 +7,7 @@ the way Ash keeps `ash-ci.yml` in the ash repository. Each repository calls them
 | --- | --- |
 | `workflows/mishka-ci.yml` | build, then format + audit + lint side by side, then the tests and the custom jobs (only when those pass) |
 | `workflows/mishka-release.yml` | the Release button bumps mix.exs and CHANGELOG, commits and pushes tag `vX` (with the GitHub App's token); the tag push is the release: CI on the tag's commit beside the ebin and NIF builds; GitHub release; Hex publish (staged: an owner approves it on hex.pm with 2FA); the hex `.tar` added to the GitHub release; notify dependents |
-| `workflows/mishka-deps-bump.yml` | on `upstream-released`, move the dependency in mix.exs, `mix deps.update`, open a PR (never merged by itself) |
+| `workflows/mishka-deps-bump.yml` | on `upstream-released`, move the dependency in mix.exs, `mix deps.update`, commit it to the one rolling PR `deps/mishka` (never merged by itself) |
 | `mishka-dependents.json` | which repositories `notify` tells about a new release of each package |
 
 Every workflow fails at once when the calling repository's owner is not in `allowed-owners`
@@ -196,9 +196,25 @@ jobs:
 
 Then list the repository under each package it depends on in `.github/mishka-dependents.json` here.
 
-The bump PR is assigned to the logins in the org variable `MISHKA_CI_PR_ASSIGNEES` and asks for a
-review from `MISHKA_CI_PR_REVIEWERS` (comma-separated, e.g. `octocat,hubot`; unset means nobody). A run
-that finds its branch pushed but no PR, left by an earlier run that failed before the PR, opens it.
+Every release lands in one rolling PR per repository, from the branch `deps/mishka`, titled
+"deps: update Mishka packages"; its body lists each package and its newest version, rebuilt on each
+run from the branch's `deps: update <pkg> to <version>` commits. So releases that follow each other
+(core, then blog) are tested together and never conflict in mix.lock. On each run:
+
+- an open PR: its branch takes the default branch merged in, then one more commit with the bump;
+- a branch whose PR was merged or closed: it starts again from the default branch (a closed PR's
+  branch is deleted first; nothing is ever force-pushed, so commits a person adds stay);
+- a branch pushed without a PR (an earlier run failed before it): the run uses it and opens the PR;
+- mix.exs already asks for that version or a newer one (`Version.compare`): nothing happens;
+- the merge conflicts in mix.exs or mix.lock: the default branch's copies win and every bump on the
+  branch is applied again (`mix deps.update` for those packages only); a conflict in any other file
+  fails the run, merge it by hand;
+- two releases at once: the later push is refused, and that run fetches and starts over (5 tries).
+  There is no concurrency group, as GitHub would cancel the waiting run and lose its bump.
+
+The PR is assigned to the logins in the org variable `MISHKA_CI_PR_ASSIGNEES` and asks for a
+review from `MISHKA_CI_PR_REVIEWERS` (comma-separated, e.g. `octocat,hubot`; unset means nobody) when
+it opens. Old per-package `deps/<pkg>-<version>` PRs are left as they are; close them by hand.
 
 Callers pin the tag `ci-v1`, moved forward (`git tag -f ci-v1 && git push -f origin ci-v1`) for
 compatible changes; a breaking change gets `ci-v2`. mishka_cms's own `ci.yml` calls
