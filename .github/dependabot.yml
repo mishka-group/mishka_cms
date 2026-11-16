@@ -35,12 +35,17 @@ updates:
         patterns:
           - "*"
 
+  # TipTap is left out: the admin's editor engine is a copy of Chelekom's headless kit, which pins
+  # every @tiptap package to one version (see test/mishka_cms/content_editor_engine_test.exs). It
+  # moves only when the kit moves, by the refresh steps in that test's moduledoc.
   - package-ecosystem: bun
     directory: /assets
     schedule:
       interval: weekly
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      - dependency-name: "@tiptap/*"
     groups:
       bun-dependencies:
         patterns:
