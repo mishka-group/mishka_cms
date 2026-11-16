@@ -7,17 +7,19 @@ defmodule MishkaCms.ContentEditorEngineTest do
   The admin's content editor runs Mishka Chelekom's headless `editor` engine, the one the core's
   `chelekom_headless` kit installs on a site as the global JS hook `chelekom-headless-editor`. The
   admin cannot load a site's bundle, so `assets/vendor/editor.js` is a copy of that hook's
-  `content`, and `assets/package.json` installs exactly the packages the hook lists.
+  `content`, and `assets/package.json` installs every package the hook lists.
 
   The kit is read from `test/fixtures/chelekom_headless.json`, a copy of Chelekom's release file.
   Nothing ships the bundle (a server downloads it), so the one in a mishka_cms_core checkout's
   `priv/cms_ui_kits/` is not in the Hex package, and CI has no checkout to read it from.
 
+  Package versions are not checked here: Dependabot moves every `@tiptap/*` package together in
+  one group, and the JS tests and the asset build catch an update that breaks the editor.
+
   These fail the day the kit moves and the vendored copy does not. To refresh it: put the new
   `chelekom_headless.json` over `test/fixtures/chelekom_headless.json`, write the hook's `content`
-  into `assets/vendor/editor.js` unchanged, set `assets/package.json`'s `overrides` to the hook's `npm` list (and its `@tiptap/*`
-  dependencies to the same versions), run `bun install` in `assets/`, and rebuild with
-  `mix esbuild mishka_cms`.
+  into `assets/vendor/editor.js` unchanged, add any package the hook's `npm` list names that
+  `assets/bun.lock` lacks, run `bun install` in `assets/`, and rebuild with `mix esbuild mishka_cms`.
   """
   use ExUnit.Case, async: true
 
@@ -34,8 +36,6 @@ defmodule MishkaCms.ContentEditorEngineTest do
     |> Enum.find(&(&1["name"] == "chelekom-headless-editor"))
   end
 
-  defp package, do: @assets |> Path.join("package.json") |> File.read!() |> Jason.decode!()
-
   defp lock, do: @assets |> Path.join("bun.lock") |> File.read!()
 
   test "the kit still ships the engine as the hook every editor mounts" do
@@ -50,29 +50,12 @@ defmodule MishkaCms.ContentEditorEngineTest do
            "assets/vendor/editor.js differs from the kit. " <> @refresh
   end
 
-  test "every package the kit's engine needs is pinned to the version the kit lists" do
-    %{"overrides" => overrides, "dependencies" => dependencies} = package()
-
-    for %{"name" => name, "version" => version} <- hook()["npm"] do
-      assert overrides[name] == version,
-             "package.json pins #{name} to #{inspect(overrides[name])}, the kit to #{version}. " <>
-               @refresh
-
-      assert dependencies[name] in [nil, version],
-             "package.json depends on #{name} #{dependencies[name]}, the kit lists #{version}. " <>
-               @refresh
-    end
-  end
-
-  test "and the lockfile installed exactly those, with the kit's integrity" do
+  test "every package the kit's engine needs is installed" do
     lock = lock()
 
-    for %{"name" => name, "version" => version, "integrity" => integrity} <- hook()["npm"] do
-      entry =
-        ~r/"#{Regex.escape(name)}": \["#{Regex.escape(name)}@([^"]+)", "[^"]*", (?:\{.*?\}, )?"(sha512-[^"]+)"\]/
-
-      assert [_whole, ^version, ^integrity] = Regex.run(entry, lock),
-             "bun.lock does not hold #{name}@#{version} with the kit's integrity. " <> @refresh
+    for %{"name" => name} <- hook()["npm"] do
+      assert lock =~ ~s("#{name}": ["#{name}@),
+             "bun.lock does not install #{name}, which the kit's engine needs. " <> @refresh
     end
   end
 end
