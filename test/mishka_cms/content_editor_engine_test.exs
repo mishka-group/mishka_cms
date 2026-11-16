@@ -13,9 +13,8 @@ defmodule MishkaCms.ContentEditorEngineTest do
   Nothing ships the bundle (a server downloads it), so the one in a mishka_cms_core checkout's
   `priv/cms_ui_kits/` is not in the Hex package, and CI has no checkout to read it from.
 
-  TipTap is not held at the kit's version: Dependabot moves every `@tiptap/*` package together in
-  one group, and these tests only ask that all of them resolve to one version, since two TipTap
-  versions in one bundle load two editor cores that do not know each other.
+  Package versions are not checked here: Dependabot moves every `@tiptap/*` package together in
+  one group, and the JS tests and the asset build catch an update that breaks the editor.
 
   These fail the day the kit moves and the vendored copy does not. To refresh it: put the new
   `chelekom_headless.json` over `test/fixtures/chelekom_headless.json`, write the hook's `content`
@@ -28,7 +27,6 @@ defmodule MishkaCms.ContentEditorEngineTest do
   @kit Path.expand("../fixtures/chelekom_headless.json", __DIR__)
   @refresh "Refresh the copy as this module's doc says: the kit's `chelekom-headless-editor` hook " <>
              "is the source of truth for the engine and its packages."
-  @locked ~r/^\s*"(@tiptap\/[^"]+)": \["@tiptap\/[^@"]+@([^"]+)"/m
 
   defp hook do
     @kit
@@ -38,12 +36,7 @@ defmodule MishkaCms.ContentEditorEngineTest do
     |> Enum.find(&(&1["name"] == "chelekom-headless-editor"))
   end
 
-  defp package, do: @assets |> Path.join("package.json") |> File.read!() |> Jason.decode!()
-
   defp lock, do: @assets |> Path.join("bun.lock") |> File.read!()
-
-  defp locked_tiptap,
-    do: @locked |> Regex.scan(lock()) |> Map.new(fn [_, name, v] -> {name, v} end)
 
   test "the kit still ships the engine as the hook every editor mounts" do
     assert %{"content" => content, "extra" => %{"module" => "Editor"}} = hook()
@@ -63,20 +56,6 @@ defmodule MishkaCms.ContentEditorEngineTest do
     for %{"name" => name} <- hook()["npm"] do
       assert lock =~ ~s("#{name}": ["#{name}@),
              "bun.lock does not install #{name}, which the kit's engine needs. " <> @refresh
-    end
-  end
-
-  test "every TipTap package resolves to one version, the one package.json asks for" do
-    locked = locked_tiptap()
-
-    assert [version] = locked |> Map.values() |> Enum.uniq(),
-           "bun.lock holds more than one TipTap version: #{inspect(locked)}. Move every " <>
-             "@tiptap/* package in assets/package.json to one version and run `bun install`."
-
-    for {name, wanted} <- package()["dependencies"], String.starts_with?(name, "@tiptap/") do
-      assert wanted == version,
-             "package.json asks for #{name} #{wanted}, bun.lock holds TipTap #{version}. " <>
-               "Pin every @tiptap/* package to one exact version."
     end
   end
 end
