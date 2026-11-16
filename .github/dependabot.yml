@@ -35,8 +35,6 @@ updates:
         patterns:
           - "*"
 
-  # TipTap has its own group, listed first so it wins over the catch-all: every @tiptap package
-  # moves in one PR to one version, since two TipTap versions in one bundle break the editor.
   - package-ecosystem: bun
     directory: /assets
     schedule:
@@ -44,9 +42,6 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
-      tiptap:
-        patterns:
-          - "@tiptap/*"
       bun-dependencies:
         patterns:
           - "*"
