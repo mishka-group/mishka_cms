@@ -99,9 +99,9 @@ defmodule MishkaCms.MixProject do
       {:ash_events, "~> 0.8"},
       {:ash_state_machine, "~> 0.2"},
       {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
-      {:ash_authentication, "~> 5.0.0-rc.15"},
+      {:ash_authentication, "~> 5.0.0-rc.18"},
       {:jose, "~> 1.11"},
-      {:ash_postgres, "~> 2.15"},
+      {:ash_postgres, "~> 2.16"},
       {:ash_json_api, "~> 1.7"},
       {:ash_graphql, "~> 1.12"},
       {:ash_phoenix, "~> 2.3"},
@@ -126,8 +126,8 @@ defmodule MishkaCms.MixProject do
       {:postgrex, "~> 0.22"},
 
       # Req/Res Stuff
-      {:bandit, "~> 1.13"},
-      {:swoosh, "~> 1.29"},
+      {:bandit, "~> 1.15"},
+      {:swoosh, "~> 1.30"},
       {:req, "~> 0.7"},
       {:dns_cluster, "~> 0.3"},
 
