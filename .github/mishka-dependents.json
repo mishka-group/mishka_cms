@@ -8,6 +8,7 @@
     "mishka-group/mishka_cms_migration",
     "mishka-group/mishka_document",
     "mishka-group/mishka_installer",
+    "mishka-group/mishka_pay",
     "mishka-group/mishka_slug"
   ],
   "mishka_blog": [
@@ -60,7 +61,8 @@
     "mishka-group/mishka_cms_builder",
     "mishka-group/mishka_cms_core",
     "mishka-group/mishka_cms_migration",
-    "mishka-group/mishka_document"
+    "mishka-group/mishka_document",
+    "mishka-group/mishka_pay"
   ],
   "mishka_slug": [
     "mishka-group/mishka_blog",
