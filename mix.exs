@@ -98,7 +98,7 @@ defmodule MishkaCms.MixProject do
       {:ash_archival, "~> 2.0"},
       {:ash_events, "~> 0.8"},
       {:ash_state_machine, "~> 0.2"},
-      {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
+      {:ash_authentication_phoenix, "~> 3.0.0-rc.12"},
       {:ash_authentication, "~> 5.0.0-rc.18"},
       {:jose, "~> 1.11"},
       {:ash_postgres, "~> 2.16"},
