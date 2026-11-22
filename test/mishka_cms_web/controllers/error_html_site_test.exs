@@ -401,7 +401,7 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
     end
 
     # As the status of the Error Page reads it.
-    test "is kept as that page's failure until it is drawn again", %{conn: conn, site: site} do
+    test "is kept as that page's failure", %{conn: conn, site: site} do
       error_page =
         error_page!(site, [
           {404, ~S|<p>{raise "line one\nline two"}</p>|},
@@ -419,9 +419,21 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
       # Another page of the same module draws, and leaves what is known of the 404.
       assert bad_csrf(conn) =~ "any"
       assert CompileFailureState.failed?({module, 404})
+    end
+
+    @tag skip:
+           not (Code.ensure_loaded?(ErrorAddress) and
+                  function_exported?(ErrorAddress, :reserved?, 1)) &&
+             "needs a core that forgets a page's failed draws as it compiles it"
+    test "is kept until its module is compiled again", %{conn: conn, site: site} do
+      error_page = error_page!(site, [{404, @raises}])
+      module = module(error_page, site)
+      on_exit(fn -> CompileFailureState.clear_matching({module, :_}) end)
+
+      no_route(conn)
+      assert CompileFailureState.failed?({module, 404})
 
       store!(error_page, 404, "<p>drawn</p>")
-      :ok = CompileFailureState.record({module, 404}, "boom")
 
       {:ok, ^module} =
         ModuleCompilerHandler.compile_or_return_module(
@@ -432,8 +444,90 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
           :update
         )
 
-      assert no_route(conn) =~ "drawn"
       refute CompileFailureState.failed?({module, 404})
+      assert no_route(conn) =~ "drawn"
+    end
+
+    test "is kept once, and a page that draws writes nothing", %{conn: conn, site: site} do
+      error_page = error_page!(site, [{403, "<p>any</p>"}, {404, @raises}])
+      module = module(error_page, site)
+      on_exit(fn -> CompileFailureState.clear_matching({module, :_}) end)
+
+      no_route(conn)
+      assert CompileFailureState.reason({module, 404}) =~ "cannot draw"
+
+      for code <- [403, 404], do: :ok = CompileFailureState.record({module, code}, "kept before")
+
+      assert no_route(conn) == "Not Found"
+      assert bad_csrf(conn) =~ "any"
+
+      for code <- [403, 404],
+          do: assert(CompileFailureState.reason({module, code}) == "kept before")
+    end
+
+    # The request was drawing the module that was replaced meanwhile.
+    test "is not kept for the module compiled since", %{site: site} do
+      error_page = error_page!(site, [{404, "<p>before</p>"}])
+      module = module(error_page, site)
+      on_exit(fn -> CompileFailureState.clear_matching({module, :_}) end)
+
+      plugin!("AfterCompile", fn data ->
+        store!(error_page, 404, "<p>after</p>")
+
+        {:ok, ^module} =
+          ModuleCompilerHandler.compile_or_return_module(
+            module,
+            error_page.path,
+            site.name,
+            site.id,
+            :update
+          )
+
+        %{data | content: {:no, :content}}
+      end)
+
+      assert ErrorHTML.render("404.html", %{conn: bare(site.host)}) == "Not Found"
+      refute CompileFailureState.failed?({module, 404})
+    end
+
+    test "logs and keeps no value of the request, and no control character", %{
+      conn: conn,
+      site: site
+    } do
+      pages = [
+        {~S|{{:ok, _} = @conn.assigns}|, "MatchError"},
+        {~S|{Map.fetch!(@conn.assigns, :nope)}|, "key :nope not found"},
+        {~S|{GenServer.call(:no_such_server, {:token, "tell-tale"})}|,
+         "(exit) noproc in GenServer.call/3"},
+        {~S|{throw({:token, "tell-tale"})}|, "(throw)"},
+        {~S|{raise "red \e[31m bell \a next \r"}|, "red [31m bell  next"},
+        {~S|{String.no_such(@conn.assigns)}|, "String.no_such/1 is undefined"}
+      ]
+
+      for {template, said} <- pages do
+        error_page = error_page!(site, [{404, "<p>ok</p>"}])
+        store!(error_page, 404, "<p>" <> template <> "</p>")
+        module = module(error_page, site)
+
+        {body, log} =
+          with_log(fn ->
+            conn |> assign(:secret, "tell-tale") |> then(&no_route/1)
+          end)
+
+        assert body == "Not Found"
+        assert [warning] = warnings(log)
+        reason = CompileFailureState.reason({module, 404})
+
+        for line <- [warning, reason] do
+          assert line =~ said
+          refute line =~ "tell-tale"
+          refute line =~ ~r/fallbacking.*[[:cntrl:]]/
+        end
+
+        CompileFailureState.clear_matching({module, :_})
+        Ash.destroy!(error_page, action: :destroy, authorize?: false)
+        WebRunTimeMetaDataState.delete_by_site(site.name)
+      end
     end
 
     test "logs a short line for whatever it raised", %{conn: conn, site: site} do
@@ -479,6 +573,44 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
         end
 
       assert [_warning] = warnings(log)
+    end
+
+    test "with no table to find the Error Page or the settings in", %{site: site} do
+      error_page!(site, [{404, "<p>own 404</p>"}])
+
+      for table <- [:mishka_web_run_time_meta_data, :mishka_cms_settings] do
+        {:ok, log} =
+          without(table, fn ->
+            with_log(fn ->
+              assert ErrorHTML.render("404.html", %{conn: bare(site.host)}) == "Not Found"
+            end)
+          end)
+
+        assert [_warning] = warnings(log)
+      end
+    end
+
+    defp without(table, fun) do
+      away = :"#{table}_away"
+      :ets.rename(table, away)
+
+      try do
+        {_result, log} = fun.()
+        {:ok, log}
+      after
+        :ets.rename(away, table)
+      end
+    end
+
+    test "for a template without a status, or a status that is none", %{site: site} do
+      conn = bare(site.host)
+      error_page!(site, [{404, "<p>own 404</p>"}])
+
+      for template <- ["invalid", "abc.html", "40.html", "4040.html", ""],
+          do: assert(ErrorHTML.render(template, %{conn: conn}) == "Internal Server Error")
+
+      plugin!("BeforeCompile", &%{&1 | status_code: "abc"})
+      assert ErrorHTML.render("404.html", %{conn: conn}) == "Not Found"
     end
 
     test "for what is not a conn, or holds no site" do
@@ -577,6 +709,29 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
 
       assert Enum.all?(pages, &(&1 =~ "own 404"))
       assert :counters.get(compiles, 1) == 1
+    end
+  end
+
+  describe "the span of an answer" do
+    test "says which answer it was", %{site: site} do
+      event = [:mishka_cms, :error_page, :render, :stop]
+      ref = :telemetry_test.attach_event_handlers(self(), [event])
+      %{name: name} = site
+      conn = bare(site.host)
+      error_page = error_page!(site, [{404, "<p>own 404</p>"}, {403, @raises}])
+      on_exit(fn -> CompileFailureState.clear_matching({module(error_page, site), :_}) end)
+
+      for {template, outcome} <- [{"404.html", :drawn}, {"403.html", :not_drawn}] do
+        ErrorHTML.render(template, %{conn: conn})
+        code = String.slice(template, 0, 3)
+
+        assert_received {^event, ^ref, %{duration: _},
+                         %{site: ^name, status_code: ^code, outcome: ^outcome}}
+      end
+
+      WebRunTimeMetaDataState.delete_by_site(name)
+      ErrorHTML.render("404.html", %{conn: conn})
+      assert_received {^event, ^ref, _measurements, %{site: ^name, outcome: :no_error_page}}
     end
   end
 

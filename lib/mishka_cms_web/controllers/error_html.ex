@@ -17,18 +17,25 @@ defmodule MishkaCmsWeb.ErrorHTML do
   ## The plain status message
 
   The answer is Phoenix's plain message for the status, sent with the status the request had, when
-  there is no page to draw or it cannot be drawn. `render/2` never raises.
+  there is no page to draw or it cannot be drawn.
 
   | the request's site | in the log |
   |--------------------|------------|
   | has no Error Page, or none with an entry for the status | one warning |
   | has one that does not compile | one warning |
-  | has one that raises as it is drawn | one warning with the exception's name and first line |
+  | has one that raises, exits or throws as it is drawn | one short warning with what it was |
+  | has a plugin on one of the first three events that answers something else than its payload | one warning |
+  | cannot be read: a process that keeps sites, settings or routes is restarting | one warning |
   | is offline, switched off or API only, before the pipeline named it | nothing |
   | does not exist: no site has the host | nothing |
 
   The last two are what `SiteLookupPlug` and `MishkaCms.Plugs.MaintenanceGate` answer unlogged on
   any other address, so a scanner cannot fill the log here either.
+
+  The template is the admin's and may fail for one visitor alone, so it is drawn inside the one
+  boundary of this module, and what it failed with is kept in
+  `MishkaCmsCore.Runtime.States.CompileFailureState` for the status of the Error Page, once for a
+  compiled module. A page that draws writes nothing.
 
   ## Events
 
@@ -40,7 +47,18 @@ defmodule MishkaCmsWeb.ErrorHTML do
     * `ErrorHTML.Render.CompileError` - `%{error: error, template: template, fallback: message}`
       for every plain message but that of a page with no entry for the status. A plugin may answer
       another `:fallback`. `error` is `:no_error_page`, the reason the page did not compile, what was
-      raised, or why no site answers: `:not_found`, `:inactive`, `:offline` or `:api_only`.
+      raised, `{:event, name}` for a plugin's answer, `:not_ready`, or why no site answers:
+      `:not_found`, `:inactive`, `:offline` or `:api_only`.
+
+  A plugin that raises is logged by `MishkaInstaller.Event.Hook.call/3`, which answers what it was
+  handed; one that exits or throws on the first three events ends the request, as on any event of it.
+
+  ## Telemetry
+
+    * `[:mishka_cms, :error_page, :render]` - `%{count: 1}` with `%{status_code: "404", site: name}`.
+    * `[:mishka_cms, :error_page, :render, :start | :stop]` - the span of it, with `:path` at the
+      start and `:outcome` at the stop: `:drawn`, or why the plain message was answered instead:
+      `:no_error_page`, `:not_compiled`, `:not_drawn`, `:event_answer` or `:not_ready`.
 
   See config/config.exs.
   """
@@ -53,6 +71,16 @@ defmodule MishkaCmsWeb.ErrorHTML do
   alias MishkaCmsCore.Runtime.{OriginValidator, SiteAvailability}
   alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
   alias MishkaInstaller.Event.Hook
+
+  # A process that keeps tables makes and loses them together, so one of each is asked for.
+  @sites :mishka_sites_host_index
+  @settings :mishka_cms_settings
+  @routes :mishka_web_run_time_meta_data
+
+  @plain "fallbacking to default Phoenix error page"
+
+  defguardp is_site(site)
+            when is_map(site) and is_binary(site.id) and is_binary(site.name)
 
   # If you want to customize your error pages,
   # uncomment the embed_templates/1 call below
@@ -70,16 +98,16 @@ defmodule MishkaCmsWeb.ErrorHTML do
   ####################################################################################
   ############################ (▰˘◡˘▰) Functions (▰˘◡˘▰) #############################
   ####################################################################################
-  def render(<<status_code::binary-size(3), _rest::binary>> = template, %{conn: conn} = _assigns) do
+  def render(<<a, b, c, ?., _format::binary>> = template, %{conn: %Plug.Conn{} = conn})
+      when a in ?0..?9 and b in ?0..?9 and c in ?0..?9 do
     case with_site(conn) do
-      {:ok, conn} -> site_page(conn, template, status_code)
-      {:error, reason} -> fallback(reason, template)
+      {:ok, conn} ->
+        site_page(conn, template, <<a, b, c>>)
+
+      {:error, reason} ->
+        warn(reason, template)
+        fallback(reason, template)
     end
-  catch
-    kind, reason ->
-      error = Exception.normalize(kind, reason, __STACKTRACE__)
-      warn_failed(kind, error, template)
-      fallback(error, template)
   end
 
   def render(template, _assigns) do
@@ -93,14 +121,19 @@ defmodule MishkaCmsWeb.ErrorHTML do
   # An error raised before `SiteLookupPlug` ran, such as a bad CSRF token or an address no route
   # matches, has no `:current_site`, so the site is found from the host the way the plug finds it.
   # A site closed to its visitors shows none of its own pages, so it gets the default page.
-  defp with_site(%Plug.Conn{assigns: %{current_site: %{name: _name}}} = conn), do: {:ok, conn}
+  defp with_site(%Plug.Conn{assigns: %{current_site: site}} = conn) when is_site(site),
+    do: {:ok, conn}
 
   defp with_site(conn) do
     host = conn |> Plug.Conn.get_req_header("host") |> List.first() |> OriginValidator.host_name()
 
-    with {:ok, site} <- SiteLookupPlug.site_for(host), :ok <- open(site) do
+    with :ok <- readable(@sites),
+         :ok <- readable(@settings),
+         {:ok, site} <- SiteLookupPlug.site_for(host),
+         :ok <- open(site) do
       Gettext.put_locale(Languages.primary(site.id))
-      {:ok, Plug.Conn.assign(conn, :current_site, site)}
+      conn = Plug.Conn.assign(conn, :current_site, site)
+      {:ok, conn}
     end
   end
 
@@ -113,126 +146,223 @@ defmodule MishkaCmsWeb.ErrorHTML do
     end
   end
 
+  # A table is away while the process that keeps it restarts, and a read of it would raise.
+  defp readable(table) do
+    case :ets.whereis(table) do
+      :undefined -> {:error, :not_ready}
+      _table -> :ok
+    end
+  end
+
   defp site_page(conn, template, status_code) do
+    %{name: site} = conn.assigns.current_site
+    metadata = %{status_code: status_code, site: site}
+
     # Emit counter for error page renders
-    :telemetry.execute(
-      [:mishka_cms, :error_page, :render],
-      %{count: 1},
-      %{status_code: status_code, site: conn.assigns.current_site.name}
-    )
+    :telemetry.execute([:mishka_cms, :error_page, :render], %{count: 1}, metadata)
 
     :telemetry.span(
       [:mishka_cms, :error_page, :render],
-      %{
-        status_code: status_code,
-        path: conn.request_path,
-        site: conn.assigns.current_site.name
-      },
+      Map.put(metadata, :path, conn.request_path),
       fn ->
-        conn =
-          %{conn: conn, status_code: status_code, template: template}
-          |> then(&Hook.call("ErrorHTML.Render.BeforeRender", &1))
-          |> Map.get(:conn)
-
-        site = conn.assigns.current_site
-
-        # THE ERROR PAGE RENDERS FOR THE SITE THE VISITOR ASKED, so it draws that site's components
-        # and the global ones — see `MishkaCmsCore.Runtime.LiveViewHelpers.component/1` — and `t/1`
-        # reads that site's words. An error raised before any page named the site, a draft
-        # preview's unknown token among them, would otherwise draw none of the site's own.
-        :ok = Translations.put_site(site.id)
-        error_path = MishkaCmsCore.Runtime.ErrorAddress.path(site.name)
-
-        error_data =
-          %{path: error_path, site: site, status_code: status_code}
-          |> then(&Hook.call("ErrorHTML.Render.BeforeCompile", &1))
-
-        result =
-          case error_module(error_data.path, error_data.site) do
-            {:ok, page_module} ->
-              known_draw(conn, page_module, String.to_integer(error_data.status_code))
-
-            {:error, {:compile, reason}} ->
-              Logger.warning(
-                "the error page of site #{error_data.site.name} for #{template} does not compile, fallbacking to default Phoenix error page"
-              )
-
-              fallback(reason, template)
-
-            {:error, :no_error_page} ->
-              Logger.warning(
-                "site #{error_data.site.name} has no error page for #{template}, fallbacking to default Phoenix error page"
-              )
-
-              fallback(:no_error_page, template)
-          end
-
-        {result, %{}}
+        {outcome, content} = answer(conn, template, status_code)
+        {content, Map.put(metadata, :outcome, outcome)}
       end
     )
   end
 
-  # What it raised is kept for the status of the Error Page (`MishkaCmsCore.Runtime.RuntimeStatus`),
-  # until this page of it is drawn again.
-  defp known_draw(conn, page_module, code) do
-    content = draw_page(conn, page_module, code)
-
-    if CompileFailureState.failed?({page_module, code}),
-      do: CompileFailureState.clear({page_module, code})
-
-    content
-  catch
-    kind, reason ->
-      error = Exception.normalize(kind, reason, __STACKTRACE__)
-      CompileFailureState.record({page_module, code}, cause(kind, error))
-      :erlang.raise(kind, reason, __STACKTRACE__)
+  defp answer(conn, template, status_code) do
+    with {:ok, conn} <- before_render(conn, template, status_code),
+         {:ok, path, site, code} <- before_compile(conn, status_code),
+         {:ok, module} <- error_module(path, site),
+         {:ok, content} <- page(module, conn, code) do
+      {:drawn, content}
+    else
+      {:error, reason} ->
+        warn(reason, template, conn.assigns.current_site)
+        {outcome(reason), reason |> error() |> fallback(template)}
+    end
   end
 
-  defp draw_page(conn, page_module, code) do
-    conn
-    |> Plug.Conn.assign(:page_module, page_module)
-    |> Plug.Conn.assign(:page_data, page_module.__error_information__())
-    |> then(&%{conn: &1, content: page_module.render(&1, code)})
-    |> then(&Hook.call("ErrorHTML.Render.AfterCompile", &1))
-    |> Map.get(:content)
-    |> draw()
+  defp before_render(conn, template, status_code) do
+    event = "ErrorHTML.Render.BeforeRender"
+
+    case Hook.call(event, %{conn: conn, status_code: status_code, template: template}) do
+      %{conn: %Plug.Conn{assigns: %{current_site: site}} = conn} when is_site(site) -> {:ok, conn}
+      _not_its_payload -> {:error, {:event, event}}
+    end
+  end
+
+  # THE ERROR PAGE RENDERS FOR THE SITE THE VISITOR ASKED, so it draws that site's components
+  # and the global ones — see `MishkaCmsCore.Runtime.LiveViewHelpers.component/1` — and `t/1`
+  # reads that site's words. An error raised before any page named the site, a draft
+  # preview's unknown token among them, would otherwise draw none of the site's own.
+  defp before_compile(conn, status_code) do
+    event = "ErrorHTML.Render.BeforeCompile"
+    site = conn.assigns.current_site
+    :ok = Translations.put_site(site.id)
+
+    with %{path: path, site: site, status_code: status_code}
+         when is_binary(path) and is_site(site) and is_binary(status_code) <-
+           Hook.call(event, %{
+             path: ErrorAddress.path(site.name),
+             site: site,
+             status_code: status_code
+           }),
+         {code, ""} <- Integer.parse(status_code) do
+      {:ok, path, site, code}
+    else
+      _not_its_payload -> {:error, {:event, event}}
+    end
+  end
+
+  # What the page raised is kept for the status of the Error Page
+  # (`MishkaCmsCore.Runtime.RuntimeStatus`) the first time, until its module is compiled again.
+  defp page(module, conn, code) do
+    with {:ok, page_data} <- attempt(&module.__error_information__/0),
+         {:error, {:drawing, kind, error}} = failed <- draw(module, conn, page_data, code) do
+      keep(module, page_data, code, {kind, error})
+      failed
+    end
+  end
+
+  defp draw(module, conn, page_data, code) do
+    conn =
+      conn
+      |> Plug.Conn.assign(:page_module, module)
+      |> Plug.Conn.assign(:page_data, page_data)
+
+    with {:ok, content} <- attempt(fn -> module.render(conn, code) end),
+         {:ok, content} <- after_compile(conn, content) do
+      attempt(fn -> html(content) end)
+    end
+  end
+
+  defp after_compile(conn, content) do
+    event = "ErrorHTML.Render.AfterCompile"
+
+    case Hook.call(event, %{conn: conn, content: content}) do
+      %{content: content} -> {:ok, content}
+      _not_its_payload -> {:error, {:event, event}}
+    end
+  end
+
+  # The one boundary here: what runs in it is the admin's template, or the plugin with the last answer,
+  # and after either nothing else answers. `catch`, as a component's call to a process exits: Bandit
+  # sends an empty 500 for an exit.
+  defp attempt(fun) do
+    {:ok, fun.()}
+  catch
+    kind, reason ->
+      {:error, {:drawing, kind, Exception.normalize(kind, reason, __STACKTRACE__)}}
   end
 
   # Drawn here, where a raise still has a plain message to answer with: Phoenix draws what
   # `render/2` answers after it has returned. Text is left to Phoenix, which escapes it.
-  defp draw(content) when is_binary(content), do: content
-  defp draw(content), do: {:safe, Phoenix.HTML.Engine.encode_to_iodata!(content)}
+  defp html(content) when is_binary(content), do: content
+  defp html(content), do: {:safe, Phoenix.HTML.Engine.encode_to_iodata!(content)}
 
-  defp fallback(error, template) do
-    %{error: error, template: template, fallback: status_message(template)}
-    |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
-    |> Map.get(:fallback)
-    |> draw()
-  catch
-    kind, reason ->
-      warn_failed(kind, Exception.normalize(kind, reason, __STACKTRACE__), template)
-      status_message(template)
+  # Once for a module: not for each request that fails, and not for the module compiled since.
+  defp keep(module, page_data, code, failure) do
+    if not CompileFailureState.failed?({module, code}) and
+         function_exported?(module, :__error_information__, 0) and
+         module.__error_information__() == page_data,
+       do: CompileFailureState.record({module, code}, :binary.copy(cause(failure)))
   end
 
-  defp warn_failed(kind, error, template) do
+  defp fallback(error, template) do
+    message = status_message(template)
+
+    case attempt(fn -> plugin_fallback(error, template, message) end) do
+      {:ok, fallback} ->
+        fallback
+
+      {:error, reason} ->
+        warn(reason, template)
+        message
+    end
+  end
+
+  defp plugin_fallback(error, template, message) do
+    data = %{error: error, template: template, fallback: message}
+
+    case Hook.call("ErrorHTML.Render.CompileError", data) do
+      %{fallback: fallback} -> html(fallback)
+      _not_its_payload -> message
+    end
+  end
+
+  defp error({:drawing, _kind, error}), do: error
+  defp error({:compile, reason}), do: reason
+  defp error(reason), do: reason
+
+  defp outcome({:drawing, _kind, _error}), do: :not_drawn
+  defp outcome({:compile, _reason}), do: :not_compiled
+  defp outcome({:event, _event}), do: :event_answer
+  defp outcome(reason), do: reason
+
+  defp warn(:not_ready, template),
+    do:
+      Logger.warning("the sites are not loaded to draw an error page for #{template}, #{@plain}")
+
+  defp warn({:drawing, kind, error}, template) do
     Logger.warning(
-      "failed to render error page for #{template}, fallbacking to default Phoenix error page: #{cause(kind, error)}"
+      "failed to render error page for #{template}, #{@plain}: #{cause({kind, error})}"
     )
   end
 
-  # The start of the first line alone: the rest of a `KeyError`'s message is every assign of the conn.
-  # An `ArgumentError`'s first line is the same for all of them and what it says is below it.
-  defp cause(kind, %ArgumentError{} = error) do
-    kind
-    |> Exception.format_banner(error)
-    |> String.split()
-    |> Enum.join(" ")
-    |> String.slice(0, 200)
+  defp warn(_closed_or_no_site, _template), do: :ok
+
+  defp warn({:compile, _reason}, template, site) do
+    Logger.warning(
+      "the error page of site #{site.name} for #{template} does not compile, #{@plain}"
+    )
   end
 
-  defp cause(kind, error) do
-    [line | _rest] = kind |> Exception.format_banner(error) |> String.split("\n", parts: 2)
-    String.slice(line, 0, 200)
+  defp warn(:no_error_page, template, site),
+    do: Logger.warning("site #{site.name} has no error page for #{template}, #{@plain}")
+
+  defp warn({:event, event}, template, _site) do
+    Logger.warning(
+      "a plugin on #{event} did not answer its payload for the error page of #{template}, #{@plain}"
+    )
+  end
+
+  defp warn(reason, template, _site), do: warn(reason, template)
+
+  # One short line that holds nothing of the request: a `KeyError`'s message is every assign of the
+  # conn, a `MatchError`'s is the value, and an exit's is what the process was called with. An error of
+  # an Erlang function says which argument it was below its first line, which is the same for all.
+  defp cause({:error, %KeyError{key: key, message: nil}}),
+    do: short("** (KeyError) key #{inspect(key)} not found")
+
+  defp cause({:error, %ArgumentError{message: "errors were found at" <> _rest = message}}) do
+    message |> String.split() |> Enum.join(" ") |> then(&short("** (ArgumentError) #{&1}"))
+  end
+
+  defp cause({:error, %error{message: message}}) when is_binary(message),
+    do: short("** (#{inspect(error)}) #{message}")
+
+  defp cause({:error, %error{} = exception})
+       when error in [UndefinedFunctionError, FunctionClauseError],
+       do: short("** (#{inspect(error)}) #{Exception.message(exception)}")
+
+  defp cause({:error, %error{}}), do: "** (#{inspect(error)})"
+
+  defp cause({kind, {reason, {module, function, args}}})
+       when is_atom(reason) and is_atom(module) and is_atom(function) and is_list(args),
+       do: "** (#{kind}) #{reason} in #{Exception.format_mfa(module, function, length(args))}"
+
+  defp cause({kind, reason}) when is_atom(reason), do: "** (#{kind}) #{inspect(reason)}"
+  defp cause({kind, _value}), do: "** (#{kind})"
+
+  defp short(text) do
+    [line | _rest] = String.split(text, "\n", parts: 2)
+
+    for <<char::utf8 <- String.slice(line, 0, 200)>>,
+        char > 31 and char not in 127..159 and char not in [0x2028, 0x2029],
+        into: "",
+        do: <<char::utf8>>
   end
 
   # One clause per status: each message is a literal `gettext/1`, which `mix gettext.extract` reads.
@@ -273,52 +403,57 @@ defmodule MishkaCmsWeb.ErrorHTML do
   `MishkaCms.Plugs.MaintenanceGate` answers an offline site with it, and with its built-in page on
   `{:error, reason}`: `:no_error_page` when the site has none, `:no_offline_entry` when its Error
   Page does not hold one, `{:compile, reason}` when it does not compile, `{:render, reason}` when
-  the entry raised as it was drawn, at compile time or for this visitor.
+  the entry raised as it was drawn, at compile time or for this visitor, `:not_ready` while the
+  process that keeps the routes is restarting.
 
   The Error Page is found in `WebRunTimeMetaDataState` and its module is compiled once, as for a
   404, so after the first request this reads ETS only. The template is handed `@status` as
   `:offline` and `@conn` as it is, so set the conn's status first.
   """
   @spec offline_page(Plug.Conn.t()) :: {:ok, iodata()} | {:error, term()}
-  def offline_page(%Plug.Conn{assigns: %{current_site: %{name: name} = site}} = conn)
-      when is_binary(name) do
-    path = ErrorAddress.path(name)
+  def offline_page(%Plug.Conn{assigns: %{current_site: site}} = conn) when is_site(site) do
+    path = ErrorAddress.path(site.name)
 
     with {:ok, module} <- error_module(path, site),
-         :ok <- offline_entry(module) do
-      draw_offline(module, conn)
+         :ok <- offline_entry(module),
+         {:error, {:drawing, kind, error}} <- draw_offline(module, conn) do
+      Logger.warning(
+        "failed to render the offline page of site #{site.name}, fallbacking to the built-in page: #{cause({kind, error})}"
+      )
+
+      {:error, {:render, error}}
     end
   end
 
   def offline_page(_conn), do: {:error, :no_error_page}
 
-  # The entry drew when its module was compiled, for a visitor with no account: one it raises for
-  # alone still gets the built-in page.
-  defp draw_offline(module, conn) do
-    {:ok, ErrorCompiler.render_page(module, conn, ErrorStatus.offline())}
-  catch
-    kind, reason ->
-      error = Exception.normalize(kind, reason, __STACKTRACE__)
+  # An entry that raises for everyone is known from the compile (`offline_entry/1`). One visitor it
+  # raises for alone, or one who asks while a new module is loaded and not yet drawn, gets the built-in
+  # page.
+  defp draw_offline(module, conn),
+    do: attempt(fn -> ErrorCompiler.render_page(module, conn, ErrorStatus.offline()) end)
 
-      Logger.warning(
-        "failed to render the offline page of site #{conn.assigns.current_site.name}, fallbacking to the built-in page: #{cause(kind, error)}"
-      )
-
-      {:error, {:render, error}}
+  # Its address is a literal one, so a path no row is stored at is not matched against the site's
+  # patterns.
+  defp error_module(path, site) do
+    with :ok <- readable(@routes),
+         true <- WebRunTimeMetaDataState.path_exists?(path, site.name),
+         {:ok, %{section: "ErrorPage"} = entry} <-
+           WebRunTimeMetaDataState.find_by_path_and_site(path, site.name) do
+      entry.id
+      |> Helpers.module_name(entry.site, "ErrorPage")
+      |> compiled(path, site)
+    else
+      {:error, :not_ready} -> {:error, :not_ready}
+      _no_error_page -> {:error, :no_error_page}
+    end
   end
 
-  defp error_module(path, site) do
-    case WebRunTimeMetaDataState.find_by_path_and_site(path, site.name) do
-      {:ok, %{section: "ErrorPage"} = entry} ->
-        module = Helpers.module_name(entry.id, entry.site, "ErrorPage")
-
-        case ModuleCompilerHandler.compile_or_return_module(module, path, site.name, site.id) do
-          {:ok, _compiled} -> {:ok, module}
-          {:error, reason} -> {:error, {:compile, reason}}
-        end
-
-      _no_error_page ->
-        {:error, :no_error_page}
+  defp compiled(module, path, site) do
+    case Helpers.loaded?(module) ||
+           ModuleCompilerHandler.compile_or_return_module(module, path, site.name, site.id) do
+      {:error, reason} -> {:error, {:compile, reason}}
+      _loaded -> {:ok, module}
     end
   end
 
