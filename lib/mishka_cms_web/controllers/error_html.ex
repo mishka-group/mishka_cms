@@ -206,6 +206,15 @@ defmodule MishkaCmsWeb.ErrorHTML do
   end
 
   # The start of the first line alone: the rest of a `KeyError`'s message is every assign of the conn.
+  # An `ArgumentError`'s first line is the same for all of them and what it says is below it.
+  defp cause(kind, %ArgumentError{} = error) do
+    kind
+    |> Exception.format_banner(error)
+    |> String.split()
+    |> Enum.join(" ")
+    |> String.slice(0, 200)
+  end
+
   defp cause(kind, error) do
     [line | _rest] = kind |> Exception.format_banner(error) |> String.split("\n", parts: 2)
     String.slice(line, 0, 200)

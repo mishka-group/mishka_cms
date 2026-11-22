@@ -125,6 +125,10 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
       })
   end
 
+  # A template its own save may refuse, as a row stored before the rule holds it.
+  defp store!(error_page, status, template),
+    do: Ash.Seed.update!(error_page, %{error_pages: [%{status: status, template: template}]})
+
   defp module(error_page, site), do: Helpers.module_name(error_page.id, site.name, "ErrorPage")
 
   # Before the pipeline has named the site.
@@ -369,6 +373,17 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
       refute log =~ "InvalidCSRFTokenError"
     end
 
+    # What such an error says is below its first line.
+    test "for an argument logs which argument, on one short line", %{conn: conn, site: site} do
+      error_page!(site, [{404, "<p>{String.to_integer(@conn.request_path)}</p>"}])
+      {body, log} = with_log(fn -> no_route(conn) end)
+
+      assert body == "Not Found"
+      assert [warning] = warnings(log)
+      assert warning =~ "1st argument"
+      assert byte_size(warning) < 500
+    end
+
     test "logs a short line for whatever it raised", %{conn: conn, site: site} do
       error_page!(site, [{404, "<p>{raise String.duplicate(\"long \", 1000)}</p>"}])
       {body, log} = with_log(fn -> no_route(conn) end)
@@ -381,7 +396,8 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
 
   describe "a page that does not compile" do
     test "answers the plain text and one warning that says so", %{conn: conn, site: site} do
-      error_page = error_page!(site, [{404, "<p>{no_such_function(1)}</p>"}])
+      error_page = error_page!(site, [{404, "<p>ok</p>"}])
+      store!(error_page, 404, "<p>{no_such_function(1)}</p>")
       on_exit(fn -> CompileFailureState.clear(module(error_page, site)) end)
 
       for _request <- [:compiles, :known_broken] do
@@ -557,7 +573,8 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
       assert_received {"CompileError", data}
       assert data == %{error: :no_error_page, template: "404.html", fallback: "Not Found"}
 
-      error_page = error_page!(site, [{403, @raises}, {404, "<p>{no_such_function(1)}</p>"}])
+      error_page = error_page!(site, [{404, "<p>ok</p>"}])
+      store!(error_page, 404, "<p>{no_such_function(1)}</p>")
       on_exit(fn -> CompileFailureState.clear(module(error_page, site)) end)
       no_route(conn)
       assert_received {"CompileError", %{error: :compilation_error, template: "404.html"}}
