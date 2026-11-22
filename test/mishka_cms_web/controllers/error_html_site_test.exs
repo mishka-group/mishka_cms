@@ -20,6 +20,7 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
 
   alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorPage, OriginValidator}
   alias MishkaCmsCore.Runtime.Compilers.Helpers
+  alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.States.{CompileFailureState, SettingsState, SiteState}
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
   alias MishkaCmsCore.Settings
@@ -397,6 +398,42 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
       assert [warning] = warnings(log)
       assert warning =~ "1st argument"
       assert byte_size(warning) < 500
+    end
+
+    # As the status of the Error Page reads it.
+    test "is kept as that page's failure until it is drawn again", %{conn: conn, site: site} do
+      error_page =
+        error_page!(site, [
+          {404, ~S|<p>{raise "line one\nline two"}</p>|},
+          {403, "<p>any</p>"}
+        ])
+
+      module = module(error_page, site)
+      on_exit(fn -> CompileFailureState.clear_matching({module, :_}) end)
+
+      no_route(conn)
+      assert [{{^module, 404}, reason}] = CompileFailureState.matching({module, :_})
+      assert reason =~ "line one"
+      refute reason =~ "line two"
+
+      # Another page of the same module draws, and leaves what is known of the 404.
+      assert bad_csrf(conn) =~ "any"
+      assert CompileFailureState.failed?({module, 404})
+
+      store!(error_page, 404, "<p>drawn</p>")
+      :ok = CompileFailureState.record({module, 404}, "boom")
+
+      {:ok, ^module} =
+        ModuleCompilerHandler.compile_or_return_module(
+          module,
+          error_page.path,
+          site.name,
+          site.id,
+          :update
+        )
+
+      assert no_route(conn) =~ "drawn"
+      refute CompileFailureState.failed?({module, 404})
     end
 
     test "logs a short line for whatever it raised", %{conn: conn, site: site} do

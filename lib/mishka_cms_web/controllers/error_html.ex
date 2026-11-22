@@ -150,18 +150,7 @@ defmodule MishkaCmsWeb.ErrorHTML do
         result =
           case error_module(error_data.path, error_data.site) do
             {:ok, page_module} ->
-              conn
-              |> Plug.Conn.assign(:page_module, page_module)
-              |> Plug.Conn.assign(:page_data, page_module.__error_information__())
-              |> then(
-                &%{
-                  conn: &1,
-                  content: page_module.render(&1, String.to_integer(error_data.status_code))
-                }
-              )
-              |> then(&Hook.call("ErrorHTML.Render.AfterCompile", &1))
-              |> Map.get(:content)
-              |> draw()
+              known_draw(conn, page_module, String.to_integer(error_data.status_code))
 
             {:error, {:compile, reason}} ->
               Logger.warning(
@@ -181,6 +170,32 @@ defmodule MishkaCmsWeb.ErrorHTML do
         {result, %{}}
       end
     )
+  end
+
+  # What it raised is kept for the status of the Error Page (`MishkaCmsCore.Runtime.RuntimeStatus`),
+  # until this page of it is drawn again.
+  defp known_draw(conn, page_module, code) do
+    content = draw_page(conn, page_module, code)
+
+    if CompileFailureState.failed?({page_module, code}),
+      do: CompileFailureState.clear({page_module, code})
+
+    content
+  catch
+    kind, reason ->
+      error = Exception.normalize(kind, reason, __STACKTRACE__)
+      CompileFailureState.record({page_module, code}, cause(kind, error))
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp draw_page(conn, page_module, code) do
+    conn
+    |> Plug.Conn.assign(:page_module, page_module)
+    |> Plug.Conn.assign(:page_data, page_module.__error_information__())
+    |> then(&%{conn: &1, content: page_module.render(&1, code)})
+    |> then(&Hook.call("ErrorHTML.Render.AfterCompile", &1))
+    |> Map.get(:content)
+    |> draw()
   end
 
   # Drawn here, where a raise still has a plain message to answer with: Phoenix draws what
