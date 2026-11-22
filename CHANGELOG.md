@@ -18,7 +18,7 @@
 - Security: `phoenix` 1.8.17 and `phoenix_live_view` 1.2.15 (EEF-CVE-2026-128361, EEF-CVE-2026-129344 and EEF-CVE-2026-126334), `bandit` 1.15 and `jose` 1.11.13
 
 ### Refactors:
-- The host no longer lists `ash_slug` (the CMS slugs with `mishka_slug`) and no longer loads the migration extension: a site that needs it adds `{:mishka_cms_migration, "~> 0.0.1"}` itself
+- The host no longer lists `ash_slug` (the CMS slugs with `mishka_slug`)
 - The editor runs TipTap 3.34.0, and every dependency is at its latest release, including `ash` 3.37.7, `ash_postgres` 2.16.0, `ash_authentication` 5.0.0-rc.18, `swoosh` 1.30, `postgrex` 0.23.0, `mishka_gervaz` 0.0.10, `mishka_installer` 0.1.16 and `guarded_struct` 0.1.10
 - The CI, release and dependency-update workflows are shared by the Mishka repositories, and a new package release opens one rolling `deps/mishka` pull request here
 
