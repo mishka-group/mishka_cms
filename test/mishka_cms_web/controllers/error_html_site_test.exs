@@ -18,7 +18,7 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
   import ExUnit.CaptureLog, only: [capture_log: 1, with_log: 1]
   import MishkaCms.Test.Factory
 
-  alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorPage}
+  alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorPage, OriginValidator}
   alias MishkaCmsCore.Runtime.Compilers.Helpers
   alias MishkaCmsCore.Runtime.States.{CompileFailureState, SettingsState, SiteState}
   alias MishkaCmsCore.Runtime.States.WebRunTimeMetaDataState
@@ -180,6 +180,21 @@ defmodule MishkaCmsWeb.ErrorHTMLSiteTest do
       assert no_route(conn) =~ "own 404"
       assert bad_csrf(conn) =~ "own 403"
       assert no_page(conn) =~ "own 404"
+    end
+
+    @tag skip:
+           OriginValidator.host_name("A.") != "a" &&
+             "needs a core that reads a host in capital letters"
+    test "answers on its host in capital letters and with the root's dot", %{
+      conn: conn,
+      site: site
+    } do
+      error_page!(site, [{404, "<p>own 404</p>"}])
+
+      for host <- [String.upcase(site.host), site.host <> "."] do
+        assert no_route(on(conn, host)) =~ "own 404"
+        assert no_page(on(conn, host)) =~ "own 404"
+      end
     end
 
     test "answers a request the endpoint refuses before the router", %{conn: conn, site: site} do

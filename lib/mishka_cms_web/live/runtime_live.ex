@@ -131,6 +131,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
     HeadCodes,
     Languages,
     Layout,
+    OriginValidator,
     Page,
     PageEditions,
     PageSource,
@@ -1388,7 +1389,7 @@ defmodule MishkaCmsWeb.RuntimeLive do
     defp same_host?(browser, _site) when browser in ["localhost", "127.0.0.1"], do: true
   end
 
-  defp same_host?(browser, site), do: browser == site
+  defp same_host?(browser, site), do: OriginValidator.host_name(browser) == site
 
   # A PAGE PAYS FOR THE VISITOR ONLY WHERE IT HAS A USE FOR ONE. Two uses: permissions, which need
   # somebody to judge, and markup or code that reads `@current_user`, which
