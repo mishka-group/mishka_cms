@@ -17,11 +17,13 @@ defmodule MishkaCmsWeb.ErrorHTML do
   ## The plain status message
 
   The answer is Phoenix's plain message for the status, sent with the status the request had, when
-  there is no page to draw.
+  there is no page to draw or it cannot be drawn. `render/2` never raises.
 
   | the request's site | in the log |
   |--------------------|------------|
   | has no Error Page, or none with an entry for the status | one warning |
+  | has one that does not compile | one warning |
+  | has one that raises as it is drawn | one warning with the exception's name and first line |
   | is offline, switched off or API only, before the pipeline named it | nothing |
   | does not exist: no site has the host | nothing |
 
@@ -34,7 +36,7 @@ defmodule MishkaCmsWeb.ErrorHTML do
     * `ErrorHTML.Render.BeforeCompile` - `%{path: path, site: site, status_code: "404"}`, the Error
       Page looked for.
     * `ErrorHTML.Render.AfterCompile` - `%{conn: conn, content: content}`, what the page's module
-      rendered.
+      rendered, drawn once every plugin has had it.
     * `ErrorHTML.Render.CompileError` - `%{error: error, template: template, fallback: message}`
       for every plain message but that of a page with no entry for the status. A plugin may answer
       another `:fallback`. `error` is `:no_error_page`, the reason the page did not compile, what was
@@ -73,6 +75,11 @@ defmodule MishkaCmsWeb.ErrorHTML do
       {:ok, conn} -> site_page(conn, template, status_code)
       {:error, reason} -> fallback(reason, template)
     end
+  catch
+    kind, reason ->
+      error = Exception.normalize(kind, reason, __STACKTRACE__)
+      warn_failed(kind, error, template)
+      fallback(error, template)
   end
 
   def render(template, _assigns) do
@@ -154,8 +161,13 @@ defmodule MishkaCmsWeb.ErrorHTML do
               )
               |> then(&Hook.call("ErrorHTML.Render.AfterCompile", &1))
               |> Map.get(:content)
+              |> draw()
 
             {:error, {:compile, reason}} ->
+              Logger.warning(
+                "the error page of site #{error_data.site.name} for #{template} does not compile, fallbacking to default Phoenix error page"
+              )
+
               fallback(reason, template)
 
             {:error, :no_error_page} ->
@@ -169,24 +181,32 @@ defmodule MishkaCmsWeb.ErrorHTML do
         {result, %{}}
       end
     )
-  rescue
-    error ->
-      # Error text is from Beacon project
-      Logger.warning("""
-      failed to render error page for #{template}, fallbacking to default Phoenix error page
-
-      Got:
-
-      #{inspect(error)}
-      """)
-
-      fallback(error, template)
   end
+
+  # Drawn here, where a raise still has a plain message to answer with: Phoenix draws what
+  # `render/2` answers after it has returned. Text is left to Phoenix, which escapes it.
+  defp draw(content) when is_binary(content), do: content
+  defp draw(content), do: {:safe, Phoenix.HTML.Engine.encode_to_iodata!(content)}
 
   defp fallback(error, template) do
     %{error: error, template: template, fallback: status_message(template)}
     |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
     |> Map.get(:fallback)
+    |> draw()
+  catch
+    kind, reason ->
+      warn_failed(kind, Exception.normalize(kind, reason, __STACKTRACE__), template)
+      status_message(template)
+  end
+
+  # The start of the first line alone: the rest of a `KeyError`'s message is every assign of the conn.
+  defp warn_failed(kind, error, template) do
+    [line | _rest] = kind |> Exception.format_banner(error) |> String.split("\n", parts: 2)
+    cause = String.slice(line, 0, 200)
+
+    Logger.warning(
+      "failed to render error page for #{template}, fallbacking to default Phoenix error page: #{cause}"
+    )
   end
 
   # One clause per status: each message is a literal `gettext/1`, which `mix gettext.extract` reads.
