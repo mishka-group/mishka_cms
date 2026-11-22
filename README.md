@@ -51,7 +51,7 @@ Open <http://localhost:4000>, and the install wizard creates the master admin an
 ## 🧪 Try the demo image
 
 ```bash
-docker pull ghcr.io/mishka-group/mishka_cms-demo:0.0.2
+docker pull ghcr.io/mishka-group/mishka_cms-demo:0.0.3
 ```
 
 [`demo-docker-compose.yml`](examples/docker/demo-docker-compose.yml) starts it with PostgreSQL 18 and explains the secrets. Open `/install?token=...` with your `MISHKA_SETUP_TOKEN`. The demo is for trying only: its migrations belong to one release, so a newer demo needs a fresh database.
