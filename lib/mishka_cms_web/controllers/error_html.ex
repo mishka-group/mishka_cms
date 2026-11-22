@@ -6,6 +6,12 @@ defmodule MishkaCmsWeb.ErrorHTML do
   @moduledoc """
   This module is invoked by your endpoint in case of errors on HTML requests.
 
+  It draws the site's own Error Page for the status. The site is `:current_site`, or, for an error
+  raised before `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug` ran (a bad CSRF token, an address no
+  route matches), the active site the request's host names, found by
+  `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug.site_for/1` from ETS. A site with no Error Page, or no
+  site, gets Phoenix's plain status message without a warning.
+
   See config/config.exs.
   """
   use MishkaCmsWeb, :html
@@ -14,6 +20,7 @@ defmodule MishkaCmsWeb.ErrorHTML do
   alias MishkaCmsCore.Runtime.States.{CompileFailureState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Runtime.Compilers.{ErrorCompiler, Helpers}
   alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorStatus, Translations}
+  alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
   alias MishkaInstaller.Event.Hook
 
   # If you want to customize your error pages,
@@ -33,6 +40,33 @@ defmodule MishkaCmsWeb.ErrorHTML do
   ############################ (▰˘◡˘▰) Functions (▰˘◡˘▰) #############################
   ####################################################################################
   def render(<<status_code::binary-size(3), _rest::binary>> = template, %{conn: conn} = _assigns) do
+    case with_site(conn) do
+      {:ok, conn} -> site_page(conn, template, status_code)
+      :error -> status_message(template)
+    end
+  end
+
+  def render(template, _assigns) do
+    Logger.warning(
+      "could not find an error page for #{template}, fallbacking to default Phoenix error page"
+    )
+
+    status_message(template)
+  end
+
+  # An error raised before `SiteLookupPlug` ran, such as a bad CSRF token or an address no route
+  # matches, has no `:current_site`, so the site is found from the host the way the plug finds it.
+  # A switched-off site's own pages are not served, so it gets the default page.
+  defp with_site(%Plug.Conn{assigns: %{current_site: %{name: _name}}} = conn), do: {:ok, conn}
+
+  defp with_site(conn) do
+    case SiteLookupPlug.site_for(conn.host) do
+      {:ok, %{active: true} = site} -> {:ok, Plug.Conn.assign(conn, :current_site, site)}
+      _no_site -> :error
+    end
+  end
+
+  defp site_page(conn, template, status_code) do
     # Emit counter for error page renders
     :telemetry.execute(
       [:mishka_cms, :error_page, :render],
@@ -66,20 +100,9 @@ defmodule MishkaCmsWeb.ErrorHTML do
           %{path: error_path, site: site, status_code: status_code}
           |> then(&Hook.call("ErrorHTML.Render.BeforeCompile", &1))
 
-        page_module =
-          "#{error_data.path}"
-          |> WebRunTimeMetaDataState.find_by_path_and_site!(error_data.site.name, "ErrorPage")
-          |> then(&Helpers.module_name(&1.id, &1.site, "ErrorPage"))
-
         result =
-          ModuleCompilerHandler.compile_or_return_module(
-            page_module,
-            error_data.path,
-            error_data.site.name,
-            error_data.site.id
-          )
-          |> case do
-            {:ok, _result} ->
+          case error_module(error_data.path, error_data.site) do
+            {:ok, page_module} ->
               conn
               |> Plug.Conn.assign(:page_module, page_module)
               |> Plug.Conn.assign(:page_data, page_module.__error_information__())
@@ -93,6 +116,10 @@ defmodule MishkaCmsWeb.ErrorHTML do
               |> Map.get(:content)
 
             {:error, reason} ->
+              Logger.warning(
+                "site #{site.name} has no error page for #{template}, fallbacking to default Phoenix error page"
+              )
+
               %{
                 error: reason,
                 template: template,
@@ -123,14 +150,6 @@ defmodule MishkaCmsWeb.ErrorHTML do
       }
       |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
       |> Map.get(:fallback)
-  end
-
-  def render(template, _assigns) do
-    Logger.warning(
-      "could not find an error page for #{template}, fallbacking to default Phoenix error page"
-    )
-
-    status_message(template)
   end
 
   # One clause per status: each message is a literal `gettext/1`, which `mix gettext.extract` reads.
