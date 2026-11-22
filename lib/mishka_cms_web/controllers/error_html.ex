@@ -199,14 +199,16 @@ defmodule MishkaCmsWeb.ErrorHTML do
       status_message(template)
   end
 
-  # The start of the first line alone: the rest of a `KeyError`'s message is every assign of the conn.
   defp warn_failed(kind, error, template) do
-    [line | _rest] = kind |> Exception.format_banner(error) |> String.split("\n", parts: 2)
-    cause = String.slice(line, 0, 200)
-
     Logger.warning(
-      "failed to render error page for #{template}, fallbacking to default Phoenix error page: #{cause}"
+      "failed to render error page for #{template}, fallbacking to default Phoenix error page: #{cause(kind, error)}"
     )
+  end
+
+  # The start of the first line alone: the rest of a `KeyError`'s message is every assign of the conn.
+  defp cause(kind, error) do
+    [line | _rest] = kind |> Exception.format_banner(error) |> String.split("\n", parts: 2)
+    String.slice(line, 0, 200)
   end
 
   # One clause per status: each message is a literal `gettext/1`, which `mix gettext.extract` reads.
@@ -247,7 +249,7 @@ defmodule MishkaCmsWeb.ErrorHTML do
   `MishkaCms.Plugs.MaintenanceGate` answers an offline site with it, and with its built-in page on
   `{:error, reason}`: `:no_error_page` when the site has none, `:no_offline_entry` when its Error
   Page does not hold one, `{:compile, reason}` when it does not compile, `{:render, reason}` when
-  the entry raised as it was drawn at compile time.
+  the entry raised as it was drawn, at compile time or for this visitor.
 
   The Error Page is found in `WebRunTimeMetaDataState` and its module is compiled once, as for a
   404, so after the first request this reads ETS only. The template is handed `@status` as
@@ -260,11 +262,26 @@ defmodule MishkaCmsWeb.ErrorHTML do
 
     with {:ok, module} <- error_module(path, site),
          :ok <- offline_entry(module) do
-      {:ok, ErrorCompiler.render_page(module, conn, ErrorStatus.offline())}
+      draw_offline(module, conn)
     end
   end
 
   def offline_page(_conn), do: {:error, :no_error_page}
+
+  # The entry drew when its module was compiled, for a visitor with no account: one it raises for
+  # alone still gets the built-in page.
+  defp draw_offline(module, conn) do
+    {:ok, ErrorCompiler.render_page(module, conn, ErrorStatus.offline())}
+  catch
+    kind, reason ->
+      error = Exception.normalize(kind, reason, __STACKTRACE__)
+
+      Logger.warning(
+        "failed to render the offline page of site #{conn.assigns.current_site.name}, fallbacking to the built-in page: #{cause(kind, error)}"
+      )
+
+      {:error, {:render, error}}
+  end
 
   defp error_module(path, site) do
     case WebRunTimeMetaDataState.find_by_path_and_site(path, site.name) do

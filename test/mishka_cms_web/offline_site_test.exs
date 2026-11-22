@@ -18,6 +18,8 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
   """
   use MishkaCmsWeb.ConnCase, async: false
 
+  import ExUnit.CaptureLog, only: [capture_log: 1]
+
   @moduletag :capture_log
 
   import MishkaCms.Test.Factory
@@ -487,6 +489,29 @@ defmodule MishkaCmsWeb.OfflineSiteTest do
 
       assert not_found =~ ~s(<p id="own-404">Not here</p>)
       assert not_found =~ "<title>Not Found</title>"
+    end
+
+    # It drew for a visitor with no account as it was compiled, and raises for this one alone.
+    test "is the built-in one for a visitor the offline entry raises for, and its own for the rest",
+         %{conn: conn, site: site} do
+      error_page!(site, [
+        entry(
+          :offline,
+          ~S|<p id="own-offline">{@conn.query_string == "boom" && String.to_integer("x")}</p>|
+        )
+      ])
+
+      assert get(conn, "/?fine").resp_body =~ "own-offline"
+
+      log =
+        capture_log(fn ->
+          conn = get(conn, "/?boom")
+
+          assert maintenance?(conn)
+          refute conn.resp_body =~ "own-offline"
+        end)
+
+      assert log =~ "failed to render the offline page of site #{site.name}"
     end
 
     test "is the site's own again once the layout that raised is fixed and recompiled", %{
