@@ -153,7 +153,7 @@ defmodule MishkaCmsWeb.Telemetry do
       ),
       summary("mishka_cms.error_page.render.stop.duration",
         unit: {:native, :millisecond},
-        tags: [:status_code, :path, :site],
+        tags: [:status_code, :site, :outcome],
         description: "Error page render duration"
       )
     ]
