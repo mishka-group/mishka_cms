@@ -123,7 +123,7 @@ defmodule MishkaCms.MixProject do
       {:phoenix_ecto, "~> 4.7"},
       {:ecto_sql, "~> 3.14"},
       {:decimal, "~> 3.2"},
-      {:postgrex, "~> 0.22"},
+      {:postgrex, "~> 0.23"},
 
       # Req/Res Stuff
       {:bandit, "~> 1.15"},
@@ -179,7 +179,7 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:mishka_cms_builder, "~> 0.0.1-alpha.8"),
       mishka_dep(:mishka_blog, "~> 0.0.3-alpha.10"),
       mishka_dep(:mishka_document, "~> 0.0.3-alpha.4"),
-      mishka_dep(:mishka_gervaz, "~> 0.0.9"),
+      mishka_dep(:mishka_gervaz, "~> 0.0.10"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
       # the ones the sites do not offer.
