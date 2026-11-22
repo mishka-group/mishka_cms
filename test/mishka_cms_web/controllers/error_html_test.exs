@@ -146,16 +146,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       # Render the 404 error page
       result = ErrorHTML.render("404.html", %{conn: conn})
 
-      # Convert rendered template to string for testing
-      html_content =
-        case result do
-          %Phoenix.LiveView.Rendered{} = rendered ->
-            # Convert LiveView rendered to HTML string
-            rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
-
-          string when is_binary(string) ->
-            string
-        end
+      html_content = result |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
 
       # Should return custom content from the ErrorPage
       assert html_content =~ "404"
@@ -169,16 +160,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       # Render the 500 error page
       result = ErrorHTML.render("500.html", %{conn: conn})
 
-      # Convert rendered template to string for testing
-      html_content =
-        case result do
-          %Phoenix.LiveView.Rendered{} = rendered ->
-            # Convert LiveView rendered to HTML string
-            rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
-
-          string when is_binary(string) ->
-            string
-        end
+      html_content = result |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
 
       # Should return custom content for 500 error
       assert html_content =~ "500"
@@ -191,16 +173,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       # Render the 403 error page
       result = ErrorHTML.render("403.html", %{conn: conn})
 
-      # Convert rendered template to string for testing
-      html_content =
-        case result do
-          %Phoenix.LiveView.Rendered{} = rendered ->
-            # Convert LiveView rendered to HTML string
-            rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
-
-          string when is_binary(string) ->
-            string
-        end
+      html_content = result |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
 
       # Should return custom content for 403 error
       assert html_content =~ "403"
@@ -233,7 +206,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       conn =
         build_conn()
         |> Plug.Conn.put_private(:phoenix_endpoint, MishkaCmsWeb.Endpoint)
-        |> Map.put(:host, site.host)
+        |> Map.update!(:req_headers, &[{"host", site.host} | &1])
 
       html =
         "403.html"
@@ -268,7 +241,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       conn =
         build_conn()
         |> Plug.Conn.put_private(:phoenix_endpoint, MishkaCmsWeb.Endpoint)
-        |> Map.put(:host, "no-site.example.com")
+        |> Map.update!(:req_headers, &[{"host", "no-site.example.com"} | &1])
 
       log =
         capture_log(fn ->

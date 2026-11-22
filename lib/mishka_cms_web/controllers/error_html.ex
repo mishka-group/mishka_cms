@@ -8,10 +8,37 @@ defmodule MishkaCmsWeb.ErrorHTML do
 
   It draws the site's own Error Page for the status. The site is `:current_site`, or, for an error
   raised before `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug` ran (a bad CSRF token, an address no
-  route matches), the active site the request's host names, found by
-  `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug.site_for/1` from ETS. A site with no Error Page gets
-  Phoenix's plain status message and one warning in the log; a host that names no active site gets
-  the message alone.
+  route matches), the site the request's `Host` header names, read as that plug reads it
+  (`MishkaCmsCore.Runtime.OriginValidator.host_name/1`,
+  `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug.site_for/1`), while that site is open and serves
+  pages. Its page is then drawn in its first language. The plug's `web:request:before_site_resolve`
+  event is not called: a plugin on it may answer the request, which is being answered here.
+
+  ## The plain status message
+
+  The answer is Phoenix's plain message for the status, sent with the status the request had, when
+  there is no page to draw.
+
+  | the request's site | in the log |
+  |--------------------|------------|
+  | has no Error Page, or none with an entry for the status | one warning |
+  | is offline, switched off or API only, before the pipeline named it | nothing |
+  | does not exist: no site has the host | nothing |
+
+  The last two are what `SiteLookupPlug` and `MishkaCms.Plugs.MaintenanceGate` answer unlogged on
+  any other address, so a scanner cannot fill the log here either.
+
+  ## Events
+
+    * `ErrorHTML.Render.BeforeRender` - `%{conn: conn, status_code: "404", template: "404.html"}`.
+    * `ErrorHTML.Render.BeforeCompile` - `%{path: path, site: site, status_code: "404"}`, the Error
+      Page looked for.
+    * `ErrorHTML.Render.AfterCompile` - `%{conn: conn, content: content}`, what the page's module
+      rendered.
+    * `ErrorHTML.Render.CompileError` - `%{error: error, template: template, fallback: message}`
+      for every plain message but that of a page with no entry for the status. A plugin may answer
+      another `:fallback`. `error` is `:no_error_page`, the reason the page did not compile, what was
+      raised, or why no site answers: `:not_found`, `:inactive`, `:offline` or `:api_only`.
 
   See config/config.exs.
   """
@@ -20,7 +47,8 @@ defmodule MishkaCmsWeb.ErrorHTML do
   alias MishkaCmsCore.Runtime.Handlers.ModuleCompilerHandler
   alias MishkaCmsCore.Runtime.States.{CompileFailureState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Runtime.Compilers.{ErrorCompiler, Helpers}
-  alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorStatus, Translations}
+  alias MishkaCmsCore.Runtime.{ErrorAddress, ErrorStatus, Languages, Translations}
+  alias MishkaCmsCore.Runtime.{OriginValidator, SiteAvailability}
   alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
   alias MishkaInstaller.Event.Hook
 
@@ -43,7 +71,7 @@ defmodule MishkaCmsWeb.ErrorHTML do
   def render(<<status_code::binary-size(3), _rest::binary>> = template, %{conn: conn} = _assigns) do
     case with_site(conn) do
       {:ok, conn} -> site_page(conn, template, status_code)
-      :error -> status_message(template)
+      {:error, reason} -> fallback(reason, template)
     end
   end
 
@@ -57,13 +85,24 @@ defmodule MishkaCmsWeb.ErrorHTML do
 
   # An error raised before `SiteLookupPlug` ran, such as a bad CSRF token or an address no route
   # matches, has no `:current_site`, so the site is found from the host the way the plug finds it.
-  # A switched-off site's own pages are not served, so it gets the default page.
+  # A site closed to its visitors shows none of its own pages, so it gets the default page.
   defp with_site(%Plug.Conn{assigns: %{current_site: %{name: _name}}} = conn), do: {:ok, conn}
 
   defp with_site(conn) do
-    case SiteLookupPlug.site_for(conn.host) do
-      {:ok, %{active: true} = site} -> {:ok, Plug.Conn.assign(conn, :current_site, site)}
-      _no_site -> :error
+    host = conn |> Plug.Conn.get_req_header("host") |> List.first() |> OriginValidator.host_name()
+
+    with {:ok, site} <- SiteLookupPlug.site_for(host), :ok <- open(site) do
+      Gettext.put_locale(Languages.primary(site.id))
+      {:ok, Plug.Conn.assign(conn, :current_site, site)}
+    end
+  end
+
+  defp open(%{active: true, mode: :api_only}), do: {:error, :api_only}
+
+  defp open(%{id: id}) do
+    case SiteAvailability.state(id) do
+      :open -> :ok
+      closed -> {:error, closed}
     end
   end
 
