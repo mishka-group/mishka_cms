@@ -308,6 +308,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
         end)
 
       refute log =~ "failed to render error page"
+      refute log =~ "has no error page"
     end
 
     test "falls back to Phoenix default when no error page exists while ErrorHTML.Render.CompileError cannot run",

@@ -9,8 +9,9 @@ defmodule MishkaCmsWeb.ErrorHTML do
   It draws the site's own Error Page for the status. The site is `:current_site`, or, for an error
   raised before `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug` ran (a bad CSRF token, an address no
   route matches), the active site the request's host names, found by
-  `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug.site_for/1` from ETS. A site with no Error Page, or no
-  site, gets Phoenix's plain status message without a warning.
+  `MishkaCmsCore.Runtime.Plugs.SiteLookupPlug.site_for/1` from ETS. A site with no Error Page gets
+  Phoenix's plain status message and one warning in the log; a host that names no active site gets
+  the message alone.
 
   See config/config.exs.
   """
@@ -115,18 +116,15 @@ defmodule MishkaCmsWeb.ErrorHTML do
               |> then(&Hook.call("ErrorHTML.Render.AfterCompile", &1))
               |> Map.get(:content)
 
-            {:error, reason} ->
+            {:error, {:compile, reason}} ->
+              fallback(reason, template)
+
+            {:error, :no_error_page} ->
               Logger.warning(
-                "site #{site.name} has no error page for #{template}, fallbacking to default Phoenix error page"
+                "site #{error_data.site.name} has no error page for #{template}, fallbacking to default Phoenix error page"
               )
 
-              %{
-                error: reason,
-                template: template,
-                fallback: status_message(template)
-              }
-              |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
-              |> Map.get(:fallback)
+              fallback(:no_error_page, template)
           end
 
         {result, %{}}
@@ -143,13 +141,13 @@ defmodule MishkaCmsWeb.ErrorHTML do
       #{inspect(error)}
       """)
 
-      %{
-        error: error,
-        template: template,
-        fallback: status_message(template)
-      }
-      |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
-      |> Map.get(:fallback)
+      fallback(error, template)
+  end
+
+  defp fallback(error, template) do
+    %{error: error, template: template, fallback: status_message(template)}
+    |> then(&Hook.call("ErrorHTML.Render.CompileError", &1))
+    |> Map.get(:fallback)
   end
 
   # One clause per status: each message is a literal `gettext/1`, which `mix gettext.extract` reads.
