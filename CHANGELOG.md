@@ -6,8 +6,9 @@
 - `GET /_health` answers first, on any host and over plain http, so a deploy can wait on it
 - A site's head code (analytics, verification, fonts) is drawn on its public pages with the response's nonce, and follows live navigation. Admin and editor pages never get it
 - Scheduled Blog posts go out at their time: the Oban crontab runs the Blog's scheduled-post worker every minute
-- A page's preview can show a state only a preview may show (`?preview_state=`, for example the newsletter's Confirmed), and a record sample in another language draws the preview in that language when the site publishes in it
+- A page's preview can show a state only a preview may show (`?preview_state=`, for example a form's Confirmed state), and a record sample in another language draws the preview in that language when the site publishes in it
 - The content editor keeps and inserts tables
+- An error page that fails to draw for a visitor is kept for its status, until it is drawn again
 
 ### Bug fixes:
 - A page with no layout is drawn bare, exactly the markup its author wrote, on the published page and in the preview as on the editor's canvas: `RuntimeLive.default_layout/1` adds the flash group and no padded `max-w-4xl` frame, and the author sets a width by wrapping the content in a section, for example `max-w-4xl mx-auto`
@@ -15,11 +16,18 @@
 - A release's shell padding no longer loses to a site's own `px-4`: the image writes the shell's class list with Tailwind's own scanner
 - The live socket hands a page its visitor's user agent, so the Blog leaves a bot's view uncounted
 - The search select in the admin's forms answers ArrowDown and Enter as it should, because the admin registers Mishka Gervaz's hooks
+- An error raised before the site is known shows the error page of the site its Host header names, only while that site is open and serves pages, in its first language; a site with no error page falls back to Phoenix's page with one short warning
+- An error page that raises as it is drawn, or does not compile, answers the plain message with the status the request had and one short warning; an offline page that raises answers the built-in page the same way, and only the error page's own template is drawn inside that boundary
+- Only a site with no Error Page is logged as having none, and the warning of an error page that raises an ArgumentError says which argument, on one short line
+- A page and the GraphQL socket answer on their site's host in capital letters or with the root's dot
+- The duration of an error page is told apart by site, status and outcome
+- `/favicon.ico` of a site with no favicon answers the core's bundled Mishka mark (`image/png`, kept an hour) in place of a 404
 - Security: `phoenix` 1.8.17 and `phoenix_live_view` 1.2.15 (EEF-CVE-2026-128361, EEF-CVE-2026-129344 and EEF-CVE-2026-126334), `bandit` 1.15 and `jose` 1.11.13
 
 ### Refactors:
 - The host no longer lists `ash_slug` (the CMS slugs with `mishka_slug`)
-- The editor runs TipTap 3.34.0, and every dependency is at its latest release, including `ash` 3.37.7, `ash_postgres` 2.16.0, `ash_authentication` 5.0.0-rc.18, `swoosh` 1.30, `postgrex` 0.23.0, `mishka_gervaz` 0.0.10, `mishka_installer` 0.1.16 and `guarded_struct` 0.1.10
+- The host takes `mishka_cms_core` 0.0.6, `mishka_cms_builder` 0.0.1, `mishka_blog` 0.0.3, `mishka_document` 0.0.3, `mishka_gervaz` 0.0.12, `mishka_installer` 0.1.17, `guarded_struct` 0.1.11 and the four sign-in extensions at 0.0.3
+- The editor runs TipTap 3.35.0, and every dependency is at its latest release, including `ash` 3.37.7, `ash_postgres` 2.16.0, `ash_authentication` 5.0.0-rc.18, `swoosh` 1.30, `postgrex` 0.23.0, `mishka_gervaz` 0.0.10, `mishka_installer` 0.1.16 and `guarded_struct` 0.1.10
 - The CI, release and dependency-update workflows are shared by the Mishka repositories, and a new package release opens one rolling `deps/mishka` pull request here
 
 # Changelog for MishkaCms 0.0.2

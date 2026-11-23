@@ -1,5 +1,6 @@
-Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:23,60D1163
-Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:39,6561B14
-Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:94,35535E7
+Config.CSRF: Missing CSRF Protections,lib/mishka_cms_web/router.ex:61,3513C1B
+Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:28,75F50F
+Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:44,194A0E6
+Config.CSWH: Cross-Site Websocket Hijacking,lib/mishka_cms_web/endpoint.ex:99,24058A4
 XSS.Raw: XSS,lib/mishka_cms_web/components/layouts/root.html.heex:19,624EBDB
-XSS.Raw: XSS,lib/mishka_cms_web/components/layouts/root.html.heex:204,15C0DC8
+XSS.Raw: XSS,lib/mishka_cms_web/components/layouts/root.html.heex:208,52A6A19

@@ -115,6 +115,11 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
         |> Ash.Query.set_tenant(site.id)
         |> Ash.read!(authorize?: false)
 
+      # Each test's site has the same name, so entries left by an earlier test would point at a
+      # module this test never compiles.
+      WebRunTimeMetaDataState.delete_by_site(site.name)
+      on_exit(fn -> WebRunTimeMetaDataState.delete_by_site(site.name) end)
+
       # Initialize the state with the error page
       Enum.each(error_pages, fn error_page ->
         WebRunTimeMetaDataState.save(%{
@@ -141,16 +146,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       # Render the 404 error page
       result = ErrorHTML.render("404.html", %{conn: conn})
 
-      # Convert rendered template to string for testing
-      html_content =
-        case result do
-          %Phoenix.LiveView.Rendered{} = rendered ->
-            # Convert LiveView rendered to HTML string
-            rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
-
-          string when is_binary(string) ->
-            string
-        end
+      html_content = result |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
 
       # Should return custom content from the ErrorPage
       assert html_content =~ "404"
@@ -164,16 +160,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       # Render the 500 error page
       result = ErrorHTML.render("500.html", %{conn: conn})
 
-      # Convert rendered template to string for testing
-      html_content =
-        case result do
-          %Phoenix.LiveView.Rendered{} = rendered ->
-            # Convert LiveView rendered to HTML string
-            rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
-
-          string when is_binary(string) ->
-            string
-        end
+      html_content = result |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
 
       # Should return custom content for 500 error
       assert html_content =~ "500"
@@ -186,16 +173,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
       # Render the 403 error page
       result = ErrorHTML.render("403.html", %{conn: conn})
 
-      # Convert rendered template to string for testing
-      html_content =
-        case result do
-          %Phoenix.LiveView.Rendered{} = rendered ->
-            # Convert LiveView rendered to HTML string
-            rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
-
-          string when is_binary(string) ->
-            string
-        end
+      html_content = result |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
 
       # Should return custom content for 403 error
       assert html_content =~ "403"
@@ -213,13 +191,64 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
     end
 
     test "falls back to Phoenix default when no error page exists", %{conn: conn, site: _site} do
-      # Clear the state to simulate no error page
-      # Since delete_by_site doesn't exist, we'll clear all data
       WebRunTimeMetaDataState.clear()
 
-      # Should return default Phoenix error message
-      result = ErrorHTML.render("404.html", %{conn: conn})
-      assert result == "Not Found"
+      log =
+        capture_log(fn ->
+          assert ErrorHTML.render("404.html", %{conn: conn}) == "Not Found"
+        end)
+
+      refute log =~ "failed to render error page"
+      assert log =~ "has no error page for 404.html, fallbacking to default Phoenix error page"
+    end
+
+    test "draws the site's page for an error raised before the site was resolved", %{site: site} do
+      conn =
+        build_conn()
+        |> Plug.Conn.put_private(:phoenix_endpoint, MishkaCmsWeb.Endpoint)
+        |> Map.update!(:req_headers, &[{"host", site.host} | &1])
+
+      html =
+        "403.html"
+        |> ErrorHTML.render(%{conn: conn})
+        |> Phoenix.HTML.Safe.to_iodata()
+        |> IO.iodata_to_binary()
+
+      assert html =~ "You don't have permission to access this resource"
+    end
+
+    test "a POST with a bad CSRF token gets the site's 403 page", %{site: site} do
+      conn =
+        build_conn()
+        |> Map.put(:host, site.host)
+        |> Map.update!(:req_headers, &[{"host", site.host} | List.keydelete(&1, "host", 0)])
+        |> Plug.Conn.put_private(:plug_skip_csrf_protection, false)
+
+      log =
+        capture_log(fn ->
+          {403, _headers, body} =
+            assert_error_sent(403, fn ->
+              post(conn, "/api/auth/user/password/sign_in", %{"_csrf_token" => "wrong"})
+            end)
+
+          assert body =~ "You don't have permission to access this resource"
+        end)
+
+      refute log =~ "failed to render error page"
+    end
+
+    test "an error on a host no site has gets the plain message without a warning" do
+      conn =
+        build_conn()
+        |> Plug.Conn.put_private(:phoenix_endpoint, MishkaCmsWeb.Endpoint)
+        |> Map.update!(:req_headers, &[{"host", "no-site.example.com"} | &1])
+
+      log =
+        capture_log(fn ->
+          assert ErrorHTML.render("403.html", %{conn: conn}) == "Forbidden"
+        end)
+
+      refute log =~ "failed to render error page"
     end
 
     test "falls back to Phoenix default for a page that does not compile while ErrorHTML.Render.CompileError cannot run",
@@ -252,6 +281,7 @@ defmodule MishkaCmsWeb.ErrorHTMLTest do
         end)
 
       refute log =~ "failed to render error page"
+      refute log =~ "has no error page"
     end
 
     test "falls back to Phoenix default when no error page exists while ErrorHTML.Render.CompileError cannot run",

@@ -61,13 +61,14 @@ defmodule MishkaCmsWeb.GraphqlSocket do
   use Absinthe.Phoenix.Socket,
     schema: MishkaCmsWeb.GraphqlSchema
 
+  alias MishkaCmsCore.Runtime.OriginValidator
   alias MishkaCmsCore.Runtime.Plugs.{AdminSurfacePlug, ApiAvailabilityPlug, ApiTenantLookupPlug}
   alias MishkaCmsCore.Runtime.SiteAvailability
   alias MishkaCmsCore.Runtime.States.SiteState
 
   @impl true
   def connect(params, socket, %{uri: %URI{host: host}} = connect_info) when is_binary(host) do
-    case SiteState.get_by_host(host) do
+    case host |> OriginValidator.host_name() |> SiteState.get_by_host() do
       {:ok, site} ->
         connect_to(site, SiteAvailability.state(site.id), params, socket, connect_info)
 
