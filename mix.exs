@@ -218,6 +218,8 @@ defmodule MishkaCms.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "ash.setup", "assets.setup", "assets.build", "run priv/repo/seeds.exs"],
+      # Once per clone: the commit hook in `.githooks/` (format and credo on the staged files).
+      hooks: ["cmd git config core.hooksPath .githooks"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ash.setup --quiet", "test"],

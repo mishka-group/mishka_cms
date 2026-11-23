@@ -63,6 +63,7 @@ erl_crash.dump
 # Agent and developer files: rules, skills, the friction log, handoffs and decisions. The image never
 # reads them.
 /.claude/
+/.githooks/
 /.github/
 /docs/
 AGENTS.md

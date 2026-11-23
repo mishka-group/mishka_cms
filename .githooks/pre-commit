@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fast checks on the staged Elixir files before every commit. The full gate is `MISHKA_DEPS=hex mix ci`.
+# Turned on once per clone with `mix hooks`.
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.ex' '*.exs' '*.heex')
+[ -z "$STAGED" ] && exit 0
+
+mix format --check-formatted $STAGED
+MIX_ENV=test mix credo --strict $STAGED
