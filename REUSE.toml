@@ -28,3 +28,45 @@ path = [
 ]
 SPDX-FileCopyrightText = "2026 Mishka Group contributors <https://github.com/mishka-group/mishka_cms/graphs/contributors>"
 SPDX-License-Identifier = "Apache-2.0"
+
+# The agent skills by Matt Pocock (github.com/mattpocock/skills), kept as he wrote them.
+[[annotations]]
+path = [
+  ".claude/skills/ask-matt/**",
+  ".claude/skills/chief-of-staff/**",
+  ".claude/skills/claude-handoff/**",
+  ".claude/skills/code-review/**",
+  ".claude/skills/codebase-design/**",
+  ".claude/skills/diagnosing-bugs/**",
+  ".claude/skills/domain-modeling/**",
+  ".claude/skills/git-guardrails-claude-code/**",
+  ".claude/skills/grill-me/**",
+  ".claude/skills/grill-with-docs/**",
+  ".claude/skills/grilling/**",
+  ".claude/skills/handoff/**",
+  ".claude/skills/implement-spec/**",
+  ".claude/skills/implement/**",
+  ".claude/skills/improve-codebase-architecture/**",
+  ".claude/skills/loop-me/**",
+  ".claude/skills/pr/**",
+  ".claude/skills/prototype/**",
+  ".claude/skills/research/**",
+  ".claude/skills/retro/**",
+  ".claude/skills/setup-matt-pocock-skills/**",
+  ".claude/skills/tdd/**",
+  ".claude/skills/teach/**",
+  ".claude/skills/to-questionnaire/**",
+  ".claude/skills/to-spec/**",
+  ".claude/skills/to-tickets/**",
+  ".claude/skills/triage/**",
+  ".claude/skills/wait-what/**",
+  ".claude/skills/wayfinder/**",
+  ".claude/skills/wizard/**",
+  ".claude/skills/writing-beats/**",
+  ".claude/skills/writing-for-agents/**",
+  ".claude/skills/writing-fragments/**",
+  ".claude/skills/writing-shape/**",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Matt Pocock"
+SPDX-License-Identifier = "MIT"
