@@ -185,7 +185,7 @@ defmodule MishkaCms.MixProject do
       # the ones the sites do not offer.
       mishka_dep(:mishka_cms_auth_google, "~> 0.0.3"),
       mishka_dep(:mishka_cms_auth_github, "~> 0.0.3"),
-      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.3-alpha.2"),
+      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.3"),
       mishka_dep(:mishka_cms_auth_discord, "~> 0.0.3")
     ]
   end
