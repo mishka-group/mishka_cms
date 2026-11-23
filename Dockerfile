@@ -10,8 +10,8 @@
 # resolution problems musl has in production.
 #
 #   - https://hub.docker.com/r/hexpm/elixir/tags?name=1.20.5-erlang-29.1.2  build image
-#   - https://hub.docker.com/_/debian/tags?name=trixie-20261027-slim        release image
-#   - https://hub.docker.com/r/oven/bun/tags?name=1.4.4                     bun binary
+#   - https://hub.docker.com/_/debian/tags?name=trixie-20261104-slim        release image
+#   - https://hub.docker.com/r/oven/bun/tags?name=1.4.5                     bun binary
 #
 # The newest Elixir and Erlang/OTP releases, on the newest snapshot of Debian's current stable
 # (trixie) hexpm builds them for — the same pair as .tool-versions, which developers and CI run;
@@ -21,8 +21,8 @@
 # its erts, ssl and public_key fixes from.
 ARG ELIXIR_VERSION=1.20.5
 ARG OTP_VERSION=29.1.2
-ARG DEBIAN_VERSION=trixie-20261027-slim
-ARG BUN_VERSION=1.4.4
+ARG DEBIAN_VERSION=trixie-20261104-slim
+ARG BUN_VERSION=1.4.5
 
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
@@ -143,7 +143,10 @@ FROM ${RUNNER_IMAGE} AS final
 
 # libncurses6, the one trixie ships. libsctp1 because Erlang 29 opens it at boot and logs an ESOCK
 # warning on every start without it. curl is for the HEALTHCHECK below.
+# `apt-get upgrade` takes the Debian security fixes published after the base image was cut, so a
+# rebuild is enough to pick them up.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
        libstdc++6 openssl libncurses6 libsctp1 locales ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
