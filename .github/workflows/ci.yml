@@ -26,9 +26,10 @@ jobs:
       # The migrations are not in git: each partition generates them before its tests.
       pre-test: .github/scripts/generate_migrations.sh ci
       test-args: ${{ github.event_name != 'pull_request' && '--include slow' || '' }}
-      credo: false
-      dialyzer: false
-      ex_dna: false
+      credo: true
+      dialyzer: true
+      ex_dna: true
+      sobelow: true
       assets: true
       bun-version: "1.4.4"
       # The image is built and smoke-tested on master and by hand; nothing is pushed.
