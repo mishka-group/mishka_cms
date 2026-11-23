@@ -79,7 +79,7 @@ defmodule MishkaCms.Dev.JsAssetsCopier do
       if File.exists?(source_js) do
         _ = File.copy!(source_js, target_js)
 
-        Jason.encode!(%{"name" => name, "main" => "index.js", "version" => "1.0.0"})
+        Jason.encode!(%{"name" => name, "main" => "index.js", "version" => app_version(app)})
         |> then(&File.write!(Path.join(target_package_dir, "package.json"), &1))
 
         Logger.debug("Copied Phoenix module: #{name} (#{filename})")
@@ -87,6 +87,16 @@ defmodule MishkaCms.Dev.JsAssetsCopier do
         Logger.warning("Phoenix file not found: #{source_js}")
       end
     end)
+  end
+
+  # The copied file's own release, so a scanner reading this package.json sees the real version.
+  defp app_version(app) do
+    _ = Application.load(app)
+
+    case Application.spec(app, :vsn) do
+      nil -> "0.0.0"
+      vsn -> to_string(vsn)
+    end
   end
 
   defp copy_npm_packages(source_assets_dir, target_dir) do
