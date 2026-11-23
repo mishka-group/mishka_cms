@@ -59,3 +59,13 @@ erl_crash.dump
 
 # The developer toolchain. The image's Elixir and OTP are the Dockerfile's own ARGs.
 .tool-versions
+
+# Agent and developer files: rules, skills, the friction log, handoffs and decisions. The image never
+# reads them.
+/.claude/
+/.github/
+/docs/
+AGENTS.md
+CLAUDE.md
+FRICTION.md
+GLOSSARY.md
