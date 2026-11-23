@@ -55,9 +55,10 @@ trap cleanup EXIT
 
 # One request, from another container on the network, the way a proxy in front reaches the app.
 # `X-Forwarded-Proto: https` is what that proxy sends: without it the production endpoint answers
-# any host but localhost with a redirect to https. Prints "STATUS REDIRECT_URL".
+# any host but localhost with a redirect to https. Prints "STATUS REDIRECT_URL". The client is the
+# curl image, because the app image carries wget only.
 request() {
-  docker run --rm --network "$network" --entrypoint curl "$image" \
+  docker run --rm --network "$network" curlimages/curl:8.23.0 \
     -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
     -H 'X-Forwarded-Proto: https' "http://${app}:4000$1"
 }
