@@ -1,0 +1,16 @@
+# Friction log
+
+A row for every guess, or every missing tool to see the real result. **Rows are never deleted**:
+closing a row fills the last column with what catches it now, one of:
+
+- `check:<name>`: a step in `mix ci`, a CI job, or a test
+- `skill rule`: written in `AGENTS.md` or a skill
+- `helper:<name>`: a test helper (its doc says what it does not prove)
+- `decided`: a design choice, written where the code is
+- `open`: nothing yet. An `open` row seen twice must become a `check`.
+
+| Date | What was missing or guessed | Where | How it is caught now |
+|---|---|---|---|
+| 2026-11-22 | Core was released before the host's `AsyncLocaleTest` ran, so core needed a second release in one cycle | release cycle | skill rule (`mishka-release`: rehearse on the host before wave 1) |
+| 2026-11-23 | `/favicon.ico` of a site with no favicon was tested as a 404 after core changed it to the Mishka mark | `test/mishka_cms_web/seo_files_test.exs` | check:test suite |
+| 2026-11-23 | CI ran no credo, sobelow, dialyzer or ex_dna, so their findings went stale on master | `.github/workflows/ci.yml` | check:ci (all four turned on) |
