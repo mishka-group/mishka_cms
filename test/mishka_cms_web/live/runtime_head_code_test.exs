@@ -121,7 +121,7 @@ defmodule MishkaCmsWeb.RuntimeHeadCodeTest do
 
     render_patch(view, pricing.path)
     assert_push_event(view, "mishka:head", %{head_code: %{items: items, nonce: nonce}})
-    assert is_binary(nonce)
+    assert byte_size(nonce) > 0
     assert [%{key: key, tag: "meta"}] = items
     assert key == entry.id
 
