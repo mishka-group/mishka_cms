@@ -142,13 +142,14 @@ RUN mix release
 FROM ${RUNNER_IMAGE} AS final
 
 # libncurses6, the one trixie ships. libsctp1 because Erlang 29 opens it at boot and logs an ESOCK
-# warning on every start without it. curl is for the HEALTHCHECK below.
+# warning on every start without it. wget is for the HEALTHCHECK below and Coolify's own health
+# check, which tries curl, then wget; wget pulls in far fewer libraries than curl.
 # `apt-get upgrade` takes the Debian security fixes published after the base image was cut, so a
 # rebuild is enough to pick them up.
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
-       libstdc++6 openssl libncurses6 libsctp1 locales ca-certificates curl \
+       libstdc++6 openssl libncurses6 libsctp1 locales ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
@@ -187,7 +188,7 @@ EXPOSE 4000
 # own, and the lookup refuses them on localhost. `localhost` is excluded from the force_ssl redirect
 # (Plug.SSL default), so plain http works here.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-  CMD curl -fsS "http://localhost:${PORT:-4000}/fonts/fonts.css" > /dev/null || exit 1
+  CMD wget -q -O /dev/null "http://localhost:${PORT:-4000}/fonts/fonts.css" || exit 1
 
 # Migrations are NOT run here on purpose (ROADMAP_DISTRIBUTED_CMS.md, phase 1): run
 # `/app/bin/migrate` as the deploy's pre-start command, then start.
