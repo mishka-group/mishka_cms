@@ -50,6 +50,7 @@ npm-debug.log
 # Ignore Claude files.
 /.claude/*
 !/.claude/skills/
+!/.claude/settings.json
 /.mnesia
 /assets/js/packages
 __extensions/ash*/
