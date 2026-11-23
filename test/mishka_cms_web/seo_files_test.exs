@@ -239,11 +239,18 @@ defmodule MishkaCmsWeb.SeoFilesTest do
       end
     end
 
-    test "is a 404 for a site with no favicon", %{site: site} do
+    test "is the core's bundled Mishka mark for a site with no favicon, never a redirect", %{
+      site: site
+    } do
       conn = fetch(site, "/favicon.ico", accept: @image_accept)
 
-      assert conn.status == 404
-      assert get_resp_header(conn, "cache-control") == ["no-store"]
+      assert conn.status == 200
+      assert conn.private.phoenix_controller == MishkaCmsCoreWeb.SeoController
+      assert get_resp_header(conn, "content-type") == ["image/png"]
+      assert get_resp_header(conn, "cache-control") == ["public, max-age=3600"]
+      assert <<0x89, "PNG", _rest::binary>> = conn.resp_body
+      assert get_resp_header(conn, "location") == []
+      assert get_resp_header(conn, "set-cookie") == []
     end
   end
 
