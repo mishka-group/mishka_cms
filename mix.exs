@@ -28,6 +28,7 @@ defmodule MishkaCms.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      usage_rules: usage_rules(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       consolidate_protocols: Mix.env() != :dev,
@@ -149,7 +150,7 @@ defmodule MishkaCms.MixProject do
       {:floki, "~> 0.38", only: :test},
       {:lazy_html, "~> 0.1"},
       {:igniter, "~> 0.8", only: :dev},
-      {:usage_rules, "~> 1.2", only: [:dev]},
+      {:usage_rules, "~> 1.3", only: [:dev]},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false, warn_if_outdated: true},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.16", only: [:dev, :test], runtime: false},
@@ -199,6 +200,19 @@ defmodule MishkaCms.MixProject do
     else
       {name, version}
     end
+  end
+
+  # `mix usage_rules.sync` writes, between its markers in AGENTS.md, a link to the usage rules of every
+  # dependency that ships them, so an agent reads how a library is meant to be used before using it.
+  defp usage_rules do
+    [
+      file: "AGENTS.md",
+      usage_rules: [
+        {:elixir, link: :markdown},
+        {:otp, link: :markdown},
+        {~r/.*/, link: :markdown}
+      ]
+    ]
   end
 
   defp aliases do
