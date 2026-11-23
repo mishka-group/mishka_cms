@@ -10,8 +10,6 @@ in `__extensions/` (`mishka_dep` in `mix.exs` takes the folder when it is there)
 - `.claude/skills/mishka-release/` (the release waves) and `.claude/skills/mishka-ci/`.
 - `docs/INDEX.md`: the handbook (contracts, guardrails), `GLOSSARY.md`, `docs/adr/`, and the newest
   file in `docs/handoffs/`.
-- UI kit components come from Mishka Chelekom: read its usage rules
-  (https://github.com/mishka-group/mishka_chelekom/blob/master/usage-rules.md) before touching a kit.
 
 ## Layout
 
@@ -66,7 +64,8 @@ without it should add `{:usage_rules, "~> <newest>", only: [:dev]}` and a `usage
    `Phoenix.LiveView.JS` before a JS hook.
 4. **Performance and safety first**: no `rescue`, `try` or `catch` on a path many users hit unless
    nothing else works; count the queries a change adds.
-5. **A paid extension is never in `mix.exs`, `mix.lock` or master.** It is linked locally only.
+5. **Local-only stays local**: an extension linked for development, and its config lines, are never
+   committed to `mix.exs`, `mix.lock` or `config/`.
 6. **Newest versions**: every dependency at its newest release; JS through bun; every TipTap package
    on one version.
 7. **No private repository names** in this public repo.
