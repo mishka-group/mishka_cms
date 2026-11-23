@@ -177,7 +177,7 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:mishka_cms_core, "~> 0.0.6"),
       # The visual page builder.
       mishka_dep(:mishka_cms_builder, "~> 0.0.1"),
-      mishka_dep(:mishka_blog, "~> 0.0.3-alpha.10"),
+      mishka_dep(:mishka_blog, "~> 0.0.3"),
       mishka_dep(:mishka_document, "~> 0.0.3"),
       mishka_dep(:mishka_gervaz, "~> 0.0.12"),
 
