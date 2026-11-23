@@ -22,11 +22,15 @@
 - A page and the GraphQL socket answer on their site's host in capital letters or with the root's dot
 - The duration of an error page is told apart by site, status and outcome
 - `/favicon.ico` of a site with no favicon answers the core's bundled Mishka mark (`image/png`, kept an hour) in place of a 404
+- Security: the image runs on Debian trixie-20261104 and runs `apt-get upgrade` at build time, so it carries the zlib, glibc and apt fixes published after the base image was cut
+- The image uses `wget` instead of `curl` for its health check (Coolify's own check tries curl, then wget), so curl and the libraries it pulls in stay out of the image
+- The Phoenix packages copied for the runtime JavaScript build carry their real versions in `package.json`, so an image scanner no longer reports `phoenix_html` 1.0.0
 - Security: `phoenix` 1.8.17 and `phoenix_live_view` 1.2.15 (EEF-CVE-2026-128361, EEF-CVE-2026-129344 and EEF-CVE-2026-126334), `bandit` 1.15 and `jose` 1.11.13
 
 ### Refactors:
 - The host no longer lists `ash_slug` (the CMS slugs with `mishka_slug`)
 - The host takes `mishka_cms_core` 0.0.6, `mishka_cms_builder` 0.0.1, `mishka_blog` 0.0.3, `mishka_document` 0.0.3, `mishka_gervaz` 0.0.12, `mishka_installer` 0.1.17, `guarded_struct` 0.1.11 and the four sign-in extensions at 0.0.3
+- The image and CI use Bun 1.4.5
 - The editor runs TipTap 3.35.0, and every dependency is at its latest release, including `ash` 3.37.7, `ash_postgres` 2.16.0, `ash_authentication` 5.0.0-rc.18, `swoosh` 1.30, `postgrex` 0.23.0, `mishka_gervaz` 0.0.10, `mishka_installer` 0.1.16 and `guarded_struct` 0.1.10
 - The CI, release and dependency-update workflows are shared by the Mishka repositories, and a new package release opens one rolling `deps/mishka` pull request here
 
