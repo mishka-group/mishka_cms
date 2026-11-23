@@ -4,7 +4,7 @@
 
 defmodule MishkaCms.MixProject do
   use Mix.Project
-  @version "0.0.2"
+  @version "0.0.3"
   @source_url "https://github.com/mishka-group/mishka_cms"
 
   def project do
@@ -98,7 +98,7 @@ defmodule MishkaCms.MixProject do
       {:ash_archival, "~> 2.0"},
       {:ash_events, "~> 0.8"},
       {:ash_state_machine, "~> 0.2"},
-      {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
+      {:ash_authentication_phoenix, "~> 3.0.0-rc.12"},
       {:ash_authentication, "~> 5.0.0-rc.18"},
       {:jose, "~> 1.11"},
       {:ash_postgres, "~> 2.16"},
@@ -117,13 +117,13 @@ defmodule MishkaCms.MixProject do
       {:absinthe_phoenix, "~> 2.0"},
       {:sourceror, "~> 1.13", only: [:dev, :test]},
       {:open_api_spex, "~> 3.22"},
-      {:mishka_installer, "~> 0.1.16"},
+      {:mishka_installer, "~> 0.1.17"},
 
       # DataBase Stuff
       {:phoenix_ecto, "~> 4.7"},
       {:ecto_sql, "~> 3.14"},
       {:decimal, "~> 3.2"},
-      {:postgrex, "~> 0.22"},
+      {:postgrex, "~> 0.23"},
 
       # Req/Res Stuff
       {:bandit, "~> 1.15"},
@@ -171,22 +171,22 @@ defmodule MishkaCms.MixProject do
        compile: false,
        depth: 1},
       {:html_sanitize_ex, "~> 1.5"},
-      mishka_dep(:guarded_struct, "~> 0.1.10"),
+      mishka_dep(:guarded_struct, "~> 0.1.11"),
 
       # Extensions
-      mishka_dep(:mishka_cms_core, "~> 0.0.5-alpha.18"),
+      mishka_dep(:mishka_cms_core, "~> 0.0.6"),
       # The visual page builder.
-      mishka_dep(:mishka_cms_builder, "~> 0.0.1-alpha.8"),
-      mishka_dep(:mishka_blog, "~> 0.0.3-alpha.10"),
-      mishka_dep(:mishka_document, "~> 0.0.3-alpha.4"),
-      mishka_dep(:mishka_gervaz, "~> 0.0.9"),
+      mishka_dep(:mishka_cms_builder, "~> 0.0.1"),
+      mishka_dep(:mishka_blog, "~> 0.0.3"),
+      mishka_dep(:mishka_document, "~> 0.0.3"),
+      mishka_dep(:mishka_gervaz, "~> 0.0.12"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
       # the ones the sites do not offer.
-      mishka_dep(:mishka_cms_auth_google, "~> 0.0.3-alpha.2"),
-      mishka_dep(:mishka_cms_auth_github, "~> 0.0.3-alpha.2"),
-      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.3-alpha.2"),
-      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.3-alpha.2")
+      mishka_dep(:mishka_cms_auth_google, "~> 0.0.3"),
+      mishka_dep(:mishka_cms_auth_github, "~> 0.0.3"),
+      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.3"),
+      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.3")
     ]
   end
 
