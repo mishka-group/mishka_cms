@@ -10,6 +10,8 @@ in `__extensions/` (`mishka_dep` in `mix.exs` takes the folder when it is there)
 - `.claude/skills/mishka-release/` (the release waves) and `.claude/skills/mishka-ci/`.
 - `docs/INDEX.md`: the handbook (contracts, guardrails), `GLOSSARY.md`, `docs/adr/`, and the newest
   file in `docs/handoffs/`.
+- UI kit components come from Mishka Chelekom: read its usage rules
+  (https://github.com/mishka-group/mishka_chelekom/blob/master/usage-rules.md) before touching a kit.
 
 ## Layout
 
