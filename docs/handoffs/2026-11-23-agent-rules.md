@@ -10,6 +10,11 @@
 - `usage_rules` (dev only, `~> 1.3`) links every dependency's usage rules into `AGENTS.md`;
   `mix usage_rules.sync --yes` refreshes them.
 - `.dockerignore` keeps the agent files out of the image's build context.
+- `docs/INDEX.md`, `docs/contracts.md`, `docs/guardrails.md`; the "Think before coding" and planning
+  rules in `AGENTS.md`; a pointer to Mishka Chelekom's usage rules.
+- `mix hooks` turns on `.githooks/pre-commit`; `mix cms.state` prints a record as text (with tests).
+- `test/mishka_cms/agent_files_test.exs` keeps the agent files' pointers, links and friction rows true.
+- Matt Pocock's engineering skills (MIT, listed in `REUSE.toml`) live in `.claude/skills/`.
 
 ## Checks
 

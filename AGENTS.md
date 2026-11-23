@@ -8,7 +8,10 @@ in `__extensions/` (`mishka_dep` in `mix.exs` takes the folder when it is there)
 
 - `.claude/skills/mishka-code-design/`: how Mishka code is written. Follow it for every change.
 - `.claude/skills/mishka-release/` (the release waves) and `.claude/skills/mishka-ci/`.
-- `GLOSSARY.md`, `docs/adr/`, and the newest file in `docs/handoffs/`.
+- `docs/INDEX.md`: the handbook (contracts, guardrails), `GLOSSARY.md`, `docs/adr/`, and the newest
+  file in `docs/handoffs/`.
+- UI kit components come from Mishka Chelekom: read its usage rules
+  (https://github.com/mishka-group/mishka_chelekom/blob/master/usage-rules.md) before touching a kit.
 
 ## Layout
 
@@ -17,12 +20,17 @@ in `__extensions/` (`mishka_dep` in `mix.exs` takes the folder when it is there)
 | `lib/mishka_cms_web/` | endpoint, router, `controllers/error_html.ex`, layouts |
 | `config/` | the extensions the host loads, Oban queues, the security headers |
 | `assets/` | a bun project: TipTap, CodeMirror, vitest |
-| `test/mishka_cms/` | rules across packages: async locale, refusal messages, gettext labels |
+| `test/mishka_cms/` | project checks: rules across packages, and the agent files' own test |
+| `lib/mix/tasks/cms.state.ex` | `mix cms.state`: a record as plain text |
+| `.githooks/` | the commit hook |
+| `.claude/skills/` | Mishka skills (code design, CI, release) and Matt Pocock's engineering skills (MIT) |
 
 ## Run it
 
 - The gate: `MISHKA_DEPS=hex mix ci`. Every step but `test` passes before a push; CI's lint stops at
   its first failure.
+- Once per clone: `mix hooks` (format and credo on staged files before each commit).
+- The state of a record, as text: `mix cms.state <resource> <id> [--site <site_id>]`.
 - Local extensions: link them in `__extensions/`. Local config, `mishka_data/` and local `mix.exs`
   lines are never committed.
 
@@ -50,16 +58,24 @@ without it should add `{:usage_rules, "~> <newest>", only: [:dev]}` and a `usage
 
 ## Hard rules
 
-1. **Simplicity first**: no unrequested features, abstractions or configurability; if 200 lines could
+1. **Think before coding**: state your assumptions; when a request can be read more than one way,
+   ask instead of guessing; push back with reasons.
+2. **Simplicity first**: no unrequested features, abstractions or configurability; if 200 lines could
    be 50, rewrite. Never cut validation, security or error handling to get there.
-2. **Reuse before you write**: Ash, mishka_installer events, mishka_gervaz, guarded_struct, and
+3. **Reuse before you write**: Ash, mishka_installer events, mishka_gervaz, guarded_struct, and
    `Phoenix.LiveView.JS` before a JS hook.
-3. **Performance and safety first**: no `rescue`, `try` or `catch` on a path many users hit unless
+4. **Performance and safety first**: no `rescue`, `try` or `catch` on a path many users hit unless
    nothing else works; count the queries a change adds.
-4. **A paid extension is never in `mix.exs`, `mix.lock` or master.** It is linked locally only.
-5. **Newest versions**: every dependency at its newest release; JS through bun; every TipTap package
+5. **A paid extension is never in `mix.exs`, `mix.lock` or master.** It is linked locally only.
+6. **Newest versions**: every dependency at its newest release; JS through bun; every TipTap package
    on one version.
-6. **No private repository names** in this public repo.
+7. **No private repository names** in this public repo.
+
+## Planning
+
+The plan is issues in the repository the work changes: a plan issue with sub-issues, research as
+comments. Read the open issues before starting, and name them in commits and PRs (`Fixes #N`,
+`Part of #N`). Release planning lives in `.claude/skills/mishka-release/`.
 
 ## The loop
 
@@ -79,6 +95,9 @@ reload, two tabs, phone size), sign in once per role, read the server log and th
 control has a `data-testid`.
 
 ## Commits and pull requests
+
+The exact shapes are in `docs/contracts.md`.
+
 
 - One open PR per repo; a new task is a commit in it. Commits are
   `type(scope): what the code now does`, staged by path.
