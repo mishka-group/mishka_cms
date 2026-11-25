@@ -54,7 +54,8 @@ All the `mishka-ci.yml` inputs (passed through), and:
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `version` | | the Release button: bump, commit and push tag `v<version>` with the GitHub App's token, nothing else; the tag push then runs the release. Empty: release the pushed tag, or a dry run without a tag |
-| `publish` | `true` | `true`: `mix hex.publish --yes --wait` through the workload identity (staged; you approve it on hex.pm with 2FA). `false`: `mix hex.build` + `mix hex.publish --dry-run`. A run without a tag (Release with no version) is always a dry run |
+| `replace` | `false` | the Release button only: the version is on Hex already or its tag exists; the button moves tag `v<version>` to the default branch's head (deletes and pushes it again) and the release run replaces the version. Without it the button stops on an existing tag or Hex version. A pushed tag needs no input: see "Replacing a release" |
+| `publish` | `true` | `true`: `mix hex.publish --yes --wait` through the workload identity (staged; you approve it on hex.pm with 2FA), with `--replace` when the version is on Hex already. `false`: `mix hex.build` + `mix hex.publish --dry-run`. A run without a tag (Release with no version) is always a dry run |
 | `package` | repository name | the Hex package name `notify` sends |
 | `github-release` | `false` | GitHub release for the tag with every file below and the hex `.tar` |
 | `ebin`, `ebin-paths` | `false`, `priv` | `MIX_ENV=prod` compile, `tar -czh` of `ebin` + `ebin-paths` (+ `consolidated`), checked to hold `<app>.app` and `.beam` files |
@@ -160,6 +161,10 @@ on:
       version:
         description: Version to release, e.g. 0.1.1 (empty dry-runs the version in mix.exs)
         required: false
+      replace:
+        description: The version is on Hex already (published less than an hour ago); replace it with master's head
+        type: boolean
+        default: false
 concurrency: release
 permissions:
   contents: write
@@ -169,10 +174,43 @@ jobs:
     uses: mishka-group/mishka_cms/.github/workflows/mishka-release.yml@ci-v1
     with:
       version: ${{ inputs.version }}
+      replace: ${{ inputs.replace == true }}
       postgres: true
       partitions: 4
     secrets: inherit
 ```
+
+`replace` is optional in a caller: a re-pushed tag replaces on its own, and a caller without the
+input simply has no replace box on its Release button.
+
+### Replacing a release
+
+A bug found right after a release is fixed under the same version, while Hex still allows it: an
+hour after the version was published, 24 hours for a package's first version. Merge the fix, then
+move the tag to the fixed commit:
+
+```sh
+git push origin :refs/tags/v<version>
+git tag -f v<version> <fixed-commit>
+git push origin v<version>
+```
+
+The tag push is a release run like any other. Its `prepare` job asks
+`https://hex.pm/api/packages/<package>/releases/<version>`; a version that is there already is
+published with `mix hex.publish --replace` (staged: you approve it on hex.pm again, before the
+window closes). Past the window the run stops in `prepare`, before CI and before the GitHub release
+is touched, with "version X was published more than an hour ago: ... release a new version". Hex
+checks again when it publishes, and a refusal there gives the same message. The GitHub release of
+the tag (a draft once the tag was deleted) is deleted and made again with the new notes, ebin
+tarball, hex `.tar` and `SHA256SUMS.txt`. `notify` runs again; each dependent's bump only refreshes
+mix.lock (the replaced version has a new checksum) in its one rolling `deps/mishka` PR, so no second
+PR opens. Anyone who fetched the old tarball must run `mix deps.update <package>`.
+
+A pushed tag finds the Hex version itself because a tag push carries no inputs, and moving a tag is
+already the deliberate step; Hex's window and your approval on hex.pm guard the rest. The Release
+button asks for `replace` instead, because it can also bump mix.exs, and a mistyped older version
+must not start a replace. With `replace` it moves the tag to the default branch's head (the fix
+must be merged first). Hex never lets a workload identity revert or retire a version.
 
 `.github/workflows/deps-bump.yml` (repositories that depend on other Mishka packages):
 
@@ -205,7 +243,10 @@ run from the branch's `deps: update <pkg> to <version>` commits. So releases tha
 - a branch whose PR was merged or closed: it starts again from the default branch (a closed PR's
   branch is deleted first; nothing is ever force-pushed, so commits a person adds stay);
 - a branch pushed without a PR (an earlier run failed before it): the run uses it and opens the PR;
-- mix.exs already asks for that version or a newer one (`Version.compare`): nothing happens;
+- mix.exs already asks for a newer version (`Version.compare`): nothing happens;
+- mix.exs already asks for that version: `mix deps.update <package>` refreshes mix.lock (a version
+  replaced on Hex has a new checksum); no lock change means nothing happens, so a second `notify`
+  for one version adds nothing;
 - the merge conflicts in mix.exs or mix.lock: the default branch's copies win and every bump on the
   branch is applied again (`mix deps.update` for those packages only); a conflict in any other file
   fails the run, merge it by hand;
