@@ -118,7 +118,7 @@ defmodule MishkaCms.MixProject do
       {:absinthe_phoenix, "~> 2.0"},
       {:sourceror, "~> 1.13", only: [:dev, :test]},
       {:open_api_spex, "~> 3.22"},
-      {:mishka_installer, "~> 0.1.17"},
+      {:mishka_installer, "~> 0.1.18"},
 
       # DataBase Stuff
       {:phoenix_ecto, "~> 4.7"},
