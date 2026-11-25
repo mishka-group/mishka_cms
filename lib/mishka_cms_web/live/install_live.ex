@@ -1780,6 +1780,7 @@ defmodule MishkaCmsWeb.InstallLive do
         background:#fff;border:1px solid #fde68a;border-radius:5px;padding:2px 7px;
         color:#92400e;cursor:pointer}
       .inst-copy:hover{border-color:#d97706;background:#fffdf7}
+      .inst-copy[data-copied]{border-color:var(--green);background:var(--green-l);color:var(--green)}
       /* The admin's popover treatment, rebuilt in this page's own stylesheet: the installer runs
          before any site exists and loads no Tailwind, so the shared component cannot come with it. */
       .inst-tip-wrap{position:relative;display:inline-flex;max-width:100%}
