@@ -34,7 +34,8 @@
 - The image and CI use Bun 1.4.5
 - The editor runs TipTap 3.35.0, and every dependency is at its latest release, including `ash` 3.37.7, `ash_postgres` 2.16.0, `ash_authentication` 5.0.0-rc.18, `swoosh` 1.30, `postgrex` 0.23.0, `mishka_gervaz` 0.0.10, `mishka_installer` 0.1.16 and `guarded_struct` 0.1.10
 - The CI, release and dependency-update workflows are shared by the Mishka repositories, and a new package release opens one rolling `deps/mishka` pull request here
-- Every dependency is at its latest release: `ash` 3.38.1, `igniter` 0.8.6, `color` 1.0.0, `image` 0.74.0, `eqrcode` 0.3.0, `lazy_html` 0.1.15 and `db_connection` 2.10.3, and `sweet_xml` leaves the lock because `image` no longer pulls it in. `assent` and `bcrypt_elixir` stay behind, as `ash_authentication` pins them
+- Every dependency is at its latest release: `ash` 3.38.1, `igniter` 0.8.6, `color` 1.0.0, `image` 0.74.0, `eqrcode` 0.3.0, `lazy_html` 0.1.16 and `db_connection` 2.10.3, and `sweet_xml` leaves the lock because `image` no longer pulls it in. `assent` and `bcrypt_elixir` stay behind, as `ash_authentication` pins them
+- The admin's JavaScript is on the newest npm releases, installed with bun: `@codemirror/commands` 6.11.2, `@codemirror/view` 6.44.0 and, for its tests, `vitest` 5.1.2. The lock carries `localize` 1.10.0 as Hex serves it since it was republished
 
 # Changelog for MishkaCms 0.0.2
 

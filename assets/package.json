@@ -5,13 +5,13 @@
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
-    "@codemirror/commands": "^6.11.1",
+    "@codemirror/commands": "^6.11.2",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.12",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/language": "^6.13.1",
     "@codemirror/state": "^6.7.6",
-    "@codemirror/view": "^6.43.15",
+    "@codemirror/view": "^6.44.0",
     "@lezer/highlight": "^1.2.5",
     "@tiptap/core": "3.35.0",
     "@tiptap/extension-code-block": "3.35.0",
@@ -27,6 +27,6 @@
     "@tailwindcss/oxide": "4.3.5",
     "jsdom": "^31.0.1",
     "vite": "^8.3.8",
-    "vitest": "^5.1.1"
+    "vitest": "^5.1.2"
   }
 }
