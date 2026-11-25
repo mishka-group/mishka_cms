@@ -125,8 +125,10 @@ jobs:
               end' "$1" "$2" < /dev/null
           }
 
-          # Moves one package's requirement in mix.exs to a version; skips a version that mix.exs
-          # already asks for, or a newer one. Adds the package to $touched when mix.exs changed.
+          # Moves one package's requirement in mix.exs to a version; skips a newer one. A version
+          # mix.exs asks for already only refreshes mix.lock, for the released package: Hex may have
+          # replaced that version (a re-pushed tag), and the old checksum would fail mix deps.get.
+          # Adds the package to $touched for mix deps.update.
           bump() {
             local pkg="$1" ver="$2" line text current=""
             local re_tag='tag: "v?([^"]+)"' re_req='"~> ([^"]+)"'
@@ -138,9 +140,18 @@ jobs:
               return 0
             fi
             if [[ "$text" =~ $re_tag ]] || [[ "$text" =~ $re_req ]]; then current="${BASH_REMATCH[1]}"; fi
-            if [ -n "$current" ] && [ "$(compare "$current" "$ver")" != lt ]; then
-              echo "::notice::mix.exs asks for $pkg $current already; skipping $ver"
-              return 0
+            if [ -n "$current" ]; then
+              case "$(compare "$current" "$ver")" in
+                gt)
+                  echo "::notice::mix.exs asks for $pkg $current already; skipping $ver"
+                  return 0 ;;
+                eq)
+                  if [ "$pkg" = "$PACKAGE" ]; then
+                    echo "::notice::mix.exs asks for $pkg $ver already; refreshing mix.lock in case Hex replaced it"
+                    touched+=("$pkg")
+                  fi
+                  return 0 ;;
+              esac
             fi
             if [[ "$text" =~ $re_tag ]]; then
               sed -i -E "${line}s/tag: \"[^\"]*\"/tag: \"v$ver\"/" mix.exs

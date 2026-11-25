@@ -9,6 +9,9 @@ name: Mishka release
 # mishka-ci.yml on the tag's commit, beside the ebin and NIF builds -> GitHub release with those
 # files -> Hex publish (staged) and the hex .tar added to the release -> notify the packages in
 # .github/mishka-dependents.json. A run without a version and without a tag is a dry run.
+# A version that is on Hex already is published again with --replace (Hex allows it for an hour, a
+# package's first version for 24 hours): a re-pushed tag finds this on its own; the Release button
+# needs `replace` ticked to move an existing tag.
 # The caller's own file must be named release.yml: Hex's workload identity matches it.
 on:
   workflow_call:
@@ -17,6 +20,10 @@ on:
         description: Version to release (empty releases the pushed tag, or dry-runs mix.exs's version)
         type: string
         default: ""
+      replace:
+        description: Release button only. The version is on Hex already or its tag exists; move the tag to the default branch's head so the release run replaces it (a pushed tag finds this itself)
+        type: boolean
+        default: false
       publish:
         description: Publish to Hex, staged until an owner approves it on hex.pm (false runs mix hex.publish --dry-run)
         type: boolean
@@ -191,6 +198,8 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       tagged: ${{ steps.v.outputs.tagged }}
+      replace: ${{ steps.hex.outputs.replace }}
+      hex-deadline: ${{ steps.hex.outputs.deadline }}
     steps:
       - name: Only allowed owners run this workflow
         env:
@@ -254,8 +263,63 @@ jobs:
             echo "::error::release from $DEFAULT_BRANCH, not $GITHUB_REF_NAME"
             exit 1
           fi
-          if [ -n "$(git ls-remote --tags origin "refs/tags/v$VERSION")" ]; then
-            echo "::error::tag v$VERSION already exists"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tagged=false" >> "$GITHUB_OUTPUT"
+
+      # A version on Hex already is replaced (mix hex.publish --replace), which Hex allows for an
+      # hour after it was published, or 24 hours for a package's first version. Past that, a run
+      # that would publish (or a Release button run with replace) stops here, before CI runs or
+      # the GitHub release is touched.
+      - id: hex
+        env:
+          PACKAGE: ${{ inputs.package || github.event.repository.name }}
+          VERSION: ${{ steps.v.outputs.version }}
+          BUTTON: ${{ inputs.version != '' }}
+          REPLACE: ${{ inputs.replace }}
+          PUBLISHING: ${{ inputs.publish && steps.v.outputs.tagged == 'true' }}
+        run: |
+          set -euo pipefail
+          # replace stays unset (false) unless the version is on Hex and its window is open.
+          code="$(curl -sS -o "$RUNNER_TEMP/hex-release.json" -w '%{http_code}' "https://hex.pm/api/packages/$PACKAGE/releases/$VERSION")"
+          case "$code" in
+            404) echo "$PACKAGE $VERSION is not on Hex yet"; exit 0 ;;
+            200) ;;
+            *) echo "::error::hex.pm answered $code for $PACKAGE $VERSION; run it again"; exit 1 ;;
+          esac
+
+          published="$(jq -r .inserted_at "$RUNNER_TEMP/hex-release.json")"
+          releases="$(curl -fsS "https://hex.pm/api/packages/$PACKAGE" | jq '.releases | length')"
+          if [ "$releases" = 1 ]; then window=86400 span="24 hours"; else window=3600 span="an hour"; fi
+          deadline=$(( $(jq -r '.inserted_at | sub("\\.[0-9]+"; "") | fromdateiso8601' "$RUNNER_TEMP/hex-release.json") + window ))
+
+          if [ "$BUTTON" = true ] && [ "$REPLACE" != true ]; then
+            echo "::error::version $VERSION is on Hex already (published $published). Run Release again with replace ticked to replace it within $span of publishing, or release a new version"
+            exit 1
+          fi
+          if [ "$(date -u +%s)" -ge "$deadline" ]; then
+            if [ "$BUTTON" = true ] || [ "$PUBLISHING" = true ]; then
+              echo "::error::version $VERSION was published more than $span ago ($published): Hex will not replace it, release a new version"
+              exit 1
+            fi
+            echo "::warning::version $VERSION was published more than $span ago ($published): Hex would not replace it"
+            exit 0
+          fi
+          echo "replace=true" >> "$GITHUB_OUTPUT"
+          echo "deadline=$deadline" >> "$GITHUB_OUTPUT"
+          echo "::notice::version $VERSION is on Hex since $published; this release replaces it with --replace (Hex allows it until $(date -u -d "@$deadline" '+%Y-%m-%d %H:%M UTC'))"
+
+      # The Release button: bump, commit, tag and push. With replace, an existing tag moves to the
+      # default branch's head: it is deleted and pushed again, as a person re-tagging would.
+      - if: inputs.version != ''
+        env:
+          VERSION: ${{ inputs.version }}
+          REPLACE: ${{ inputs.replace }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          existing="$(git ls-remote --tags origin "refs/tags/v$VERSION")"
+          if [ -n "$existing" ] && [ "$REPLACE" != true ]; then
+            echo "::error::tag v$VERSION already exists. Run Release again with replace ticked to move it to $DEFAULT_BRANCH's head"
             exit 1
           fi
 
@@ -282,8 +346,13 @@ jobs:
           else
             git commit -am "chore(release): v$VERSION"
           fi
-          git tag "v$VERSION"
-          git push origin "HEAD:$DEFAULT_BRANCH" "v$VERSION"
+          git tag -f "v$VERSION"
+          git push origin "HEAD:$DEFAULT_BRANCH"
+          if [ -n "$existing" ]; then
+            echo "::notice::moving tag v$VERSION to $(git rev-parse --short HEAD)"
+            git push origin ":refs/tags/v$VERSION"
+          fi
+          git push origin "v$VERSION"
           echo "### v$VERSION tagged; the tag push starts the release run" >> "$GITHUB_STEP_SUMMARY"
 
   # Everything below runs on a tag push (the release) or a run without a version (dry run).
@@ -451,6 +520,20 @@ jobs:
           ( cd release && if [ -n "$(ls -A)" ]; then sha256sum -- * > SHA256SUMS.txt; fi )
           ls -la release
 
+      # A re-pushed tag (a fix released again under the same version) had a release already;
+      # deleting the tag turned it into a draft. It is deleted, never the tag, and made again below
+      # with this run's notes and files.
+      - name: Replace an earlier release of this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          for id in $(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" | jq -r --arg tag "$TAG" '.[] | select(.tag_name == $tag) | .id'); do
+            echo "::notice::replacing the earlier release $id of $TAG"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: v${{ needs.prepare.outputs.version }}
@@ -510,12 +593,42 @@ jobs:
 
       # A run without a tag (Release with no version) is always a dry run.
       - if: ${{ !inputs.publish || needs.prepare.outputs.tagged != 'true' }}
-        run: mix hex.publish --dry-run --yes
+        env:
+          REPLACE: ${{ needs.prepare.outputs.replace }}
+        run: |
+          if [ "$REPLACE" = true ]; then
+            mix hex.publish --dry-run --yes --replace
+          else
+            mix hex.publish --dry-run --yes
+          fi
 
       # No HEX_API_KEY here: with one set, Hex would publish with the key instead of the identity.
-      # --wait waits for a staged release to be approved on hex.pm.
+      # --wait waits for a staged release to be approved on hex.pm. A version on Hex already
+      # (prepare's check) goes out with --replace while Hex's window is still open.
       - if: inputs.publish && needs.prepare.outputs.tagged == 'true'
-        run: mix hex.publish --yes --wait
+        env:
+          REPLACE: ${{ needs.prepare.outputs.replace }}
+          DEADLINE: ${{ needs.prepare.outputs.hex-deadline }}
+        run: |
+          set -euo pipefail
+          if [ "$REPLACE" != true ]; then
+            mix hex.publish --yes --wait
+            exit 0
+          fi
+          late="version $VERSION was published more than an hour ago (24 hours for a package's first version): Hex will not replace it, release a new version"
+          if [ "$(date -u +%s)" -ge "$DEADLINE" ]; then
+            echo "::error::$late"
+            exit 1
+          fi
+          echo "Replacing $VERSION on Hex; approve it before $(date -u -d "@$DEADLINE" '+%Y-%m-%d %H:%M UTC')"
+          if ! mix hex.publish --yes --wait --replace; then
+            if [ "$(date -u +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::$late"
+            else
+              echo "::error::Hex refused to replace version $VERSION; read the lines above"
+            fi
+            exit 1
+          fi
 
       - if: needs.github-release.result == 'success'
         env:
@@ -526,8 +639,9 @@ jobs:
 
       - env:
           PUBLISH: ${{ inputs.publish }}
+          REPLACE: ${{ needs.prepare.outputs.replace }}
         run: |
-          echo "### $GITHUB_REPOSITORY v$VERSION, published to Hex: $PUBLISH" >> "$GITHUB_STEP_SUMMARY"
+          echo "### $GITHUB_REPOSITORY v$VERSION, published to Hex: $PUBLISH, replacing the earlier $VERSION: $REPLACE" >> "$GITHUB_STEP_SUMMARY"
 
   notify:
     # Skipped jobs earlier in the chain (ebin, nifs, ...) would skip this one without the if.
