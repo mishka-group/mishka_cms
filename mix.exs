@@ -187,7 +187,7 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:mishka_cms_auth_google, "~> 0.0.3"),
       mishka_dep(:mishka_cms_auth_github, "~> 0.0.3"),
       mishka_dep(:mishka_cms_auth_slack, "~> 0.0.3"),
-      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.3")
+      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.4")
     ]
   end
 
