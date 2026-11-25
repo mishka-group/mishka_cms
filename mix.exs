@@ -118,7 +118,7 @@ defmodule MishkaCms.MixProject do
       {:absinthe_phoenix, "~> 2.0"},
       {:sourceror, "~> 1.13", only: [:dev, :test]},
       {:open_api_spex, "~> 3.22"},
-      {:mishka_installer, "~> 0.1.17"},
+      {:mishka_installer, "~> 0.1.18"},
 
       # DataBase Stuff
       {:phoenix_ecto, "~> 4.7"},
@@ -175,19 +175,19 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:guarded_struct, "~> 0.1.11"),
 
       # Extensions
-      mishka_dep(:mishka_cms_core, "~> 0.0.6"),
+      mishka_dep(:mishka_cms_core, "~> 0.0.7"),
       # The visual page builder.
-      mishka_dep(:mishka_cms_builder, "~> 0.0.1"),
-      mishka_dep(:mishka_blog, "~> 0.0.3"),
-      mishka_dep(:mishka_document, "~> 0.0.3"),
-      mishka_dep(:mishka_gervaz, "~> 0.0.12"),
+      mishka_dep(:mishka_cms_builder, "~> 0.0.2"),
+      mishka_dep(:mishka_blog, "~> 0.0.4"),
+      mishka_dep(:mishka_document, "~> 0.0.4"),
+      mishka_dep(:mishka_gervaz, "~> 0.0.13"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
       # the ones the sites do not offer.
-      mishka_dep(:mishka_cms_auth_google, "~> 0.0.3"),
-      mishka_dep(:mishka_cms_auth_github, "~> 0.0.3"),
-      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.3"),
-      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.3")
+      mishka_dep(:mishka_cms_auth_google, "~> 0.0.4"),
+      mishka_dep(:mishka_cms_auth_github, "~> 0.0.4"),
+      mishka_dep(:mishka_cms_auth_slack, "~> 0.0.4"),
+      mishka_dep(:mishka_cms_auth_discord, "~> 0.0.4")
     ]
   end
 
