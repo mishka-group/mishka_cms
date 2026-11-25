@@ -180,7 +180,7 @@ defmodule MishkaCms.MixProject do
       mishka_dep(:mishka_cms_builder, "~> 0.0.1"),
       mishka_dep(:mishka_blog, "~> 0.0.3"),
       mishka_dep(:mishka_document, "~> 0.0.3"),
-      mishka_dep(:mishka_gervaz, "~> 0.0.12"),
+      mishka_dep(:mishka_gervaz, "~> 0.0.13"),
 
       # Sign-in providers: each registers itself with Mishka CMS through mishka_installer. Leave out
       # the ones the sites do not offer.
