@@ -7,7 +7,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import SharedHooks from "./shared_hooks.js";
 
 // A LiveView hook is a plain object bound to `this` with `el` on it; `handleEvent` is LiveView's,
-// recorded here so a test can push the server's event.
+// recorded here so a test can push the server's event, and `js()` sets and removes attributes the
+// way LiveView's own commands do.
 function bind(hook, el) {
   const bound = Object.create(hook);
   const handlers = {};
@@ -15,6 +16,10 @@ function bind(hook, el) {
   bound.el = el;
   bound.handleEvent = (name, handler) => (handlers[name] = handler);
   bound.push = (name, payload = {}) => handlers[name](payload);
+  bound.js = () => ({
+    setAttribute: (target, attr, val) => target.setAttribute(attr, val),
+    removeAttribute: (target, attr) => target.removeAttribute(attr),
+  });
 
   return bound;
 }
@@ -224,5 +229,101 @@ describe("Captcha — a score (reCAPTCHA v3)", () => {
 
     expect(api.execute).toHaveBeenCalledTimes(1);
     expect(el.querySelector("[data-captcha-token]").value).toBe("again");
+  });
+});
+
+describe("CopyToClipboard", () => {
+  function button() {
+    document.body.innerHTML = `
+      <button id="copy" type="button" data-copy="https://example.test/a.zip" class="size-6">
+        <svg data-icon="copy"></svg>
+      </button>`;
+
+    return document.getElementById("copy");
+  }
+
+  function clipboard(writeText) {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete navigator.clipboard;
+  });
+
+  test("copies data-copy and marks the button copied, leaving its children alone", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const writeText = vi.fn(() => Promise.resolve());
+    clipboard(writeText);
+    const el = button();
+    const icon = el.firstElementChild;
+    const markup = el.innerHTML;
+    const hook = bind(SharedHooks.CopyToClipboard, el);
+
+    hook.mounted();
+    el.click();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith("https://example.test/a.zip");
+    expect(el.hasAttribute("data-copied")).toBe(true);
+    expect(el.innerHTML).toBe(markup);
+    expect(el.firstElementChild).toBe(icon);
+
+    vi.advanceTimersByTime(1200);
+
+    expect(el.hasAttribute("data-copied")).toBe(false);
+    expect(el.innerHTML).toBe(markup);
+  });
+
+  test("a second copy inside the moment starts the moment again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    clipboard(vi.fn(() => Promise.resolve()));
+    const el = button();
+    const hook = bind(SharedHooks.CopyToClipboard, el);
+
+    hook.mounted();
+    el.click();
+    await Promise.resolve();
+    vi.advanceTimersByTime(1000);
+    el.click();
+    await Promise.resolve();
+    vi.advanceTimersByTime(1000);
+
+    expect(el.hasAttribute("data-copied")).toBe(true);
+
+    vi.advanceTimersByTime(200);
+
+    expect(el.hasAttribute("data-copied")).toBe(false);
+  });
+
+  test("a refused copy never marks the button copied", async () => {
+    clipboard(vi.fn(() => Promise.reject(new Error("denied"))));
+    const el = button();
+    const hook = bind(SharedHooks.CopyToClipboard, el);
+
+    hook.mounted();
+    el.click();
+    await settled();
+
+    expect(el.hasAttribute("data-copied")).toBe(false);
+  });
+
+  test("a destroyed button stops listening and leaves no timer behind", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const writeText = vi.fn(() => Promise.resolve());
+    clipboard(writeText);
+    const el = button();
+    const hook = bind(SharedHooks.CopyToClipboard, el);
+
+    hook.mounted();
+    el.click();
+    await Promise.resolve();
+    hook.destroyed();
+
+    expect(vi.getTimerCount()).toBe(0);
+
+    el.click();
+
+    expect(writeText).toHaveBeenCalledTimes(1);
   });
 });

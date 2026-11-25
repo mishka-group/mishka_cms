@@ -40,19 +40,35 @@ const FlashAutoDismiss = {
   },
 };
 
-// Copy the element's data-copy value to the clipboard, with a brief "Copied!" flash.
+// COPY THE ELEMENT'S `data-copy` TO THE CLIPBOARD, then mark the element `data-copied` for a moment.
+// The hook never writes into the element: a button LiveView draws is LiveView's, and text swapped in
+// over its children fought the next render, so the button jumped in size and lost its icon. The
+// caller shows the copied state itself, with Tailwind's `data-[copied]:` or `group-data-[copied]:`
+// variants, at the size it already has.
+//
+// The attribute goes through `this.js()`, so a render that lands inside the moment keeps it. A copy
+// the browser refuses (no permission, no secure context) leaves the element as it was.
+const COPIED_FOR = 1200;
+
 const CopyToClipboard = {
   mounted() {
-    this.el.addEventListener("click", () => {
+    this.onClick = () => {
       const text = this.el.getAttribute("data-copy") || "";
-      navigator.clipboard.writeText(text).then(() => {
-        const original = this.el.innerHTML;
-        this.el.innerHTML = "Copied!";
-        setTimeout(() => {
-          this.el.innerHTML = original;
-        }, 1200);
-      });
-    });
+      navigator.clipboard.writeText(text).then(
+        () => this.copied(),
+        () => {},
+      );
+    };
+    this.el.addEventListener("click", this.onClick);
+  },
+  copied() {
+    clearTimeout(this.timer);
+    this.js().setAttribute(this.el, "data-copied", "");
+    this.timer = setTimeout(() => this.js().removeAttribute(this.el, "data-copied"), COPIED_FOR);
+  },
+  destroyed() {
+    clearTimeout(this.timer);
+    this.el.removeEventListener("click", this.onClick);
   },
 };
 
