@@ -1,3 +1,11 @@
+# Changelog for MishkaCms 0.0.4
+
+### Bug fixes:
+- The copy button of the installer and of every page that uses the `CopyToClipboard` hook keeps its size and its icon when it is pressed: the hook marks the button `data-copied` for a moment and no longer writes "Copied!" over its content, so a render that lands meanwhile cannot fight it. A page shows the copied state with Tailwind's `data-[copied]:` or `group-data-[copied]:` variants, and the installer's failed-URL button turns green while copied. A copy the browser refuses leaves the button as it was
+
+### Refactors:
+- Every dependency is at its latest release: `ash` 3.38.1, `igniter` 0.8.6, `color` 1.0.0, `image` 0.74.0, `eqrcode` 0.3.0, `lazy_html` 0.1.15 and `db_connection` 2.10.3, and `sweet_xml` leaves the lock because `image` no longer pulls it in. `assent` and `bcrypt_elixir` stay behind, as `ash_authentication` pins them
+
 # Changelog for MishkaCms 0.0.3
 
 ### Features:
