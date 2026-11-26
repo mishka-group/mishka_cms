@@ -37,19 +37,19 @@ msgstr ""
 msgid "close"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2714
+#: lib/mishka_cms_web/live/install_live.ex:2824
 #, elixir-autogen, elixir-format
 msgid "%{count} UI-kit package"
 msgid_plural "%{count} UI-kit packages"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/mishka_cms_web/live/install_live.ex:837
+#: lib/mishka_cms_web/live/install_live.ex:936
 #, elixir-autogen, elixir-format
 msgid "%{count} package(s) could not be fetched."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2662
+#: lib/mishka_cms_web/live/install_live.ex:2772
 #, elixir-autogen, elixir-format
 msgid "%{kits} building blocks"
 msgstr ""
@@ -59,52 +59,52 @@ msgstr ""
 msgid "%{name} · preview"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:954
+#: lib/mishka_cms_web/live/install_live.ex:1053
 #, elixir-autogen, elixir-format
 msgid "%{selected} of %{total} chosen · plain style, extras optional"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1150
+#: lib/mishka_cms_web/live/install_live.ex:1249
 #, elixir-autogen, elixir-format
 msgid "%{value} · default"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:925
+#: lib/mishka_cms_web/live/install_live.ex:1024
 #, elixir-autogen, elixir-format
 msgid "A %{schema} JSON. It is checked and cached beside the official packages before anything is installed."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:605
+#: lib/mishka_cms_web/live/install_live.ex:667
 #, elixir-autogen, elixir-format
 msgid "A couple of basics to finish setup — you can change them any time later."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1886
+#: lib/mishka_cms_web/live/install_live.ex:1988
 #, elixir-autogen, elixir-format
 msgid "A modular, multi-tenant content platform built with Elixir, Phoenix & Ash."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2239
+#: lib/mishka_cms_web/live/install_live.ex:2341
 #, elixir-autogen, elixir-format
 msgid "A visitor whose address names no language is answered in the primary one. Every page this install writes answers each language here; the settings page changes the list later."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2186
+#: lib/mishka_cms_web/live/install_live.ex:2288
 #, elixir-autogen, elixir-format
 msgid "Add a language"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:883
+#: lib/mishka_cms_web/live/install_live.ex:982
 #, elixir-autogen, elixir-format
 msgid "Add a package by URL"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:630
+#: lib/mishka_cms_web/live/install_live.ex:721
 #, elixir-autogen, elixir-format
 msgid "Add a starter home page"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:525
+#: lib/mishka_cms_web/live/install_live.ex:587
 #, elixir-autogen, elixir-format
 msgid "Admin dashboard:"
 msgstr ""
@@ -114,34 +114,35 @@ msgstr ""
 msgid "Administrators of this site can %{link} to continue."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1048
+#: lib/mishka_cms_web/live/install_live.ex:1147
 #, elixir-autogen, elixir-format
 msgid "All"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1022
+#: lib/mishka_cms_web/live/install_live.ex:1121
 #, elixir-autogen, elixir-format
 msgid "All kits"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1313
+#: lib/mishka_cms_web/live/install_live.ex:701
+#: lib/mishka_cms_web/live/install_live.ex:1412
 #, elixir-autogen, elixir-format
 msgid "At least 8 characters"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:649
-#: lib/mishka_cms_web/live/install_live.ex:1199
-#: lib/mishka_cms_web/live/install_live.ex:1270
+#: lib/mishka_cms_web/live/install_live.ex:740
+#: lib/mishka_cms_web/live/install_live.ex:1298
+#: lib/mishka_cms_web/live/install_live.ex:1369
 #, elixir-autogen, elixir-format
 msgid "Back"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:579
+#: lib/mishka_cms_web/live/install_live.ex:641
 #, elixir-autogen, elixir-format
 msgid "Back to sample data"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:580
+#: lib/mishka_cms_web/live/install_live.ex:642
 #, elixir-autogen, elixir-format
 msgid "Back to settings"
 msgstr ""
@@ -156,49 +157,50 @@ msgstr ""
 msgid "Bad Request"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:614
+#: lib/mishka_cms_web/live/install_live.ex:676
 #, elixir-autogen, elixir-format
 msgid "Basics"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1347
-#: lib/mishka_cms_web/live/install_live.ex:2791
+#: lib/mishka_cms_web/live/install_live.ex:1449
+#: lib/mishka_cms_web/live/install_live.ex:2901
 #, elixir-autogen, elixir-format
 msgid "Checking…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3047
+#: lib/mishka_cms_web/live/install_live.ex:3159
 #, elixir-autogen, elixir-format
 msgid "Choose a language from the list."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:677
+#: lib/mishka_cms_web/live/install_live.ex:776
 #, elixir-autogen, elixir-format
 msgid "Choose what to install"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1006
+#: lib/mishka_cms_web/live/install_live.ex:1105
 #, elixir-autogen, elixir-format
 msgid "Clear"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:474
+#: lib/mishka_cms_web/live/install_live.ex:536
 #, elixir-autogen, elixir-format
 msgid "Components"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:473
-#: lib/mishka_cms_web/live/install_live.ex:1297
+#: lib/mishka_cms_web/live/install_live.ex:535
+#: lib/mishka_cms_web/live/install_live.ex:1396
 #, elixir-autogen, elixir-format
 msgid "Configuration"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1099
+#: lib/mishka_cms_web/live/install_live.ex:1198
 #, elixir-autogen, elixir-format
 msgid "Configure options"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1320
+#: lib/mishka_cms_web/live/install_live.ex:710
+#: lib/mishka_cms_web/live/install_live.ex:1422
 #, elixir-autogen, elixir-format
 msgid "Confirm password"
 msgstr ""
@@ -208,22 +210,22 @@ msgstr ""
 msgid "Conflict"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:591
+#: lib/mishka_cms_web/live/install_live.ex:653
 #, elixir-autogen, elixir-format
 msgid "Continue"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:865
+#: lib/mishka_cms_web/live/install_live.ex:964
 #, elixir-autogen, elixir-format
 msgid "Copy the URL for %{label}"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:975
+#: lib/mishka_cms_web/live/install_live.ex:1074
 #, elixir-autogen, elixir-format
 msgid "Customize"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1334
+#: lib/mishka_cms_web/live/install_live.ex:1436
 #, elixir-autogen, elixir-format
 msgid "Domain"
 msgstr ""
@@ -238,57 +240,57 @@ msgstr ""
 msgid "Draft preview"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1304
+#: lib/mishka_cms_web/live/install_live.ex:1403
 #, elixir-autogen, elixir-format
 msgid "Email"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:604
+#: lib/mishka_cms_web/live/install_live.ex:666
 #, elixir-autogen, elixir-format
 msgid "Essential settings"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2235
+#: lib/mishka_cms_web/live/install_live.ex:2337
 #, elixir-autogen, elixir-format
 msgid "Every language this install offers is on the list."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:586
+#: lib/mishka_cms_web/live/install_live.ex:648
 #, elixir-autogen, elixir-format
 msgid "Every step finished. Continue to sign in as the master admin."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:875
+#: lib/mishka_cms_web/live/install_live.ex:974
 #, elixir-autogen, elixir-format
 msgid "Everything below is what did load — install the rest later from the admin."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2306
+#: lib/mishka_cms_web/live/install_live.ex:2416
 #, elixir-autogen, elixir-format
 msgid "Fair"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:919
+#: lib/mishka_cms_web/live/install_live.ex:1018
 #, elixir-autogen, elixir-format
 msgid "Fetch"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:724
+#: lib/mishka_cms_web/live/install_live.ex:823
 #, elixir-autogen, elixir-format
 msgid "Fetching %{kits}…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:917
+#: lib/mishka_cms_web/live/install_live.ex:1016
 #, elixir-autogen, elixir-format
 msgid "Fetching…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1232
+#: lib/mishka_cms_web/live/install_live.ex:1331
 #, elixir-autogen, elixir-format
 msgid "For local development only — sample master, sites, users and content."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1338
+#: lib/mishka_cms_web/live/install_live.ex:1440
 #, elixir-autogen, elixir-format
 msgid "For local development you can use %{host}."
 msgstr ""
@@ -303,7 +305,7 @@ msgstr ""
 msgid "Gateway Timeout"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:532
+#: lib/mishka_cms_web/live/install_live.ex:594
 #, elixir-autogen, elixir-format
 msgid "Go to login"
 msgstr ""
@@ -313,44 +315,44 @@ msgstr ""
 msgid "Gone"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2307
+#: lib/mishka_cms_web/live/install_live.ex:2417
 #, elixir-autogen, elixir-format
 msgid "Good"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:975
+#: lib/mishka_cms_web/live/install_live.ex:1074
 #, elixir-autogen, elixir-format
 msgid "Hide"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:476
-#: lib/mishka_cms_web/live/install_live.ex:658
+#: lib/mishka_cms_web/live/install_live.ex:538
+#: lib/mishka_cms_web/live/install_live.ex:757
 #, elixir-autogen, elixir-format
 msgid "Install"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:90
+#: lib/mishka_cms_web/live/install_live.ex:106
 #, elixir-autogen, elixir-format
 msgid "Install — Mishka CMS"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:548
+#: lib/mishka_cms_web/live/install_live.ex:610
 #, elixir-autogen, elixir-format
 msgid "Installation"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:489
-#: lib/mishka_cms_web/live/install_live.ex:585
+#: lib/mishka_cms_web/live/install_live.ex:551
+#: lib/mishka_cms_web/live/install_live.ex:647
 #, elixir-autogen, elixir-format
 msgid "Installation complete"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:571
+#: lib/mishka_cms_web/live/install_live.ex:633
 #, elixir-autogen, elixir-format
 msgid "Installation failed"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:655
+#: lib/mishka_cms_web/live/install_live.ex:753
 #, elixir-autogen, elixir-format
 msgid "Installing…"
 msgstr ""
@@ -365,12 +367,12 @@ msgstr ""
 msgid "Invalid setup token"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2141
+#: lib/mishka_cms_web/live/install_live.ex:2243
 #, elixir-autogen, elixir-format
 msgid "Languages"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2210
+#: lib/mishka_cms_web/live/install_live.ex:2312
 #, elixir-autogen, elixir-format
 msgid "Languages to add"
 msgstr ""
@@ -380,33 +382,33 @@ msgstr ""
 msgid "Links to other pages open the published site in a new tab."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1231
-#: lib/mishka_cms_web/live/install_live.ex:1280
+#: lib/mishka_cms_web/live/install_live.ex:1330
+#: lib/mishka_cms_web/live/install_live.ex:1379
 #, elixir-autogen, elixir-format
 msgid "Load sample data"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:547
+#: lib/mishka_cms_web/live/install_live.ex:609
 #, elixir-autogen, elixir-format
 msgid "Loading sample data"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2161
+#: lib/mishka_cms_web/live/install_live.ex:2263
 #, elixir-autogen, elixir-format
 msgid "Make %{language} the primary language"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2165
+#: lib/mishka_cms_web/live/install_live.ex:2267
 #, elixir-autogen, elixir-format
 msgid "Make primary"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1301
+#: lib/mishka_cms_web/live/install_live.ex:1400
 #, elixir-autogen, elixir-format
 msgid "Master Admin"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1254
+#: lib/mishka_cms_web/live/install_live.ex:1353
 #, elixir-autogen, elixir-format
 msgid "Master login will be %{email} / %{password}"
 msgstr ""
@@ -421,47 +423,47 @@ msgstr ""
 msgid "Method Not Allowed"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:892
+#: lib/mishka_cms_web/live/install_live.ex:991
 #, elixir-autogen, elixir-format
 msgid "Mishka takes no responsibility for them: their components run inside your admin and render on your visitors' pages. Install only from a source you trust."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1332
+#: lib/mishka_cms_web/live/install_live.ex:1434
 #, elixir-autogen, elixir-format
 msgid "My CMS"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1909
+#: lib/mishka_cms_web/live/install_live.ex:2011
 #, elixir-autogen, elixir-format
 msgid "Need help?"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1350
+#: lib/mishka_cms_web/live/install_live.ex:1452
 #, elixir-autogen, elixir-format
 msgid "Next: choose components"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1213
+#: lib/mishka_cms_web/live/install_live.ex:1312
 #, elixir-autogen, elixir-format
 msgid "Next: settings"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:749
+#: lib/mishka_cms_web/live/install_live.ex:848
 #, elixir-autogen, elixir-format
 msgid "No UI-kit bundle could be loaded."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1161
+#: lib/mishka_cms_web/live/install_live.ex:1260
 #, elixir-autogen, elixir-format
 msgid "No components match “%{query}”."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2232
+#: lib/mishka_cms_web/live/install_live.ex:2334
 #, elixir-autogen, elixir-format
 msgid "No language matches “%{query}”."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1055
+#: lib/mishka_cms_web/live/install_live.ex:1154
 #, elixir-autogen, elixir-format
 msgid "None"
 msgstr ""
@@ -481,33 +483,35 @@ msgstr ""
 msgid "Not Implemented"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:890
+#: lib/mishka_cms_web/live/install_live.ex:989
 #, elixir-autogen, elixir-format
 msgid "Packages from outside the official channels are not ours."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:938
-#: lib/mishka_cms_web/live/install_live.ex:2653
+#: lib/mishka_cms_web/live/install_live.ex:1037
+#: lib/mishka_cms_web/live/install_live.ex:2763
 #, elixir-autogen, elixir-format
 msgid "Page building blocks"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1311
+#: lib/mishka_cms_web/live/install_live.ex:699
+#: lib/mishka_cms_web/live/install_live.ex:1410
 #, elixir-autogen, elixir-format
 msgid "Password"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2287
+#: lib/mishka_cms_web/live/install_live.ex:2397
 #, elixir-autogen, elixir-format
 msgid "Password strength: %{strength}"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1322
+#: lib/mishka_cms_web/live/install_live.ex:712
+#: lib/mishka_cms_web/live/install_live.ex:1424
 #, elixir-autogen, elixir-format
 msgid "Re-enter password"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2173
+#: lib/mishka_cms_web/live/install_live.ex:2275
 #, elixir-autogen, elixir-format
 msgid "Remove %{language}"
 msgstr ""
@@ -522,63 +526,63 @@ msgstr ""
 msgid "Request Timeout"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1081
+#: lib/mishka_cms_web/live/install_live.ex:1180
 #, elixir-autogen, elixir-format
 msgid "Required by %{names}"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1123
+#: lib/mishka_cms_web/live/install_live.ex:1222
 #, elixir-autogen, elixir-format
 msgid "Reset defaults"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:847
+#: lib/mishka_cms_web/live/install_live.ex:946
 #, elixir-autogen, elixir-format
 msgid "Retry"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:771
-#: lib/mishka_cms_web/live/install_live.ex:796
+#: lib/mishka_cms_web/live/install_live.ex:870
+#: lib/mishka_cms_web/live/install_live.ex:895
 #, elixir-autogen, elixir-format
 msgid "Retry download"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:760
+#: lib/mishka_cms_web/live/install_live.ex:859
 #, elixir-autogen, elixir-format
 msgid "Retry, or drop a bundle into %{path} and reload."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1874
+#: lib/mishka_cms_web/live/install_live.ex:1976
 #, elixir-autogen, elixir-format
 msgid "SETUP WIZARD · v%{version}"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1879
+#: lib/mishka_cms_web/live/install_live.ex:1981
 #, elixir-autogen, elixir-format
 msgid "STEP %{step} / 4"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:518
+#: lib/mishka_cms_web/live/install_live.ex:580
 #, elixir-autogen, elixir-format
 msgid "Sample data loaded — master login %{email} / %{password}"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2194
+#: lib/mishka_cms_web/live/install_live.ex:2296
 #, elixir-autogen, elixir-format
 msgid "Search by name or code…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:988
+#: lib/mishka_cms_web/live/install_live.ex:1087
 #, elixir-autogen, elixir-format
 msgid "Search components…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1277
+#: lib/mishka_cms_web/live/install_live.ex:1376
 #, elixir-autogen, elixir-format
 msgid "Seeding…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:998
+#: lib/mishka_cms_web/live/install_live.ex:1097
 #, elixir-autogen, elixir-format
 msgid "Select all"
 msgstr ""
@@ -588,17 +592,17 @@ msgstr ""
 msgid "Service Unavailable"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1298
+#: lib/mishka_cms_web/live/install_live.ex:1397
 #, elixir-autogen, elixir-format
 msgid "Set up your master admin and your first site."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:550
+#: lib/mishka_cms_web/live/install_live.ex:612
 #, elixir-autogen, elixir-format
 msgid "Setting up everything your CMS needs — sit tight."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:475
+#: lib/mishka_cms_web/live/install_live.ex:537
 #, elixir-autogen, elixir-format
 msgid "Settings"
 msgstr ""
@@ -608,12 +612,12 @@ msgstr ""
 msgid "Setup token not configured. Set MISHKA_SETUP_TOKEN and open /install?token=<value>."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1331
+#: lib/mishka_cms_web/live/install_live.ex:1433
 #, elixir-autogen, elixir-format
 msgid "Site name"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2308
+#: lib/mishka_cms_web/live/install_live.ex:2418
 #, elixir-autogen, elixir-format
 msgid "Strong"
 msgstr ""
@@ -643,43 +647,43 @@ msgstr ""
 msgid "We are currently undergoing maintenance. Please check back soon."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2305
+#: lib/mishka_cms_web/live/install_live.ex:2415
 #, elixir-autogen, elixir-format
 msgid "Weak"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1328
+#: lib/mishka_cms_web/live/install_live.ex:1430
 #, elixir-autogen, elixir-format
 msgid "Website"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:511
+#: lib/mishka_cms_web/live/install_live.ex:573
 #, elixir-autogen, elixir-format
 msgid "Your site %{host} is ready — sign in as the master admin to continue."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:632
+#: lib/mishka_cms_web/live/install_live.ex:723
 #, elixir-autogen, elixir-format
 msgid "always added, with the header and footer every page is drawn in"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1250
+#: lib/mishka_cms_web/live/install_live.ex:1349
 #, elixir-autogen, elixir-format
 msgid "always included"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2153
+#: lib/mishka_cms_web/live/install_live.ex:2255
 #, elixir-autogen, elixir-format
 msgid "primary"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1091
+#: lib/mishka_cms_web/live/install_live.ex:1190
 #, elixir-autogen, elixir-format
 msgid "required"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2151
-#: lib/mishka_cms_web/live/install_live.ex:2226
+#: lib/mishka_cms_web/live/install_live.ex:2253
+#: lib/mishka_cms_web/live/install_live.ex:2328
 #, elixir-autogen, elixir-format
 msgid "right to left"
 msgstr ""
@@ -689,17 +693,17 @@ msgstr ""
 msgid "sign in"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2708
+#: lib/mishka_cms_web/live/install_live.ex:2818
 #, elixir-autogen, elixir-format
 msgid "the UI-kit bundles on disk"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2673
+#: lib/mishka_cms_web/live/install_live.ex:2783
 #, elixir-autogen, elixir-format
 msgid "unversioned"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1361
+#: lib/mishka_cms_web/live/install_live.ex:1463
 #, elixir-autogen, elixir-format
 msgid "⚡ Or load sample data for development"
 msgstr ""
@@ -709,22 +713,22 @@ msgstr ""
 msgid "The original was changed after this draft was made."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2246
+#: lib/mishka_cms_web/live/install_live.ex:2348
 #, elixir-autogen, elixir-format
 msgid "Language in addresses"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2268
+#: lib/mishka_cms_web/live/install_live.ex:2370
 #, elixir-autogen, elixir-format
 msgid "Pages keep their paths either way; the settings page changes this later."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3087
+#: lib/mishka_cms_web/live/install_live.ex:3199
 #, elixir-autogen, elixir-format
 msgid "No prefix for the primary language"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3089
+#: lib/mishka_cms_web/live/install_live.ex:3201
 #, elixir-autogen, elixir-format
 msgid "A prefix for every language"
 msgstr ""
@@ -734,12 +738,12 @@ msgstr ""
 msgid "Building preview…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2782
+#: lib/mishka_cms_web/live/install_live.ex:2892
 #, elixir-autogen, elixir-format
 msgid "Chelekom's releases could not be looked up: %{reason}."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:793
+#: lib/mishka_cms_web/live/install_live.ex:892
 #, elixir-autogen, elixir-format
 msgid "Contact Mishka CMS support"
 msgstr ""
@@ -749,67 +753,67 @@ msgstr ""
 msgid "Draft preview — its CSS is built from this draft, its own styles included, each time it is opened."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:691
+#: lib/mishka_cms_web/live/install_live.ex:790
 #, elixir-autogen, elixir-format
 msgid "Kit version"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2755
+#: lib/mishka_cms_web/live/install_live.ex:2865
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Master"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:803
+#: lib/mishka_cms_web/live/install_live.ex:902
 #, elixir-autogen, elixir-format
 msgid "No release has the UI kits yet."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2785
+#: lib/mishka_cms_web/live/install_live.ex:2895
 #, elixir-autogen, elixir-format
 msgid "No release of Chelekom has them, and its master branch does not either."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:810
+#: lib/mishka_cms_web/live/install_live.ex:909
 #, elixir-autogen, elixir-format
 msgid "No stable release has the UI kits yet."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:781
+#: lib/mishka_cms_web/live/install_live.ex:880
 #, elixir-autogen, elixir-format
 msgid "Please contact Mishka CMS support. You can retry, or carry on and add the components later from the admin."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2754
+#: lib/mishka_cms_web/live/install_live.ex:2864
 #, elixir-autogen, elixir-format
 msgid "Pre-release"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:679
+#: lib/mishka_cms_web/live/install_live.ex:778
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Ready-made pieces for building your pages, and the features your site runs on. What every site needs is selected already — carry straight on, or open a section to add more."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2753
+#: lib/mishka_cms_web/live/install_live.ex:2863
 #, elixir-autogen, elixir-format
 msgid "Stable"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:778
+#: lib/mishka_cms_web/live/install_live.ex:877
 #, elixir-autogen, elixir-format
 msgid "The UI-kit packages could not be found."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2776
+#: lib/mishka_cms_web/live/install_live.ex:2886
 #, elixir-autogen, elixir-format
 msgid "The kits already on this server. Pick a version to fetch one."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2769
+#: lib/mishka_cms_web/live/install_live.ex:2879
 #, elixir-autogen, elixir-format
 msgid "The newest release, pre-releases included: %{tag}."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2766
+#: lib/mishka_cms_web/live/install_live.ex:2876
 #, elixir-autogen, elixir-format
 msgid "The newest stable release, %{tag}."
 msgstr ""
@@ -819,69 +823,80 @@ msgstr ""
 msgid "The preview's styles could not be built. Reload the page to try again."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:939
+#: lib/mishka_cms_web/live/install_live.ex:1038
 #, elixir-autogen, elixir-format
 msgid "They appear here once the UI kits are downloaded."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2773
+#: lib/mishka_cms_web/live/install_live.ex:2883
 #, elixir-autogen, elixir-format
 msgid "Unreleased: the files on Chelekom's master branch, which may change at any time."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:812
+#: lib/mishka_cms_web/live/install_live.ex:911
 #, elixir-autogen, elixir-format
 msgid "Using pre-release %{tag}, the newest release that has them."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:805
+#: lib/mishka_cms_web/live/install_live.ex:904
 #, elixir-autogen, elixir-format
 msgid "Using the files on Chelekom's master branch, which may change at any time."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2084
+#: lib/mishka_cms_web/live/install_live.ex:2186
 #, elixir-autogen, elixir-format
 msgid "%{chosen} of %{total} chosen"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2078
+#: lib/mishka_cms_web/live/install_live.ex:2180
 #, elixir-autogen, elixir-format
 msgid "1 part · required"
 msgid_plural "%{count} parts · all required"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1248
+#: lib/mishka_cms_web/live/install_live.ex:1347
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Core data (sites, users, permissions) is %{included}."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1210
+#: lib/mishka_cms_web/live/install_live.ex:752
+#: lib/mishka_cms_web/live/install_live.ex:1309
 #, elixir-autogen, elixir-format
 msgid "Loading components…"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1176
+#: lib/mishka_cms_web/live/install_live.ex:1275
 #, elixir-autogen, elixir-format
 msgid "Open a row to see and change what it installs. Required parts are always installed; an extension can also be set up later, from its own menu."
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2032
+#: lib/mishka_cms_web/live/install_live.ex:2134
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Required"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:1174
+#: lib/mishka_cms_web/live/install_live.ex:1273
 #, elixir-autogen, elixir-format
 msgid "What gets installed"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2070
+#: lib/mishka_cms_web/live/install_live.ex:2172
 #, elixir-autogen, elixir-format
 msgid "needs an answer"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2081
+#: lib/mishka_cms_web/live/install_live.ex:2183
 #, elixir-autogen, elixir-format
 msgid "not chosen"
+msgstr ""
+
+#: lib/mishka_cms_web/live/install_live.ex:2382
+#, elixir-autogen, elixir-format
+msgid "A reload keeps every answer except the password. Please enter it again."
+msgstr ""
+
+#: lib/mishka_cms_web/live/install_live.ex:693
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Master Admin password"
 msgstr ""

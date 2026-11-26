@@ -111,39 +111,39 @@ msgstr ""
 msgid "must be equal to %{number}"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3198
+#: lib/mishka_cms_web/live/install_live.ex:3335
 #, elixir-autogen, elixir-format
 msgid "does not match"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:2056
-#: lib/mishka_cms_web/live/install_live.ex:3161
-#: lib/mishka_cms_web/live/install_live.ex:3162
-#: lib/mishka_cms_web/live/install_live.ex:3183
-#: lib/mishka_cms_web/live/install_live.ex:3189
-#: lib/mishka_cms_web/live/install_live.ex:3200
-#: lib/mishka_cms_web/live/install_live.ex:3206
+#: lib/mishka_cms_web/live/install_live.ex:2158
+#: lib/mishka_cms_web/live/install_live.ex:3280
+#: lib/mishka_cms_web/live/install_live.ex:3281
+#: lib/mishka_cms_web/live/install_live.ex:3320
+#: lib/mishka_cms_web/live/install_live.ex:3326
+#: lib/mishka_cms_web/live/install_live.ex:3337
+#: lib/mishka_cms_web/live/install_live.ex:3343
 #, elixir-autogen, elixir-format
 msgid "is required"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3204
+#: lib/mishka_cms_web/live/install_live.ex:3341
 #, elixir-autogen, elixir-format
 msgid "must be 3–70 characters"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3210
+#: lib/mishka_cms_web/live/install_live.ex:3347
 #, elixir-autogen, elixir-format
 msgid "must be a bare domain (no http://)"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3166
-#: lib/mishka_cms_web/live/install_live.ex:3187
+#: lib/mishka_cms_web/live/install_live.ex:3285
+#: lib/mishka_cms_web/live/install_live.ex:3324
 #, elixir-autogen, elixir-format
 msgid "must be a valid email"
 msgstr ""
 
-#: lib/mishka_cms_web/live/install_live.ex:3193
+#: lib/mishka_cms_web/live/install_live.ex:3330
 #, elixir-autogen, elixir-format
 msgid "must be at least 8 characters"
 msgstr ""

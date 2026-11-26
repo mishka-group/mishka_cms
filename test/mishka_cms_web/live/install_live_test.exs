@@ -1008,6 +1008,227 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     end
   end
 
+  # A RELOAD CARRIES ON WHERE IT STOPPED. The step is in the address and the answers in the tab's
+  # `sessionStorage`, through the `InstallDraft` hook: these tests play the hook, handing the page
+  # back what it pushed, as the browser would after a reload. The password is never in it.
+  describe "a reload" do
+    # The answers the page pushed last, as the hook would have kept them.
+    defp kept_draft(view) do
+      render(view)
+      drafts = for {:push_event, "install-draft", %{draft: draft}} <- pushed(view), do: draft
+      List.last(drafts)
+    end
+
+    # Every event the page pushed so far, in order. Call `render/1` first, so they have arrived.
+    defp pushed(%{proxy: {ref, _topic, _pid}}) do
+      fn ->
+        receive do
+          {^ref, {:push_event, event, payload}} -> {:push_event, event, payload}
+        after
+          0 -> nil
+        end
+      end
+      |> Stream.repeatedly()
+      |> Enum.take_while(& &1)
+    end
+
+    # A page as the browser opens it: the hook hands back what the tab holds as soon as it mounts.
+    defp reload(conn, path, draft) do
+      {:ok, view, _html} = live(conn, path)
+      render_hook(view, "restore_draft", %{"draft" => draft})
+      view
+    end
+
+    defp to_kept_ui_kit(conn) do
+      view = reload(conn, "/install", nil)
+      view |> form("#install-form", install: @valid) |> render_submit()
+      render_async(view, 15_000)
+      view |> element("#uikit-toggle") |> render_click()
+      view
+    end
+
+    test "every step names itself in the address", %{conn: conn} do
+      view = reload(conn, "/install", nil)
+      assert_patch(view, "/install?step=config")
+
+      view |> form("#install-form", install: @valid) |> render_submit()
+      assert_patch(view, "/install?step=components")
+      render_async(view, 15_000)
+
+      view |> element("#uikit-next") |> render_click()
+      assert_patch(view, "/install?step=settings")
+
+      view |> element("#settings-back") |> render_click()
+      assert_patch(view, "/install?step=components")
+    end
+
+    test "the kept answers hold everything typed but the password", %{conn: conn} do
+      view = reload(conn, "/install", nil)
+      view |> form("#install-form", install: @valid) |> render_change()
+
+      assert kept_draft(view)["config"] == Map.drop(@valid, ["password", "password_confirmation"])
+
+      view |> form("#install-form", install: @valid) |> render_submit()
+      render_async(view, 15_000)
+      view |> element("#uikit-toggle") |> render_click()
+      view |> element("#toggle-chelekom-button") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      draft = kept_draft(view)
+      assert "chelekom-button" in draft["selected"]
+      refute inspect(draft) =~ @valid["password"]
+    end
+
+    test "before the page has read the tab's answers back, it keeps nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/install")
+      view |> form("#install-form", install: @valid) |> render_change()
+
+      assert pushed(view) == []
+    end
+
+    test "a reload on the components step comes back to it, the answers and picks kept", %{
+      conn: conn
+    } do
+      view = to_kept_ui_kit(conn)
+      view |> element("#toggle-chelekom-button") |> render_click()
+      draft = kept_draft(view)
+
+      view = reload(conn, "/install?step=components", draft)
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#installer-uikit")
+      view |> element("#uikit-toggle") |> render_click()
+      assert has_element?(view, "#toggle-chelekom-button[checked]")
+      refute Install.installed?()
+
+      # The first step has its answers, and asks for the password again.
+      view |> element("#uikit-back") |> render_click()
+
+      assert has_element?(
+               view,
+               "#install-form input[name='install[email]'][value='owner@example.com']"
+             )
+
+      assert has_element?(view, "#install-form input[name='install[host]'][value='localhost']")
+      assert has_element?(view, "[data-testid=install-password-note]")
+    end
+
+    test "a reload on the settings step keeps what was typed and asks only for the password", %{
+      conn: conn
+    } do
+      own_media_dir!()
+      view = to_kept_ui_kit(conn)
+      view |> element("#toggle-chelekom-button") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      view
+      |> form("#install-settings-form", settings: %{"site.title" => "Acme Docs"})
+      |> render_change()
+
+      draft = kept_draft(view)
+
+      view = reload(conn, "/install?step=settings", draft)
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#installer-settings")
+      assert has_element?(view, "#install-set-site-title[value='Acme Docs']")
+      assert has_element?(view, "[data-testid=install-password-note]")
+      assert has_element?(view, "[data-testid=install-set-password]")
+
+      # Without it nothing installs.
+      view |> form("#install-settings-form") |> render_submit()
+      assert has_element?(view, "#install-password-again", "is required")
+      refute has_element?(view, "#install-progress")
+      refute Install.installed?()
+
+      view
+      |> form("#install-settings-form",
+        settings: %{"password" => "Another123!", "password_confirmation" => "Another123!"}
+      )
+      |> render_submit()
+
+      assert_push_event(view, "install-draft", %{draft: nil})
+      render_async(view, 15_000)
+      assert has_element?(view, "#install-complete")
+
+      assert [user] = User |> Ash.Query.filter(is_nil(site_id)) |> Ash.read!(authorize?: false)
+      assert to_string(user.email) == "owner@example.com"
+      assert Bcrypt.verify_pass("Another123!", user.hashed_password)
+      assert Settings.get("site.title") == "Acme Docs"
+      refute Settings.get("password")
+    end
+
+    test "while the kits load again, Install waits and says so", %{conn: conn} do
+      test = self()
+
+      github_releases!([kit_release("v1.9", false, ["chelekom.json"])],
+        download: fn conn ->
+          send(test, {:fetching, self()})
+          receive do: (:go -> :ok)
+          named_bundle(conn)
+        end
+      )
+
+      view = reload(conn, "/install?step=settings", %{"config" => Map.drop(@valid, ["password"])})
+      # credo:disable-for-next-line Jump.CredoChecks.AssertReceiveTimeout
+      assert_receive {:fetching, download}, 5_000
+
+      assert has_element?(
+               view,
+               ~s(#install-settings-submit.is-waiting[disabled][data-loading="Loading components…"])
+             )
+
+      send(download, :go)
+      render_async(view, 15_000)
+
+      refute has_element?(view, "#install-settings-submit[disabled]")
+      assert has_element?(view, ~s(#install-settings-submit[data-loading="Installing…"]))
+    end
+
+    test "a draft is checked like the steps check what is typed", %{conn: conn} do
+      draft = %{
+        "config" => %{"email" => "not-an-email", "password" => "Leaked123!", "host" => 7},
+        "kit_channel" => "nightly",
+        "languages" => ["zz-not-a-code", 1],
+        "language_urls" => "everywhere",
+        "picks" => "all"
+      }
+
+      view = reload(conn, "/install?step=settings", draft)
+
+      # The first step's answers do not pass its checks, so the wizard stays there.
+      assert has_element?(view, "#install-form")
+      assert_patch(view, "/install?step=config")
+
+      assert has_element?(
+               view,
+               "#install-form input[name='install[email]'][value='not-an-email']"
+             )
+
+      refute render(view) =~ "Leaked123!"
+
+      saved = kept_draft(view)
+      assert saved["config"] == %{"email" => "not-an-email"}
+      assert saved["kit_channel"] == "stable"
+      assert saved["languages"] == Languages.default()
+      assert saved["language_urls"] == hd(Languages.url_modes())
+    end
+
+    test "a reload of an untouched wizard asks for nothing again", %{conn: conn} do
+      view = reload(conn, "/install?step=components", %{"config" => %{"email" => ""}})
+
+      assert has_element?(view, "#install-form")
+      refute has_element?(view, "[data-testid=install-password-note]")
+    end
+
+    test "a second hand-back after the wizard moved on changes nothing", %{conn: conn} do
+      view = to_ui_kit(conn)
+      render_hook(view, "restore_draft", %{"draft" => %{"config" => %{"email" => "x@y.test"}}})
+
+      assert has_element?(view, "#installer-uikit")
+    end
+  end
+
   describe "the languages on the settings step" do
     test "English starts as the primary, with no remove button, and a crafted remove keeps it", %{
       conn: conn

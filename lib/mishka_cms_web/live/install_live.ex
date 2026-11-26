@@ -62,6 +62,16 @@ defmodule MishkaCmsWeb.InstallLive do
   row opens on the empty field. The forms' answers are the core's parts' `answers`, the fields'
   answers each extension's own, and the choice reaches `Bootstrap.run/2` as `:parts`.
 
+  A reload keeps the wizard where it was. The step is in the address (`?step=config`, `components`,
+  `settings`, through `push_patch/2`), and the answers wait in the browser tab's `sessionStorage`:
+  after every render that changes them the page pushes `install-draft` to the `InstallDraft` hook
+  (`assets/js/install_draft.js`), which keeps them and hands them back as `restore_draft` when the
+  page mounts again. Nothing is written to the database before the last step, and the master
+  password is never among the answers kept, so after a reload it is the one thing asked again,
+  with a note: on the first step, or on the settings step when the reload landed past it. A draft
+  is read as untrusted input, every value checked as the step it belongs to checks it. Once the
+  install starts the draft is cleared.
+
   It is reachable only while the CMS is uninstalled: `MishkaCms.Plugs.InstallGate`
   responds `404` for this route once `MishkaCmsCore.Install.installed?/0` is true.
 
@@ -78,6 +88,12 @@ defmodule MishkaCmsWeb.InstallLive do
   @install_setting_keys ["site.title", "mailer.from"]
 
   @kit_channels %{"stable" => :stable, "prerelease" => :prerelease, "master" => :master}
+
+  # The steps a reload can come back to, by the name the address gives each.
+  @url_steps %{"config" => :config, "components" => :ui_kit, "settings" => :settings}
+
+  # What the first step keeps across a reload: every answer but the password and its confirmation.
+  @kept_config ["email", "site_name", "host"]
 
   # Where an operator is sent when no UI-kit package can be found anywhere.
   @support_url "https://github.com/mishka-group"
@@ -123,10 +139,34 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(install_steps: rows(Bootstrap.steps()), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
      |> assign_seed_parts()
-     |> assign_form(%{})}
+     |> assign_form(%{})
+     |> assign(url_step: :config, restored?: false, saved_draft: nil, password_again?: false)
+     |> assign(pending_selected: nil)
+     |> attach_hook(:install_draft, :after_render, &remember_draft/1)}
   end
 
   @impl true
+  def handle_params(params, _uri, socket),
+    do: {:noreply, assign(socket, url_step: Map.get(@url_steps, params["step"], :config))}
+
+  @impl true
+  # ONCE, AND ONLY ON THE FIRST STEP: a second mount of the hook, or a draft arriving after the
+  # wizard has moved on, changes nothing.
+  def handle_event(
+        "restore_draft",
+        params,
+        %{assigns: %{restored?: false, step: :config}} = socket
+      ) do
+    new_socket =
+      socket
+      |> assign(restored?: true)
+      |> restore_draft(params["draft"])
+
+    {:noreply, new_socket}
+  end
+
+  def handle_event("restore_draft", _params, socket), do: {:noreply, socket}
+
   def handle_event("validate", %{"install" => params}, socket) do
     {:noreply, assign_form(socket, params)}
   end
@@ -135,7 +175,7 @@ defmodule MishkaCmsWeb.InstallLive do
     socket = assign(socket, submitted?: true)
 
     case errors(params) do
-      [] -> {:noreply, start_ui_kit(socket, params)}
+      [] -> {:noreply, socket |> assign_form(params) |> start_ui_kit(params)}
       _ -> {:noreply, assign_form(socket, params)}
     end
   end
@@ -292,11 +332,11 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   def handle_event("back", _params, %{assigns: %{step: :settings}} = socket) do
-    {:noreply, assign(socket, step: :ui_kit)}
+    {:noreply, go(socket, :ui_kit)}
   end
 
   def handle_event("back", _params, %{assigns: %{step: :installing}} = socket) do
-    {:noreply, assign(socket, step: socket.assigns.install_origin)}
+    {:noreply, go(socket, socket.assigns.install_origin)}
   end
 
   def handle_event("finish", _params, socket) do
@@ -304,7 +344,7 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   def handle_event("back", _params, socket) do
-    {:noreply, assign(socket, step: :config)}
+    {:noreply, go(socket, :config)}
   end
 
   def handle_event("validate_settings", %{"settings" => params}, socket) do
@@ -342,12 +382,27 @@ defmodule MishkaCmsWeb.InstallLive do
       else: {:noreply, socket}
   end
 
+  # The kits are still loading after a reload: nothing to install from yet.
+  def handle_event("install", _params, %{assigns: %{catalog: nil}} = socket),
+    do: {:noreply, socket}
+
+  # A PASSWORD ASKED AGAIN HERE, after a reload dropped it, joins the first step's answers and is
+  # never handed to the settings.
   def handle_event("install", %{"settings" => params}, socket) do
     socket = assign(socket, settings_submitted?: true)
+    {password, settings} = Map.split(params, ["password", "password_confirmation"])
 
-    case settings_errors(params) do
-      [] -> {:noreply, commit(socket, params)}
-      _ -> {:noreply, assign_settings_form(socket, params)}
+    case settings_errors(params, socket.assigns.config) do
+      [] ->
+        new_socket =
+          socket
+          |> update(:config, &with_password(&1, password))
+          |> commit(settings)
+
+        {:noreply, new_socket}
+
+      _errors ->
+        {:noreply, assign_settings_form(socket, params)}
     end
   end
 
@@ -399,11 +454,18 @@ defmodule MishkaCmsWeb.InstallLive do
        bundle_failures: failures,
        bundle_release: Map.get(result, :release)
      )
-     |> recompute(MapSet.new())}
+     |> recompute(restored_selection(socket.assigns.pending_selected, catalog))
+     |> assign(pending_selected: nil)}
   end
 
+  # The settings step a reload came back to cannot install without the kits, so a failed load goes
+  # back to the step that shows the error and its retry.
   def handle_async(:bundle, {:exit, reason}, socket) do
-    {:noreply, assign(socket, bundle_status: :error, bundle_error: inspect(reason))}
+    new_socket = assign(socket, bundle_status: :error, bundle_error: inspect(reason))
+
+    if new_socket.assigns.step == :settings,
+      do: {:noreply, go(new_socket, :ui_kit)},
+      else: {:noreply, new_socket}
   end
 
   def handle_async(:install, {:ok, {:ok, %{site: site}}}, socket) do
@@ -624,6 +686,35 @@ defmodule MishkaCmsWeb.InstallLive do
                 header and footer (`MishkaCmsCore.Runtime.SiteLayout`). Ticked and disabled, so it
                 says what the install does and submits nothing: `MishkaCmsCore.Install.Bootstrap`
                 writes it whatever arrives. --%>
+          <%!-- A RELOAD KEEPS EVERY ANSWER BUT THE PASSWORD, which is asked here when it landed past
+                the first step: it is never kept anywhere a reload could read it. --%>
+          <div :if={needs_password?(@config)} id="install-password-again">
+            <div class="inst-divider"></div>
+            <h3 class="inst-sec-h"><.svg_user /> {gettext("Master Admin password")}</h3>
+            <.password_again_note />
+            <.field
+              field={@settings_form["password"]}
+              id="install-set-password"
+              data-testid="install-set-password"
+              label={gettext("Password")}
+              type="password"
+              placeholder={gettext("At least 8 characters")}
+              autocomplete="new-password"
+            >
+              <:extra><.strength_meter password={@settings_form["password"].value} /></:extra>
+            </.field>
+            <.field
+              field={@settings_form["password_confirmation"]}
+              id="install-set-password-confirmation"
+              data-testid="install-set-password-confirmation"
+              label={gettext("Confirm password")}
+              type="password"
+              placeholder={gettext("Re-enter password")}
+              autocomplete="new-password"
+            />
+            <div class="inst-divider"></div>
+          </div>
+
           <label id="install-starter-content" class="inst-smp-row is-fixed">
             <input type="checkbox" checked disabled aria-disabled="true" class="inst-cbox" />
             <span class="nm">
@@ -648,12 +739,20 @@ defmodule MishkaCmsWeb.InstallLive do
           <button id="settings-back" type="button" phx-click="back" class={btn_ghost()}>
             <.svg_back /> {gettext("Back")}
           </button>
+          <%!-- After a reload onto this step the kits load again before anything can install. --%>
           <button
             id="install-settings-submit"
+            data-testid="install-settings-submit"
             type="submit"
             form="install-settings-form"
-            data-loading={gettext("Installing…")}
-            class={btn_primary()}
+            disabled={@bundle_status == :loading}
+            aria-busy={to_string(@bundle_status == :loading)}
+            data-loading={
+              if @bundle_status == :loading,
+                do: gettext("Loading components…"),
+                else: gettext("Installing…")
+            }
+            class={[btn_primary(), @bundle_status == :loading && "is-waiting"]}
           >
             <span class="lbl">{gettext("Install")} <.svg_arrow /></span>
           </button>
@@ -1313,7 +1412,10 @@ defmodule MishkaCmsWeb.InstallLive do
           placeholder={gettext("At least 8 characters")}
           autocomplete="new-password"
         >
-          <:extra><.strength_meter password={@form[:password].value} /></:extra>
+          <:extra>
+            <.strength_meter password={@form[:password].value} />
+            <.password_again_note :if={@password_again? and needs_password?(@form.params)} />
+          </:extra>
         </.field>
         <.field
           field={@form[:password_confirmation]}
@@ -1864,7 +1966,7 @@ defmodule MishkaCmsWeb.InstallLive do
         .inst-actions .inst-btn{padding:12px 16px;font-size:13.5px}
       }
     </style>
-    <div class="inst-shell">
+    <div id="install-wizard" phx-hook="InstallDraft" class="inst-shell">
       <aside class="inst-aside">
         <div class="inst-brand">
           <div class="inst-logo-tile"><img src="/images/mishka-logo.svg" alt="Mishka" /></div>
@@ -1946,7 +2048,7 @@ defmodule MishkaCmsWeb.InstallLive do
   defp rail_open?(2, %{config: config, catalog: catalog}), do: config != %{} and catalog != nil
   defp rail_open?(_i, _assigns), do: false
 
-  defp rail_nav(socket, "0"), do: assign(socket, step: :config)
+  defp rail_nav(socket, "0"), do: go(socket, :config)
 
   defp rail_nav(%{assigns: %{config: config}} = socket, "1") when map_size(config) > 0,
     do: start_ui_kit(socket, config)
@@ -2273,6 +2375,14 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   attr :password, :any, default: nil
+
+  defp password_again_note(assigns) do
+    ~H"""
+    <p id="install-password-note" data-testid="install-password-note" class="inst-hint">
+      {gettext("A reload keeps every answer except the password. Please enter it again.")}
+    </p>
+    """
+  end
 
   defp strength_meter(assigns) do
     password = to_string(assigns.password || "")
@@ -2642,7 +2752,7 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   defp start_ui_kit(socket, config) do
-    socket = assign(socket, step: :ui_kit, config: config)
+    socket = socket |> assign(config: config) |> go(:ui_kit)
 
     if socket.assigns.catalog, do: socket, else: load_bundle(socket)
   end
@@ -3018,7 +3128,8 @@ defmodule MishkaCmsWeb.InstallLive do
 
       missing ->
         socket
-        |> assign(step: :ui_kit, extension_errors: missing)
+        |> go(:ui_kit)
+        |> assign(extension_errors: missing)
         |> update(:open_plugins, fn open ->
           Enum.reduce(Map.keys(missing), open, &MapSet.put(&2, {"install", &1}))
         end)
@@ -3031,7 +3142,8 @@ defmodule MishkaCmsWeb.InstallLive do
     values = Map.merge(install_defaults(socket.assigns.config), socket.assigns.settings_values)
 
     socket
-    |> assign(step: :settings, settings_submitted?: false)
+    |> go(:settings)
+    |> assign(settings_submitted?: false)
     |> assign(settings_form: to_form(values, as: :settings))
   end
 
@@ -3149,15 +3261,22 @@ defmodule MishkaCmsWeb.InstallLive do
   defp install_default(definition, _config), do: definition.default
 
   defp assign_settings_form(socket, params) do
-    errors = if socket.assigns.settings_submitted?, do: settings_errors(params), else: []
+    errors =
+      if socket.assigns.settings_submitted?,
+        do: settings_errors(params, socket.assigns.config),
+        else: []
+
     assign(socket, settings_form: to_form(params, as: :settings, errors: errors))
   end
 
-  defp settings_errors(params) do
+  # The password fields are checked only when the settings step shows them.
+  defp settings_errors(params, config) do
     title = trimmed(params["site.title"])
     from = trimmed(params["mailer.from"])
 
-    []
+    errors = password_errors(params, config)
+
+    errors
     |> error_if(is_nil(title), "site.title", dgettext_noop("errors", "is required"))
     |> error_if(is_nil(from), "mailer.from", dgettext_noop("errors", "is required"))
     |> error_if(
@@ -3165,6 +3284,24 @@ defmodule MishkaCmsWeb.InstallLive do
       "mailer.from",
       dgettext_noop("errors", "must be a valid email")
     )
+  end
+
+  # THE FIRST STEP'S OWN PASSWORD CHECKS, under the settings form's names, for a password a reload
+  # dropped; none when the first step's answers still hold one.
+  defp password_errors(params, config) do
+    if needs_password?(config) do
+      for {field, error} <- errors(params),
+          field in [:password, :password_confirmation],
+          do: {Atom.to_string(field), error}
+    else
+      []
+    end
+  end
+
+  defp needs_password?(config), do: (config["password"] || "") == ""
+
+  defp with_password(config, password) do
+    if needs_password?(config), do: Map.merge(config, password), else: config
   end
 
   defp assign_form(socket, params) do
@@ -3266,6 +3403,163 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   defp picks_to_lists(picks), do: Map.new(picks, fn {key, ids} -> {key, MapSet.to_list(ids)} end)
+
+  # THE WIZARD'S OWN STEPS ARE IN THE ADDRESS, replaced rather than pushed, so a reload lands on the
+  # same step and the browser's Back still leaves the wizard as before. The others are not: an
+  # install cannot be resumed, and sample data is a detour from the first step.
+  defp go(socket, step) do
+    socket = assign(socket, step: step)
+
+    case Enum.find(@url_steps, fn {_name, url_step} -> url_step == step end) do
+      {name, _step} -> push_patch(socket, to: ~p"/install?#{[step: name]}", replace: true)
+      nil -> socket
+    end
+  end
+
+  # AFTER EVERY RENDER, the answers as they now stand go to the tab, but only once its own draft has
+  # been read back, so the empty first render cannot wipe it, and only when they changed.
+  defp remember_draft(%{assigns: %{restored?: false}} = socket), do: socket
+
+  defp remember_draft(socket) do
+    case draft(socket.assigns) do
+      unchanged when unchanged == socket.assigns.saved_draft ->
+        socket
+
+      draft ->
+        socket
+        |> assign(saved_draft: draft)
+        |> push_event("install-draft", %{draft: draft})
+    end
+  end
+
+  defp draft(%{step: step}) when step in [:installing, :done], do: nil
+
+  defp draft(assigns) do
+    %{
+      "config" => Map.take(assigns.form.params, @kept_config),
+      "kit_channel" => Atom.to_string(assigns.kit_channel),
+      "selected" => MapSet.to_list(assigns.pending_selected || assigns.selected),
+      "config_axes" =>
+        Map.new(assigns.config_axes, fn {name, axes} ->
+          {name, Map.new(axes, fn {axis, values} -> {axis, MapSet.to_list(values)} end)}
+        end),
+      "picks" => picks_to_lists(assigns.install_picks),
+      "answers" => assigns.extension_answers,
+      "settings" => assigns.settings_values,
+      "languages" => assigns.languages,
+      "language_urls" => assigns.language_urls
+    }
+  end
+
+  # A DRAFT IS THE CLIENT'S, so each value is taken only in the shape its step would accept and
+  # anything else keeps the fresh wizard's value. A password a reconnect's form recovery brought
+  # back is kept; the draft never carries one.
+  defp restore_draft(socket, draft) when is_map(draft) do
+    kept = strings(draft["config"], @kept_config)
+    config = Map.merge(socket.assigns.form.params, kept)
+    %{install_plugins: plugins, install_picks: picks, extension_fields: fields} = socket.assigns
+
+    socket
+    |> assign(password_again?: needs_password?(config) and Enum.any?(kept, &(elem(&1, 1) != "")))
+    |> assign(kit_channel: Map.get(@kit_channels, draft["kit_channel"], :stable))
+    |> assign(pending_selected: restored_names(draft["selected"]))
+    |> assign(config_axes: restored_axes(draft["config_axes"]))
+    |> assign(install_picks: restored_picks(plugins, picks, draft["picks"]))
+    |> assign(extension_answers: known_answers(fields, draft["answers"]))
+    |> assign(settings_values: strings(draft["settings"], @install_setting_keys))
+    |> assign(languages: restored_languages(draft["languages"]))
+    |> assign(language_urls: restored_url_mode(draft["language_urls"]))
+    |> assign_form(config)
+    |> resume(config)
+  end
+
+  defp restore_draft(socket, _no_draft), do: go(socket, :config)
+
+  # Back to the step the address names, as far as the answers reach: the first step's answers must
+  # pass its own checks, the password aside, to go further. The kits load again on the way; one
+  # step change, so one address.
+  defp resume(%{assigns: %{url_step: step}} = socket, config) when step in [:ui_kit, :settings] do
+    if config_ready?(config),
+      do: socket |> assign(config: config) |> load_bundle() |> resume_at(step),
+      else: go(socket, :config)
+  end
+
+  defp resume(socket, _config), do: go(socket, :config)
+
+  defp resume_at(socket, :settings), do: to_settings_step(socket)
+  defp resume_at(socket, :ui_kit), do: go(socket, :ui_kit)
+
+  defp config_ready?(config) do
+    Enum.all?(errors(config), fn {field, _error} ->
+      field in [:password, :password_confirmation]
+    end)
+  end
+
+  defp strings(map, keys) when is_map(map),
+    do: for({key, value} <- Map.take(map, keys), is_binary(value), into: %{}, do: {key, value})
+
+  defp strings(_absent, _keys), do: %{}
+
+  # Component names, kept until the kits are in to be checked against them.
+  defp restored_names(names) when is_list(names),
+    do: names |> Enum.filter(&is_binary/1) |> MapSet.new()
+
+  defp restored_names(_absent), do: MapSet.new()
+
+  defp restored_selection(nil, _catalog), do: MapSet.new()
+  defp restored_selection(names, catalog), do: MapSet.intersection(names, catalog.names)
+
+  # The catalogue narrows each component's axes to the ones it offers when it installs.
+  defp restored_axes(axes) when is_map(axes) do
+    for {name, by_axis} <- axes,
+        is_binary(name) and is_map(by_axis),
+        values = restored_axis_values(by_axis),
+        values != %{},
+        into: %{},
+        do: {name, values}
+  end
+
+  defp restored_axes(_absent), do: %{}
+
+  defp restored_axis_values(by_axis) do
+    for {axis, values} <- by_axis,
+        is_binary(axis) and is_list(values),
+        set = values |> Enum.filter(&is_binary/1) |> MapSet.new(),
+        MapSet.size(set) > 0,
+        into: %{},
+        do: {axis, set}
+  end
+
+  # Only parts a drawn plugin declares; a plugin the draft does not name keeps its defaults.
+  defp restored_picks(plugins, picks, saved) when is_map(saved) do
+    Map.new(plugins, fn plugin ->
+      case saved[plugin.key] do
+        ids when is_list(ids) ->
+          {plugin.key, MapSet.new(for part <- plugin.parts, part.id in ids, do: part.id)}
+
+        _absent ->
+          {plugin.key, Map.fetch!(picks, plugin.key)}
+      end
+    end)
+  end
+
+  defp restored_picks(_plugins, picks, _absent), do: picks
+
+  # The same codes `add_language/2` would accept, each once, or the fresh list.
+  defp restored_languages(codes) when is_list(codes) do
+    known = Languages.known()
+    codes = Enum.uniq(codes)
+
+    if Languages.valid?(codes) and Enum.all?(codes, &(&1 in known)),
+      do: codes,
+      else: Languages.default()
+  end
+
+  defp restored_languages(_absent), do: Languages.default()
+
+  defp restored_url_mode(mode) do
+    if mode in Languages.url_modes(), do: mode, else: hd(Languages.url_modes())
+  end
 
   defp parts_assigns("install"), do: {:install_plugins, :install_picks}
   defp parts_assigns("seed"), do: {:seed_plugins, :seed_picks}
