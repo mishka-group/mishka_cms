@@ -15,9 +15,10 @@ IO.puts("====================================================")
 IO.puts("  MishkaCMS Dev Seeds — realistic production data")
 IO.puts("====================================================\n")
 
-# The core foundation (sites, users, permissions, components, layouts, …), then every extension
-# that declares a seed on core's `dev:seed` event, on each site — see `MishkaCmsCore.Dev.Seeds`.
-MishkaCmsCore.Dev.Seeds.run_all(:dev)
+# Every dev part declared on core's `installer:seed` event: the core's own (sites, users,
+# permissions, components, layouts, …), then each extension's, on every site — see
+# `MishkaCmsCore.Install.Seeds`.
+MishkaCmsCore.Install.Seeds.run_all(:normal)
 
 IO.puts("\n====================================================")
 IO.puts("  Dev seeds complete!")

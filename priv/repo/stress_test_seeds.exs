@@ -26,9 +26,9 @@ IO.puts("======================================================\n")
 IO.puts("WARNING: This will create 3,000 sites with proportional")
 IO.puts("data in each. This may take a very long time.\n")
 
-# Core: 3,000 sites with large amounts of per-site data, then every extension that declares a seed
-# on core's `dev:seed` event, at its own stress volumes, on each of them — see
-# `MishkaCmsCore.Dev.Seeds.run_all/2`.
+# Core: 3,000 sites with large amounts of per-site data, then every extension's dev parts on
+# core's `installer:seed` event, at their own stress volumes, on each of them — see
+# `MishkaCmsCore.Install.Seeds.run_all/2`.
 IO.puts("Seeding core data (3,000 sites), then every extension's stress seed...")
 
 # COMPONENTS AND PAGES ARE NOT LISTED HERE, and were removed rather than implemented.
@@ -37,7 +37,7 @@ IO.puts("Seeding core data (3,000 sites), then every extension's stress seed..."
 # never written — a reader checking whether the editor holds up under load would have concluded it
 # had been tested against them. The dev seed is where components are demonstrated, two per site;
 # a stress run wanting them should add them to `stress_seed/1` deliberately.
-MishkaCmsCore.Dev.Seeds.run_all(:stress,
+MishkaCmsCore.Install.Seeds.run_all(:stress,
   sites: 3000,
   layouts_per_site: 20,
   error_pages_per_site: 3,

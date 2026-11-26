@@ -27,7 +27,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   alias MishkaCmsCore.Accounts.{Permission, User}
   alias MishkaCmsCore.Dev.Generator
   alias MishkaCmsCore.Dev.SeedMedia
-  alias MishkaCmsCore.Dev.Seeds
+  alias MishkaCmsCore.Install.Seeds
   alias MishkaCmsCore.Install.StarterContent
   alias MishkaCmsCore.Runtime.Compilers.JavaScriptCompiler
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
@@ -56,6 +56,16 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
   require Ash.Query
 
+  # THE CORE'S DEV PARTS ALONE: every other plugin is given no part, the core's components stay
+  # ticked as they start.
+  defp run_core! do
+    picks =
+      for %{key: key} <- Seeds.plugins(:dev), key != Seeds.core_key(), into: %{}, do: {key, []}
+
+    {:ok, core} = Seeds.run(:dev, picks)
+    core
+  end
+
   # A SEEDED LIBRARY IS FILES, AND THE SANDBOX CANNOT ROLL A FILE BACK. The run stores the whole
   # shipped media set under `priv/static/uploads/<site id>/`, and each seeded site has an id of its
   # own, so nothing a run writes is ever written over: left alone, this file would grow that
@@ -67,7 +77,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   # A run knows the sites it made, and those are the ones it takes back.
   setup_all do
     context = MishkaCms.DataCase.setup_module_sandbox()
-    core = Seeds.run([])
+    core = run_core!()
 
     on_exit(fn ->
       Enum.each(core.sites, &File.rm_rf!(Path.join(uploads_directory(), &1.id)))
@@ -78,8 +88,8 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
   defp uploads_directory, do: Application.app_dir(:mishka_cms, "priv/static/uploads")
 
-  test "categories/0 lists the core's seed first, then the extensions' seeds" do
-    keys = Seeds.categories() |> Enum.map(& &1.key)
+  test "plugins/1 lists the core's parts first, then the extensions' dev parts" do
+    keys = :dev |> Seeds.plugins() |> Enum.map(& &1.key)
     assert hd(keys) == "mishka_cms_core"
     assert "mishka_blog" in keys
     assert "mishka_document" in keys
@@ -454,7 +464,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
     {:ok, _value} = Settings.put("site.languages", ["en", "de"], site_id: site.id)
 
-    Seeds.run([])
+    run_core!()
 
     assert Languages.site(site.id) == ["en", "de"]
   end
@@ -473,7 +483,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     site = Enum.find(core.sites, &(&1.host == "localhost"))
     {:ok, _value} = Settings.put("site.language_urls", "prefix_all", site_id: site.id)
 
-    Seeds.run([])
+    run_core!()
 
     assert Languages.url_mode(site.id) == "prefix_all"
   end
@@ -503,7 +513,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   test "a second run grants no account anything more", %{core: core} do
     before = Map.new(core.sites, &{&1.id, grants(&1.id)})
 
-    Seeds.run([])
+    run_core!()
 
     for site <- core.sites, do: assert(grants(site.id) == before[site.id])
   end
@@ -789,7 +799,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     # AND ONLY THE SITE THAT DEMONSTRATES IT HAS ONE.
     for other <- core.sites, other.host != "localhost", do: assert(drafts(other) == [])
 
-    Seeds.run([])
+    run_core!()
 
     assert [^draft] = drafts(site)
   end
@@ -849,11 +859,13 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     |> Ash.read_one!(authorize?: false)
   end
 
-  test "steps/1 always starts with the core's seed and adds the extensions selected" do
-    assert Seeds.steps([]) |> Enum.map(&elem(&1, 0)) == ["mishka_cms_core"]
+  test "steps/2 always starts with the core's parts and adds the extension parts chosen" do
+    none = Seeds.steps(:dev, %{"mishka_blog" => [], "mishka_document" => []})
+    assert Enum.all?(none, &match?({{"mishka_cms_core", _part}, _label}, &1))
+    assert {{"mishka_cms_core", "samples"}, _label} = List.last(none)
 
-    assert Seeds.steps(["mishka_blog"]) |> Enum.map(&elem(&1, 0)) ==
-             ["mishka_cms_core", "mishka_blog"]
+    blog = Seeds.steps(:dev, %{"mishka_blog" => ["samples"], "mishka_document" => []})
+    assert {{"mishka_blog", "samples"}, _label} = List.last(blog)
   end
 
   # NOTHING TO CHOOSE. A dev database is where every component gets tried, so the seed installs all
@@ -1059,13 +1071,30 @@ defmodule MishkaCmsCore.Dev.SeedsInstallFreshTest do
   # Over thirty seconds on its own: left out of a pull request, see test/test_helper.exs.
   @moduletag :slow
 
-  alias MishkaCmsCore.Dev.Seeds
+  alias MishkaCmsCore.Install.Seeds
+
+  # THE CORE'S DEV PARTS ALONE: every other plugin is given no part, the core's components stay
+  # ticked as they start.
+  defp run_core! do
+    picks =
+      for %{key: key} <- Seeds.plugins(:dev), key != Seeds.core_key(), into: %{}, do: {key, []}
+
+    {:ok, core} = Seeds.run(:dev, picks)
+    core
+  end
+
   alias MishkaCmsCore.Runtime.Workers.SiteRuntimeWorker
 
   # THE SEEDS WRITE THEM THEMSELVES, so the sites they create enqueue no job to write them again.
   test "the sites it creates enqueue no job for their sign-in pages" do
+    # A DEV BUILD, not a test one: `MishkaCmsCore.Install.Seeds` refuses a dev run in production.
     Application.put_env(:mishka_cms_core, :env_test?, false)
-    on_exit(fn -> Application.put_env(:mishka_cms_core, :env_test?, true) end)
+    Application.put_env(:mishka_cms_core, :env_dev?, true)
+
+    on_exit(fn ->
+      Application.put_env(:mishka_cms_core, :env_test?, true)
+      Application.delete_env(:mishka_cms_core, :env_dev?)
+    end)
 
     core = seed_core()
 
@@ -1099,7 +1128,7 @@ defmodule MishkaCmsCore.Dev.SeedsInstallFreshTest do
   # under a site id of its own, which a "remove everything that appeared" sweep would take with it.
   # A run knows the sites it made, and those are the ones it takes back.
   defp seed_core do
-    core = Seeds.run([])
+    core = run_core!()
 
     on_exit(fn ->
       Enum.each(core.sites, &File.rm_rf!(Path.join(uploads_directory(), &1.id)))
