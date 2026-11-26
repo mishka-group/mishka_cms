@@ -78,10 +78,11 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
 
   defp uploads_directory, do: Application.app_dir(:mishka_cms, "priv/static/uploads")
 
-  test "categories/0 lists the loaded extension seeders" do
+  test "categories/0 lists the core's seed first, then the extensions' seeds" do
     keys = Seeds.categories() |> Enum.map(& &1.key)
-    assert :blog in keys
-    assert :document in keys
+    assert hd(keys) == "mishka_cms_core"
+    assert "mishka_blog" in keys
+    assert "mishka_document" in keys
   end
 
   # THREE SITES A BROWSER ON THIS MACHINE CAN REALLY OPEN. `mishka.tools` and `api.mishka.tools`
@@ -848,9 +849,11 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
     |> Ash.read_one!(authorize?: false)
   end
 
-  test "steps/1 always starts with :core and adds the extensions selected" do
-    assert Seeds.steps([]) |> Enum.map(&elem(&1, 0)) == [:core]
-    assert Seeds.steps([:blog]) |> Enum.map(&elem(&1, 0)) == [:core, :blog]
+  test "steps/1 always starts with the core's seed and adds the extensions selected" do
+    assert Seeds.steps([]) |> Enum.map(&elem(&1, 0)) == ["mishka_cms_core"]
+
+    assert Seeds.steps(["mishka_blog"]) |> Enum.map(&elem(&1, 0)) ==
+             ["mishka_cms_core", "mishka_blog"]
   end
 
   # NOTHING TO CHOOSE. A dev database is where every component gets tried, so the seed installs all

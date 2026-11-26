@@ -1305,10 +1305,24 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     end
   end
 
+  # THE SEEDS ARE THE `dev:seed` PLUGINS, the core's own first and required. Registered by hand,
+  # as the extensions step below registers its plugin, so the list does not depend on what the boot
+  # got to register before the first test.
   describe "dev sample-data step" do
     setup do
       Application.put_env(:mishka_cms_core, :env_dev?, true)
       on_exit(fn -> Application.delete_env(:mishka_cms_core, :env_dev?) end)
+
+      for plugin <- [
+            MishkaCmsCore.Dev.CoreSeed,
+            MishkaBlog.Plugins.DevSeed,
+            MishkaDocument.Plugins.DevSeed
+          ] do
+        {:ok, _registered} = plugin.register()
+        {:ok, _started} = plugin.start()
+      end
+
+      :ok = MishkaInstaller.Event.EventHandler.do_compile("dev:seed", :start, false)
       :ok
     end
 
@@ -1318,40 +1332,57 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       refute has_element?(view, "#install-dev-seeds")
     end
 
-    test "in dev, offers the dev-seed entry and its extension categories", %{conn: conn} do
+    test "in dev, lists every registered seed, the core's locked on", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/install")
       assert has_element?(view, "#install-dev-seeds")
 
       view |> element("#install-dev-seeds") |> render_click()
       assert has_element?(view, "#installer-seeds")
 
-      # The extension seeds, all checked by default. Every UI-kit component is always installed, so
-      # there is nothing to choose for the kits.
+      # The core's seed is always loaded, so it is ticked and cannot be unticked; the extensions'
+      # seeds are ticked by default. Every UI-kit component is always installed, so there is nothing
+      # to choose for the kits.
+      assert has_element?(view, "#seed-mishka_cms_core input[checked][disabled]")
+      refute has_element?(view, "#seed-mishka_blog input[disabled]")
+      assert has_element?(view, "#seed-mishka_blog input[checked]")
+      assert has_element?(view, "#seed-mishka_document input[checked]")
       refute has_element?(view, "#seed-chelekom")
-      assert has_element?(view, "#seed-blog input[checked]")
-      assert has_element?(view, "#seed-document input[checked]")
 
-      # Extensions are labelled by their name, not "Blog content".
-      html = render(view)
-      assert html =~ "Mishka Blog"
-      assert html =~ "Mishka Document"
+      # Each seed is named by its plugin's label, with the summary of what it writes.
+      for %{key: key, label: label, summary: summary} <- MishkaCmsCore.Dev.Seeds.categories() do
+        assert has_element?(view, "#seed-#{key} .nm", label)
+        assert has_element?(view, "#seed-#{key} .ex", summary)
+      end
     end
 
-    test "loads the core sample data behind a live checklist, then the done screen", %{conn: conn} do
+    test "loads the core and the ticked seeds behind a live checklist, then the done screen", %{
+      conn: conn
+    } do
+      MishkaCmsCore.Test.Installer.register!(MishkaCms.Test.DevSeedProbe, "dev:seed", %{
+        extension: :mishka_seed_probe,
+        priority: 90,
+        extra: [%{label: "Seed probe", summary: "Nothing written"}]
+      })
+
       {:ok, view, _html} = live(conn, "/install")
       view |> element("#install-dev-seeds") |> render_click()
 
-      # Trim to the core only (deselect the extension seeds) for a fast test.
-      view |> element("#seed-blog input") |> render_click()
-      view |> element("#seed-document input") |> render_click()
+      # Untick the blog and the documentation for a fast test; the probe stays ticked.
+      view |> element("#seed-mishka_blog input") |> render_click()
+      view |> element("#seed-mishka_document input") |> render_click()
 
       view |> element("#seeds-run") |> render_click()
 
-      # Runs async behind the same checklist the real install uses.
+      # Runs async behind the same checklist the real install uses, one row per seed it runs.
       assert has_element?(view, "#install-progress")
-      assert has_element?(view, "#step-core")
+      assert has_element?(view, "#step-mishka_cms_core")
+      assert has_element?(view, "#step-mishka_seed_probe")
+      refute has_element?(view, "#step-mishka_blog")
+      refute has_element?(view, "#step-mishka_document")
       render_async(view, 30_000)
 
+      # A ticked seed that did not answer would have failed the run instead.
+      refute has_element?(view, "#install-error")
       assert has_element?(view, "#install-complete")
       view |> element("#install-finish") |> render_click()
 

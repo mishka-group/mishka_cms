@@ -114,11 +114,7 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(language_urls: hd(Languages.url_modes()))
      |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
-     |> assign(
-       dev_seeds: dev_seeds_allowed?(),
-       seed_categories: dev_seed_categories(),
-       seed_selected: default_seed_selected()
-     )
+     |> assign_seed_categories()
      |> assign_form(%{})}
   end
 
@@ -325,7 +321,7 @@ defmodule MishkaCmsWeb.InstallLive do
 
   def handle_event("run_seeds", _params, socket) do
     if dev_seeds_allowed?() do
-      selected = Enum.map(socket.assigns.seed_selected, &String.to_existing_atom/1)
+      selected = MapSet.to_list(socket.assigns.seed_selected)
       lv = self()
 
       if connected?(socket),
@@ -1237,19 +1233,27 @@ defmodule MishkaCmsWeb.InstallLive do
     >
       <div id="installer-seeds">
         <div class="inst-smp">
+          <%!-- A REQUIRED SEED IS NOT A CHOICE: the core's own seed writes the sites every other one
+                is run on, and `MishkaCmsCore.Dev.Seeds.run/2` runs it whatever arrives. Ticked and
+                disabled, so the list says what will be loaded. --%>
           <label
             :for={category <- @seed_categories}
             id={"seed-#{category.key}"}
-            class="inst-smp-row"
+            class={["inst-smp-row", category.required && "is-fixed"]}
           >
             <input
               type="checkbox"
-              checked={MapSet.member?(@seed_selected, to_string(category.key))}
+              checked={category.required or MapSet.member?(@seed_selected, category.key)}
+              disabled={category.required}
+              aria-disabled={category.required && "true"}
               phx-click="toggle_seed"
               phx-value-key={category.key}
               class="inst-cbox"
             />
-            <span class="nm">{category.label}</span>
+            <span class="nm">
+              {Settings.text(category.label)}
+              <span :if={category.summary != ""} class="ex">{Settings.text(category.summary)}</span>
+            </span>
           </label>
           <p class="inst-smp-note">
             {raw(
@@ -3011,12 +3015,16 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp dev_seeds_allowed?, do: Application.get_env(:mishka_cms_core, :env_dev?, false)
 
-  defp dev_seed_categories do
-    if dev_seeds_allowed?(), do: MishkaCmsCore.Dev.Seeds.categories(), else: []
-  end
+  # EVERY SEED TICKED, read once from the `dev:seed` plugins (`MishkaCmsCore.Dev.Seeds.categories/0`)
+  # and only in development: a production build offers no seeds at all.
+  defp assign_seed_categories(socket) do
+    categories = if dev_seeds_allowed?(), do: MishkaCmsCore.Dev.Seeds.categories(), else: []
 
-  defp default_seed_selected do
-    MapSet.new(dev_seed_categories(), &to_string(&1.key))
+    assign(socket,
+      dev_seeds: dev_seeds_allowed?(),
+      seed_categories: categories,
+      seed_selected: MapSet.new(categories, & &1.key)
+    )
   end
 
   defp seed_steps(selected) do
