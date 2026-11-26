@@ -51,6 +51,13 @@ defmodule MishkaCmsWeb.InstallLive do
   saves it to the new site's `site.language_urls`. The section sits outside the settings form, so
   the Install button submits that form through its `form` attribute.
 
+  What gets installed is the parts plugins declare on `installer:seed`
+  (`MishkaCmsCore.Install.Seeds`), drawn by `parts_list/1` as one row per plugin with its parts
+  nested: the `:prod` parts at the end of the `:ui_kit` screen, with the fields an extension's own
+  install asks for under its row, and the `:dev` parts on the development-only `:seeds` screen. A
+  required part is ticked and locked, a default one starts ticked. The forms' answers are the core's
+  parts' `answers`, and the choice reaches `Bootstrap.run/2` as `:parts`.
+
   It is reachable only while the CMS is uninstalled: `MishkaCms.Plugs.InstallGate`
   responds `404` for this route once `MishkaCmsCore.Install.installed?/0` is true.
 
@@ -58,7 +65,7 @@ defmodule MishkaCmsWeb.InstallLive do
   """
   use MishkaCmsWeb, :live_view
 
-  alias MishkaCmsCore.Install.{Bootstrap, Extensions, UiKitCatalog}
+  alias MishkaCmsCore.Install.{Bootstrap, Extensions, Seeds, UiKitCatalog}
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
   alias MishkaCmsCore.Runtime.Languages
   alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
@@ -104,17 +111,13 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(selected: MapSet.new(), required: MapSet.new(), query: "")
      |> assign(kits: [], kit_filter: nil)
      |> assign(picker_open: false, config_axes: %{}, open_config: nil)
-     |> assign(
-       extensions: Extensions.offered(),
-       extensions_chosen: MapSet.new(),
-       open_extension: nil
-     )
+     |> assign_install_parts()
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
      |> assign(languages: Languages.default(), language_error: nil, language_query: "")
      |> assign(language_urls: hd(Languages.url_modes()))
-     |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
+     |> assign(install_steps: rows(Bootstrap.steps()), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
-     |> assign_seed_categories()
+     |> assign_seed_parts()
      |> assign_form(%{})}
   end
 
@@ -239,8 +242,25 @@ defmodule MishkaCmsWeb.InstallLive do
 
   def handle_event("rail_nav", _params, socket), do: {:noreply, socket}
 
-  def handle_event("toggle_extension", %{"key" => key}, socket) do
-    {:noreply, assign(socket, extensions_chosen: toggle(socket.assigns.extensions_chosen, key))}
+  # A REQUIRED PART IS NOT A CHOICE, and a click on its locked box changes nothing here either:
+  # `MishkaCmsCore.Install.Seeds` runs it whatever arrives.
+  def handle_event("toggle_part", %{"scope" => scope, "key" => key, "part" => id}, socket)
+      when scope in ["install", "seed"] do
+    {plugins, picks} = parts_assigns(scope)
+    plugin = Enum.find(socket.assigns[plugins], &(&1.key == key))
+
+    case plugin && Enum.find(plugin.parts, &(&1.id == id)) do
+      %{required: false} ->
+        {:noreply,
+         update(
+           socket,
+           picks,
+           &Map.update(&1, key, MapSet.new([id]), fn set -> toggle(set, id) end)
+         )}
+
+      _locked_or_unknown ->
+        {:noreply, socket}
+    end
   end
 
   # AN EXTENSION THAT WANTS NOTHING ASKED HAS NOTHING TO OPEN. Only one is open at a time, the way
@@ -315,13 +335,9 @@ defmodule MishkaCmsWeb.InstallLive do
       else: {:noreply, socket}
   end
 
-  def handle_event("toggle_seed", %{"key" => key}, socket) do
-    {:noreply, assign(socket, seed_selected: toggle(socket.assigns.seed_selected, key))}
-  end
-
   def handle_event("run_seeds", _params, socket) do
     if dev_seeds_allowed?() do
-      selected = MapSet.to_list(socket.assigns.seed_selected)
+      picks = picks_to_lists(socket.assigns.seed_picks)
       lv = self()
 
       if connected?(socket),
@@ -329,12 +345,11 @@ defmodule MishkaCmsWeb.InstallLive do
 
       {:noreply,
        socket
-       |> assign(step: :installing, install_origin: :seeds, install_steps: seed_steps(selected))
+       |> assign(step: :installing, install_origin: :seeds)
+       |> assign(install_steps: rows(Seeds.steps(:dev, picks)))
        |> assign(install_error: nil, install_done: false, install_total: 0, compiled_count: 0)
        |> MishkaGervaz.Messages.start_async(:seeds, fn ->
-         MishkaCmsCore.Dev.Seeds.run(selected, fn message ->
-           send(lv, {:install_progress, message})
-         end)
+         Seeds.run(:dev, picks, progress: &send(lv, {:install_progress, &1}))
        end)}
     else
       {:noreply, socket}
@@ -387,7 +402,7 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(install_error: exit_message(reason))}
   end
 
-  def handle_async(:seeds, {:ok, core}, socket) do
+  def handle_async(:seeds, {:ok, {:ok, core}}, socket) do
     MishkaCmsCore.Install.mark_installed!()
     site = Enum.find(core.sites, &(&1.host == "localhost")) || hd(core.sites)
 
@@ -395,6 +410,10 @@ defmodule MishkaCmsWeb.InstallLive do
      socket
      |> assign(site: site, seeded?: true, install_done: true)
      |> assign(install_steps: all_done(socket.assigns.install_steps))}
+  end
+
+  def handle_async(:seeds, {:ok, {:error, reason}}, socket) do
+    {:noreply, assign(socket, install_error: Seeds.describe(reason))}
   end
 
   def handle_async(:seeds, {:exit, reason}, socket) do
@@ -511,7 +530,8 @@ defmodule MishkaCmsWeb.InstallLive do
       <ul id="install-progress" class="inst-steps-list">
         <li
           :for={step <- @install_steps}
-          id={"step-#{step.id}"}
+          id={"step-#{step.dom}"}
+          data-testid={"step-#{step.dom}"}
           class={["inst-istep", istep_class(step.status)]}
         >
           <div class="txt">
@@ -1121,81 +1141,32 @@ defmodule MishkaCmsWeb.InstallLive do
             </div>
           </div>
 
-          <%!-- EVERY EXTENSION THAT REGISTERED ITSELF, and nothing written down here. The list is
-                  `MishkaInstaller`'s own registry of plugins on `installer:extension:install`, so an
-                  extension that is installed offers itself and one that is not cannot appear. --%>
-          <div :if={@extensions != []} class="inst-mod">
+          <%!-- EVERY CHOICE A PLUGIN DECLARED, and nothing written down here. The list is
+                  `MishkaInstaller`'s own registry of plugins on `installer:seed`, read for the
+                  production install (`MishkaCmsCore.Install.Seeds.plugins/1`): the core's parts
+                  first, then each extension's, with the fields its install asks for. --%>
+          <div :if={@install_plugins != []} class="inst-mod">
             <div class="inst-mod-head">
               <div class="inst-mod-ico"><.svg_box /></div>
               <div>
-                <div class="t">{gettext("Extensions")}</div>
+                <div class="t">{gettext("What gets installed")}</div>
                 <div class="s">
                   {gettext(
-                    "Tick what this site should start with. Everything here can also be set up later, from its own menu."
+                    "Tick what this site should start with. Locked rows are always installed; an extension can also be set up later, from its own menu."
                   )}
                 </div>
               </div>
             </div>
 
             <div class="inst-mod-body">
-              <ul id="install-extensions" class="inst-ext-list">
-                <li
-                  :for={extension <- @extensions}
-                  id={"extension-#{extension.key}"}
-                  class={["inst-ext", MapSet.member?(@extensions_chosen, extension.key) && "on"]}
-                >
-                  <label class="inst-ext-row">
-                    <input
-                      type="checkbox"
-                      id={"toggle-extension-#{extension.key}"}
-                      checked={MapSet.member?(@extensions_chosen, extension.key)}
-                      phx-click="toggle_extension"
-                      phx-value-key={extension.key}
-                      class="inst-cbox"
-                    />
-                    <span class="nm">
-                      <span class="t">{Settings.text(extension.label)}</span>
-                      <span :if={extension.summary != ""} class="s">
-                        {Settings.text(extension.summary)}
-                      </span>
-                    </span>
-                  </label>
-
-                  <%!-- ASKED ONLY WHEN IT IS WANTED. An extension declaring no fields has nothing
-                          to open, and one that does is asked only once it has been ticked. --%>
-                  <button
-                    :if={extension.fields != [] and MapSet.member?(@extensions_chosen, extension.key)}
-                    type="button"
-                    phx-click="toggle_extension_fields"
-                    phx-value-key={extension.key}
-                    class={["inst-mod-cust", @open_extension == extension.key && "open"]}
-                  >
-                    {gettext("Settings")} <span class="ch"><.svg_chev /></span>
-                  </button>
-
-                  <div
-                    :if={
-                      @open_extension == extension.key and
-                        MapSet.member?(@extensions_chosen, extension.key)
-                    }
-                    id={"extension-fields-#{extension.key}"}
-                    class="inst-ext-fields"
-                  >
-                    <div :for={field <- extension.fields} class="inst-field">
-                      <label for={"extension-#{extension.key}-#{field_name(field)}"}>
-                        {field_label(field)}
-                      </label>
-                      <input
-                        type="text"
-                        id={"extension-#{extension.key}-#{field_name(field)}"}
-                        name={"settings[extensions][#{extension.key}][#{field_name(field)}]"}
-                        class="inst-inp"
-                      />
-                      <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
-                    </div>
-                  </div>
-                </li>
-              </ul>
+              <.parts_list
+                id="install-parts"
+                scope="install"
+                plugins={@install_plugins}
+                picks={@install_picks}
+                fields={@extension_fields}
+                open={@open_extension}
+              />
             </div>
           </div>
 
@@ -1233,32 +1204,14 @@ defmodule MishkaCmsWeb.InstallLive do
     >
       <div id="installer-seeds">
         <div class="inst-smp">
-          <%!-- A REQUIRED SEED IS NOT A CHOICE: the core's own seed writes the sites every other one
-                is run on, and `MishkaCmsCore.Dev.Seeds.run/2` runs it whatever arrives. Ticked and
-                disabled, so the list says what will be loaded. --%>
-          <label
-            :for={category <- @seed_categories}
-            id={"seed-#{category.key}"}
-            class={["inst-smp-row", category.required && "is-fixed"]}
-          >
-            <input
-              type="checkbox"
-              checked={category.required or MapSet.member?(@seed_selected, category.key)}
-              disabled={category.required}
-              aria-disabled={category.required && "true"}
-              phx-click="toggle_seed"
-              phx-value-key={category.key}
-              class="inst-cbox"
-            />
-            <span class="nm">
-              {Settings.text(category.label)}
-              <span :if={category.summary != ""} class="ex">{Settings.text(category.summary)}</span>
-            </span>
-          </label>
+          <%!-- EVERY DEV PART A PLUGIN DECLARED (`MishkaCmsCore.Install.Seeds.plugins(:dev)`).
+                A required part is ticked and locked: `MishkaCmsCore.Install.Seeds.run/3` runs it
+                whatever arrives, so the list says what will be loaded. --%>
+          <.parts_list id="seed-parts" scope="seed" plugins={@seed_plugins} picks={@seed_picks} />
           <p class="inst-smp-note">
             {raw(
               gettext(
-                "Core data (sites, users, permissions) and every UI-kit component are %{included}.",
+                "Core data (sites, users, permissions) is %{included}.",
                 included: strong(gettext("always included"))
               )
             )}<br />
@@ -1272,11 +1225,18 @@ defmodule MishkaCmsWeb.InstallLive do
         </div>
 
         <div class="inst-actions">
-          <button id="seeds-back" type="button" phx-click="back" class={btn_ghost()}>
+          <button
+            id="seeds-back"
+            data-testid="seeds-back"
+            type="button"
+            phx-click="back"
+            class={btn_ghost()}
+          >
             <.svg_back /> {gettext("Back")}
           </button>
           <button
             id="seeds-run"
+            data-testid="seeds-run"
             type="button"
             phx-click="run_seeds"
             data-loading={gettext("Seeding…")}
@@ -1595,6 +1555,7 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-ext-row .nm{display:flex;flex-direction:column;gap:2px}
       .inst-ext-row .t{font-weight:700;font-size:14px}
       .inst-ext-row .s{font-size:12.5px;color:var(--dim)}
+      .inst-ext .inst-smp-row{padding:8px 4px}
       .inst-ext-fields{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}
       .inst-ext-fields .inst-field:last-child{margin-bottom:0}
 
@@ -1928,6 +1889,91 @@ defmodule MishkaCmsWeb.InstallLive do
        do: to_settings_step(socket)
 
   defp rail_nav(socket, _index), do: socket
+
+  attr :id, :string, required: true
+  attr :scope, :string, required: true
+  attr :plugins, :list, required: true
+  attr :picks, :map, required: true
+  attr :fields, :map, default: %{}
+  attr :open, :string, default: nil
+
+  # ONE ROW PER PLUGIN, ITS PARTS NESTED. A required part is ticked and disabled, so it says what
+  # the run does and submits nothing. An extension's install fields are asked only once one of its
+  # parts is ticked, and only one plugin's are open at a time, so a long list stays readable.
+  defp parts_list(assigns) do
+    ~H"""
+    <ul id={@id} data-testid={@id} class="inst-ext-list">
+      <li
+        :for={plugin <- @plugins}
+        id={"#{@scope}-plugin-#{plugin.key}"}
+        data-testid={"#{@scope}-plugin-#{plugin.key}"}
+        class={["inst-ext", any_part?(@picks, plugin) && "on"]}
+      >
+        <div class="inst-ext-row">
+          <span class="nm"><span class="t">{Settings.text(plugin.label)}</span></span>
+        </div>
+
+        <label
+          :for={part <- plugin.parts}
+          id={"#{@scope}-part-#{plugin.key}-#{part.id}"}
+          class={["inst-smp-row", part.required && "is-fixed"]}
+        >
+          <input
+            type="checkbox"
+            data-testid={"#{@scope}-part-#{plugin.key}-#{part.id}"}
+            checked={part?(@picks, plugin.key, part)}
+            disabled={part.required}
+            aria-disabled={part.required && "true"}
+            phx-click="toggle_part"
+            phx-value-scope={@scope}
+            phx-value-key={plugin.key}
+            phx-value-part={part.id}
+            class="inst-cbox"
+          />
+          <span class="nm">
+            {Settings.text(part.label)}
+            <span :if={part.summary != ""} class="ex">{Settings.text(part.summary)}</span>
+          </span>
+        </label>
+
+        <button
+          :if={Map.get(@fields, plugin.key, []) != [] and any_part?(@picks, plugin)}
+          type="button"
+          id={"extension-fields-toggle-#{plugin.key}"}
+          data-testid={"extension-fields-toggle-#{plugin.key}"}
+          phx-click="toggle_extension_fields"
+          phx-value-key={plugin.key}
+          class={["inst-mod-cust", @open == plugin.key && "open"]}
+        >
+          {gettext("Settings")} <span class="ch"><.svg_chev /></span>
+        </button>
+
+        <div
+          :if={@open == plugin.key and any_part?(@picks, plugin)}
+          id={"extension-fields-#{plugin.key}"}
+          class="inst-ext-fields"
+        >
+          <div :for={field <- Map.get(@fields, plugin.key, [])} class="inst-field">
+            <label for={"extension-#{plugin.key}-#{field_name(field)}"}>{field_label(field)}</label>
+            <input
+              type="text"
+              id={"extension-#{plugin.key}-#{field_name(field)}"}
+              data-testid={"extension-#{plugin.key}-#{field_name(field)}"}
+              name={"settings[extensions][#{plugin.key}][#{field_name(field)}]"}
+              class="inst-inp"
+            />
+            <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
+          </div>
+        </div>
+      </li>
+    </ul>
+    """
+  end
+
+  defp part?(_picks, _key, %{required: true}), do: true
+  defp part?(picks, key, %{id: id}), do: picks |> Map.get(key, MapSet.new()) |> MapSet.member?(id)
+
+  defp any_part?(picks, plugin), do: Enum.any?(plugin.parts, &part?(picks, plugin.key, &1))
 
   attr :id, :string, default: nil
   attr :field, Phoenix.HTML.FormField, required: true
@@ -2647,8 +2693,8 @@ defmodule MishkaCmsWeb.InstallLive do
     params =
       socket.assigns.config
       |> bootstrap_params(selection, settings)
-      |> Map.put(:extensions, MapSet.to_list(socket.assigns.extensions_chosen))
-      |> Map.put(:extension_answers, extension_answers(answers))
+      |> Map.put(:parts, picks_to_lists(socket.assigns.install_picks))
+      |> Map.put(:answers, extension_answers(answers))
       |> Map.put(:languages, socket.assigns.languages)
       |> Map.put(:language_urls, socket.assigns.language_urls)
 
@@ -2658,7 +2704,8 @@ defmodule MishkaCmsWeb.InstallLive do
       do: Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, "runtime:bulk_compile")
 
     socket
-    |> assign(step: :installing, install_origin: :settings, install_steps: init_steps())
+    |> assign(step: :installing, install_origin: :settings)
+    |> assign(install_steps: rows(Bootstrap.steps(params.parts)))
     |> assign(install_error: nil, install_done: false)
     |> assign(install_total: length(Map.get(selection, :components, [])), compiled_count: 0)
     |> MishkaGervaz.Messages.start_async(:install, fn ->
@@ -2677,9 +2724,11 @@ defmodule MishkaCmsWeb.InstallLive do
     }
   end
 
-  defp init_steps do
-    Enum.map(Bootstrap.steps(), fn {id, label} ->
-      %{id: id, label: label, status: :pending, logs: []}
+  # ONE ROW PER PART, keyed by `{plugin, part}` as the progress messages are, and drawn under
+  # `step-<plugin>-<part>`.
+  defp rows(steps) do
+    Enum.map(steps, fn {{key, id} = row, label} ->
+      %{id: row, dom: "#{key}-#{id}", label: Settings.text(label), status: :pending, logs: []}
     end)
   end
 
@@ -3015,21 +3064,39 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp dev_seeds_allowed?, do: Application.get_env(:mishka_cms_core, :env_dev?, false)
 
-  # EVERY SEED TICKED, read once from the `dev:seed` plugins (`MishkaCmsCore.Dev.Seeds.categories/0`)
-  # and only in development: a production build offers no seeds at all.
-  defp assign_seed_categories(socket) do
-    categories = if dev_seeds_allowed?(), do: MishkaCmsCore.Dev.Seeds.categories(), else: []
+  # THE PRODUCTION INSTALL'S PARTS, read once from `installer:seed`, with the required and default
+  # ones ticked, and the fields each extension's own install asks for, by key.
+  defp assign_install_parts(socket) do
+    plugins = Seeds.plugins(:prod)
 
     assign(socket,
-      dev_seeds: dev_seeds_allowed?(),
-      seed_categories: categories,
-      seed_selected: MapSet.new(categories, & &1.key)
+      install_plugins: plugins,
+      install_picks: start_picks(plugins),
+      extension_fields: Map.new(Extensions.offered(), &{&1.key, &1.fields}),
+      open_extension: nil
     )
   end
 
-  defp seed_steps(selected) do
-    Enum.map(MishkaCmsCore.Dev.Seeds.steps(selected), fn {id, label} ->
-      %{id: id, label: Settings.text(label), status: :pending, logs: []}
+  # THE DEV PARTS, and only in development: a production build offers no sample data at all, and
+  # `MishkaCmsCore.Install.Seeds.run/3` refuses it there too.
+  defp assign_seed_parts(socket) do
+    plugins = if dev_seeds_allowed?(), do: Seeds.plugins(:dev), else: []
+
+    assign(socket,
+      dev_seeds: dev_seeds_allowed?(),
+      seed_plugins: plugins,
+      seed_picks: start_picks(plugins)
+    )
+  end
+
+  defp start_picks(plugins) do
+    Map.new(plugins, fn plugin ->
+      {plugin.key, MapSet.new(for part <- plugin.parts, part.default, do: part.id)}
     end)
   end
+
+  defp picks_to_lists(picks), do: Map.new(picks, fn {key, ids} -> {key, MapSet.to_list(ids)} end)
+
+  defp parts_assigns("install"), do: {:install_plugins, :install_picks}
+  defp parts_assigns("seed"), do: {:seed_plugins, :seed_picks}
 end
