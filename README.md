@@ -72,9 +72,11 @@ To upgrade, bump the Mishka packages in `mix.exs`, run `mix deps.update` for the
 - **[Mishka CMS Builder, the visual page editor](https://mishka.tools/cms/docs/build-a-page)**: the live canvas, drafts, history and review notes.
 - **[Mishka Blog, the blog extension](https://mishka.tools/cms/extensions/blog)**: posts, categories, tags, authors and moderated comments.
 - **[Mishka Document, the documentation extension](https://mishka.tools/cms/extensions/documentation)**: versioned docs, proposed changes as drafts, and issue tracking.
+- **[Mishka CMS Migration, the migration extension](https://mishka.tools/cms/extensions/migration)**: moves a WordPress site into Mishka CMS, with a dry run first.
 - **[Mishka Gervaz, the admin DSL for Ash](https://mishka.tools/gervaz)**: the toolkit the admin screens are built with.
 - **[Mishka Installer, plugins and events for Elixir](https://mishka.tools/installer)**: the event system every plugin hooks into.
 - **[Mishka Chelekom, Phoenix LiveView components](https://mishka.tools/chelekom)**: the UI kits the install wizard offers.
+- **[Mishka Pay, the payment SDK for Elixir](https://mishka.tools/pay)**: one set of calls for Stripe and PayPal, with providers as plugins and each site keeping its own keys.
 - **Sign-in providers**: [Google](https://github.com/mishka-group/mishka_cms_auth_google), [GitHub](https://github.com/mishka-group/mishka_cms_auth_github), [Slack](https://github.com/mishka-group/mishka_cms_auth_slack) and [Discord](https://github.com/mishka-group/mishka_cms_auth_discord).
 
 ## 📚 Documentation
@@ -82,7 +84,10 @@ To upgrade, bump the Mishka packages in `mix.exs`, run `mix deps.update` for the
 - [Mishka CMS documentation](https://mishka.tools/cms/docs): tutorials, how-to guides, reference and concepts
 - The [Blog extension docs](https://mishka.tools/cms/extensions/blog/docs) and the [Documentation extension docs](https://mishka.tools/cms/extensions/documentation/docs)
 - [Mishka Installer documentation](https://mishka.tools/installer/docs), for plugins and events
-- The [Mishka blog](https://mishka.tools/blog), for releases and articles
+- The [Mishka Open-Source Blog Engine](https://mishka.tools/blog), for releases and articles
+  * [Mishka CMS 0.0.3: A Stable Editor and Smarter Phoenix LiveView Admin](https://mishka.tools/blog/mishka-cms-0-0-3-stable-visual-editor-admin-blog-feeds-phoenix-liveview-elixir-cms)
+  * [Mishka CMS 0.0.2: Visual Editor Package and Faster Previews](https://mishka.tools/blog/mishka-cms-0-0-2-visual-editor-package-phoenix-liveview-cms-elixir)
+  * [Introducing Mishka CMS: How We Built a Runtime CMS on Phoenix LiveView](https://mishka.tools/blog/mishka-cms-0-0-1-realtime-runtime-cms-for-elixir-and-phoenix)
 
 ## 💬 Community and support
 
