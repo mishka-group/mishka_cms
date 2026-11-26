@@ -52,7 +52,10 @@ defmodule MishkaCmsWeb.InstallLiveTest do
   # Chelekom's real styled bundle. Nothing ships one; this project keeps a copy for its tests.
   @chelekom Path.expand("../../fixtures/cms_ui_kits/chelekom.json", __DIR__)
 
+  # THE CORE'S PARTS AND THE PROBE'S ALONE: every extension's pages start ticked, and the wizard
+  # is tested with the probe standing in for an extension (`MishkaCms.Test.SeedProbe`).
   setup do
+    :ok = MishkaCms.Test.SeedProbe.extensions_off!()
     :persistent_term.put(:mishka_installed, false)
     official = Application.fetch_env!(:mishka_cms_core, :official_ui_kits)
     Application.put_env(:mishka_cms_core, :official_ui_kits, @offline_kits)

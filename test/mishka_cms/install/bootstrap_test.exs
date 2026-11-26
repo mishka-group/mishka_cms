@@ -35,7 +35,10 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
 
   # EVERY RUN WRITES THE STARTER, and its logo is a file of the master site's media library: this
   # test's own folder, not `priv/static`.
+  #
+  # THE CORE'S PARTS ALONE: every extension's pages start ticked, and these tests are about the core.
   setup do
+    :ok = MishkaCms.Test.SeedProbe.extensions_off!()
     :persistent_term.erase(:mishka_installed)
     dir = Path.join(System.tmp_dir!(), "bootstrap_media_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)

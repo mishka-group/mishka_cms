@@ -860,11 +860,14 @@ defmodule MishkaCmsCore.Dev.SeedsInstallTest do
   end
 
   test "steps/2 always starts with the core's parts and adds the extension parts chosen" do
-    none = Seeds.steps(:dev, %{"mishka_blog" => [], "mishka_document" => []})
+    nothing =
+      for %{key: key} <- Seeds.plugins(:dev), key != Seeds.core_key(), into: %{}, do: {key, []}
+
+    none = Seeds.steps(:dev, nothing)
     assert Enum.all?(none, &match?({{"mishka_cms_core", _part}, _label}, &1))
     assert {{"mishka_cms_core", "samples"}, _label} = List.last(none)
 
-    blog = Seeds.steps(:dev, %{"mishka_blog" => ["samples"], "mishka_document" => []})
+    blog = Seeds.steps(:dev, %{nothing | "mishka_blog" => ["samples"]})
     assert {{"mishka_blog", "samples"}, _label} = List.last(blog)
   end
 
