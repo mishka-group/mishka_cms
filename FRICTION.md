@@ -14,3 +14,4 @@ closing a row fills the last column with what catches it now, one of:
 | 2026-11-22 | Core was released before the host's `AsyncLocaleTest` ran, so core needed a second release in one cycle | release cycle | skill rule (`mishka-release`: rehearse on the host before wave 1) |
 | 2026-11-23 | `/favicon.ico` of a site with no favicon was tested as a 404 after core changed it to the Mishka mark | `test/mishka_cms_web/seo_files_test.exs` | check:test suite |
 | 2026-11-23 | CI ran no credo, sobelow, dialyzer or ex_dna, so their findings went stale on master | `.github/workflows/ci.yml` | check:ci (all four turned on) |
+| 2026-11-26 | The commit hook was not active in this clone (`core.hooksPath` unset, `mix hooks` never run), so commits went in without it; its format and credo commands were run by hand on the staged files | `.githooks/pre-commit` | check:ci (lint runs format and credo on every push) |
