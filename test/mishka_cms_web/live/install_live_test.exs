@@ -320,6 +320,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert html =~ "<style"
       assert html =~ ".inst-aside"
       refute html =~ "@tailwindcss/browser"
+
       # The installer is the first page a user ever sees — it renders no Phoenix flash at all.
       refute html =~ "flash-group"
     end
@@ -1507,6 +1508,180 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
       assert has_element?(view, "#install-complete")
       refute "blog-post-list" in installed_components()
+    end
+  end
+
+  # EACH PLUGIN IS ONE CLOSED ROW that counts what it will run, opened to change its parts.
+  describe "the plugin rows of the parts list" do
+    setup do
+      register_seed_plugins!(@probe_parts)
+      :ok
+    end
+
+    test "start closed and open and close on their toggle, staying open as parts are ticked", %{
+      conn: conn
+    } do
+      view = to_ui_kit(conn)
+
+      for key <- ~w(mishka_cms_core mishka_seed_probe) do
+        assert has_element?(view, ~s(#install-plugin-toggle-#{key}[aria-expanded="false"]))
+        assert has_element?(view, "#install-plugin-parts-#{key}[hidden]")
+      end
+
+      view |> element("#install-plugin-toggle-mishka_seed_probe") |> render_click()
+
+      assert has_element?(
+               view,
+               ~s(#install-plugin-toggle-mishka_seed_probe[aria-expanded="true"])
+             )
+
+      refute has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#install-plugin-parts-mishka_cms_core[hidden]")
+
+      view |> element(~s([data-testid="install-part-mishka_seed_probe-extra"])) |> render_click()
+      refute has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+
+      view |> element("#install-plugin-toggle-mishka_seed_probe") |> render_click()
+      assert has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+    end
+
+    test "say how many parts they run, counted as parts are ticked", %{conn: conn} do
+      view = to_ui_kit(conn)
+      state = "#install-plugin-state-mishka_seed_probe"
+
+      assert has_element?(view, state, "1 of 2 chosen")
+      view |> element(~s([data-testid="install-part-mishka_seed_probe-extra"])) |> render_click()
+      assert has_element?(view, state, "2 of 2 chosen")
+
+      for part <- ~w(pages extra) do
+        view
+        |> element(~s([data-testid="install-part-mishka_seed_probe-#{part}"]))
+        |> render_click()
+      end
+
+      assert has_element?(view, state, "not chosen")
+    end
+
+    test "mark a required part with a lock, and it cannot be unticked", %{conn: conn} do
+      view = to_ui_kit(conn)
+      settings = "#install-part-mishka_cms_core-settings"
+
+      assert has_element?(view, "#{settings} .lk svg")
+      assert has_element?(view, "#{settings} .inst-required", "Required")
+      refute has_element?(view, "#install-part-mishka_cms_core-components .inst-required")
+
+      render_click(view, "toggle_part", %{
+        "scope" => "install",
+        "key" => "mishka_cms_core",
+        "part" => "settings"
+      })
+
+      assert has_element?(
+               view,
+               ~s([data-testid="install-part-mishka_cms_core-settings"][checked][disabled])
+             )
+    end
+
+    test "the same rows draw the dev sample data", %{conn: conn} do
+      Application.put_env(:mishka_cms_core, :env_dev?, true)
+      on_exit(fn -> Application.delete_env(:mishka_cms_core, :env_dev?) end)
+
+      {:ok, view, _html} = live(conn, "/install")
+      view |> element("#install-dev-seeds") |> render_click()
+
+      assert has_element?(view, "#seed-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#seed-plugin-state-mishka_seed_probe", "2 of 3 chosen")
+
+      view |> element("#seed-plugin-toggle-mishka_seed_probe") |> render_click()
+      view |> element(~s([data-testid="seed-part-mishka_seed_probe-extra"])) |> render_click()
+
+      refute has_element?(view, "#seed-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#seed-plugin-state-mishka_seed_probe", "3 of 3 chosen")
+    end
+  end
+
+  describe "a plugin whose parts are all required" do
+    setup do
+      register_seed_plugins!([
+        %{id: "base", label: "Probe base", envs: [:prod], required: true},
+        %{id: "more", label: "Probe more", envs: [:prod], required: true}
+      ])
+
+      :ok
+    end
+
+    test "is counted as such on its closed row", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      assert has_element?(
+               view,
+               "#install-plugin-state-mishka_seed_probe",
+               "2 parts · all required"
+             )
+    end
+  end
+
+  # AN EXTENSION'S OWN INSTALL ASKS FOR A KEY, so the wizard draws the field under its parts.
+  defmodule FieldsProbe do
+    @moduledoc false
+    use MishkaInstaller.Event.Hook, event: "installer:extension:install"
+
+    @impl true
+    def call(payload), do: {:reply, payload}
+  end
+
+  describe "an extension's install fields" do
+    setup do
+      register_seed_plugins!(@probe_parts)
+
+      MishkaCmsCore.Test.Installer.register!(FieldsProbe, "installer:extension:install", %{
+        extension: :mishka_seed_probe,
+        extra: [
+          %{
+            label: "Probe",
+            fields: [%{name: "api_key", label: "API key", type: :string, required?: true}]
+          }
+        ]
+      })
+
+      :ok
+    end
+
+    test "show under a ticked part once the row is open", %{conn: conn} do
+      view = to_ui_kit(conn)
+      view |> element("#install-plugin-toggle-mishka_seed_probe") |> render_click()
+
+      assert has_element?(
+               view,
+               ~s(#install-plugin-parts-mishka_seed_probe [data-testid="extension-mishka_seed_probe-api_key"])
+             )
+
+      view |> element(~s([data-testid="install-part-mishka_seed_probe-pages"])) |> render_click()
+      refute has_element?(view, ~s([data-testid="extension-mishka_seed_probe-api_key"]))
+    end
+
+    test "a required one left empty keeps the step and opens its row on the error", %{conn: conn} do
+      view = to_ui_kit(conn)
+      assert has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+
+      view |> element("#uikit-next") |> render_click()
+
+      refute has_element?(view, "#install-settings-form")
+      refute has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#install-plugin-state-mishka_seed_probe", "needs an answer")
+      assert has_element?(view, "#extension-fields-mishka_seed_probe .inst-error", "is required")
+
+      view
+      |> form("#extension-fields-mishka_seed_probe",
+        extensions: %{mishka_seed_probe: %{api_key: "k-1"}}
+      )
+      |> render_change()
+
+      refute has_element?(view, "#extension-fields-mishka_seed_probe .inst-error")
+      assert has_element?(view, "#install-plugin-state-mishka_seed_probe", "1 of 2 chosen")
+
+      view |> element("#uikit-next") |> render_click()
+      assert has_element?(view, "#install-settings-form")
     end
   end
 

@@ -52,11 +52,15 @@ defmodule MishkaCmsWeb.InstallLive do
   the Install button submits that form through its `form` attribute.
 
   What gets installed is the parts plugins declare on `installer:seed`
-  (`MishkaCmsCore.Install.Seeds`), drawn by `parts_list/1` as one row per plugin with its parts
-  nested: the `:prod` parts at the end of the `:ui_kit` screen, with the fields an extension's own
-  install asks for under its row, and the `:dev` parts on the development-only `:seeds` screen. A
-  required part is ticked and locked, a default one starts ticked. The forms' answers are the core's
-  parts' `answers`, and the choice reaches `Bootstrap.run/2` as `:parts`.
+  (`MishkaCmsCore.Install.Seeds`), drawn by `parts_list/1` as one closed row per plugin that names
+  it and counts what it will run ("3 of 4 chosen"); opening it (`toggle_plugin`, kept in
+  `:open_plugins` so a re-render leaves it open) shows its parts: the `:prod` parts at the end of the
+  `:ui_kit` screen, with the fields an extension's own install asks for under them, and the `:dev`
+  parts on the development-only `:seeds` screen. A required part is locked on and marked so, a
+  default one starts ticked. The fields' answers are kept as they are typed (`extension_answers`),
+  and the step is left only when every required one of a ticked extension is filled; otherwise its
+  row opens on the empty field. The forms' answers are the core's parts' `answers`, the fields'
+  answers each extension's own, and the choice reaches `Bootstrap.run/2` as `:parts`.
 
   It is reachable only while the CMS is uninstalled: `MishkaCms.Plugs.InstallGate`
   responds `404` for this route once `MishkaCmsCore.Install.installed?/0` is true.
@@ -263,11 +267,23 @@ defmodule MishkaCmsWeb.InstallLive do
     end
   end
 
-  # AN EXTENSION THAT WANTS NOTHING ASKED HAS NOTHING TO OPEN. Only one is open at a time, the way
-  # the component configuration above behaves, so a long list stays readable.
-  def handle_event("toggle_extension_fields", %{"key" => key}, socket) do
-    {:noreply,
-     assign(socket, open_extension: if(socket.assigns.open_extension == key, do: nil, else: key))}
+  # ONLY A PLUGIN THE LIST DRAWS opens, so an event naming anything else stores nothing.
+  def handle_event("toggle_plugin", %{"scope" => scope, "key" => key}, socket)
+      when scope in ["install", "seed"] do
+    {plugins, _picks} = parts_assigns(scope)
+
+    if Enum.any?(socket.assigns[plugins], &(&1.key == key)),
+      do: {:noreply, update(socket, :open_plugins, &toggle(&1, {scope, key}))},
+      else: {:noreply, socket}
+  end
+
+  def handle_event("extension_answers", params, socket) do
+    answers = known_answers(socket.assigns.extension_fields, params["extensions"])
+    new_socket = update(socket, :extension_answers, &Map.merge(&1, answers))
+
+    if new_socket.assigns.extension_errors == %{},
+      do: {:noreply, new_socket},
+      else: {:noreply, assign(new_socket, extension_errors: missing_answers(new_socket.assigns))}
   end
 
   def handle_event("to_settings", _params, socket) do
@@ -1152,7 +1168,7 @@ defmodule MishkaCmsWeb.InstallLive do
                 <div class="t">{gettext("What gets installed")}</div>
                 <div class="s">
                   {gettext(
-                    "Tick what this site should start with. Locked rows are always installed; an extension can also be set up later, from its own menu."
+                    "Open a row to see and change what it installs. Required parts are always installed; an extension can also be set up later, from its own menu."
                   )}
                 </div>
               </div>
@@ -1164,8 +1180,10 @@ defmodule MishkaCmsWeb.InstallLive do
                 scope="install"
                 plugins={@install_plugins}
                 picks={@install_picks}
+                open={@open_plugins}
                 fields={@extension_fields}
-                open={@open_extension}
+                answers={@extension_answers}
+                errors={@extension_errors}
               />
             </div>
           </div>
@@ -1207,7 +1225,13 @@ defmodule MishkaCmsWeb.InstallLive do
           <%!-- EVERY DEV PART A PLUGIN DECLARED (`MishkaCmsCore.Install.Seeds.plugins(:dev)`).
                 A required part is ticked and locked: `MishkaCmsCore.Install.Seeds.run/3` runs it
                 whatever arrives, so the list says what will be loaded. --%>
-          <.parts_list id="seed-parts" scope="seed" plugins={@seed_plugins} picks={@seed_picks} />
+          <.parts_list
+            id="seed-parts"
+            scope="seed"
+            plugins={@seed_plugins}
+            picks={@seed_picks}
+            open={@open_plugins}
+          />
           <p class="inst-smp-note">
             {raw(
               gettext(
@@ -1547,17 +1571,46 @@ defmodule MishkaCmsWeb.InstallLive do
         background:#fffbeb;border:1px solid #fde68a;padding:4px 10px;border-radius:99px}
       .inst-mod-body{border-top:1px solid var(--line-2);padding:16px 18px 18px;animation:inst-rise .3s}
 
-      /* extensions */
-      .inst-ext-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
-      .inst-ext{border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}
-      .inst-ext.on{border-color:var(--blue);background:var(--blue-l)}
-      .inst-ext-row{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
-      .inst-ext-row .nm{display:flex;flex-direction:column;gap:2px}
-      .inst-ext-row .t{font-weight:700;font-size:14px}
-      .inst-ext-row .s{font-size:12.5px;color:var(--dim)}
-      .inst-ext .inst-smp-row{padding:8px 4px}
-      .inst-ext-fields{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}
+      /* what gets installed: one closed row per plugin, its parts under it when opened */
+      .inst-plugs{list-style:none;margin:0;padding:0}
+      .inst-plug{border-bottom:1px solid var(--line-2)}
+      .inst-plug:last-child{border-bottom:none}
+      .inst-plug-head{display:flex;align-items:center;gap:10px;width:100%;padding:12px;border:none;
+        background:none;border-radius:10px;cursor:pointer;text-align:left;color:var(--ink);
+        font-size:14px;transition:background .15s}
+      .inst-plug-head:hover{background:var(--bg-2)}
+      .inst-plug-head:focus-visible{outline:none;box-shadow:0 0 0 2px var(--blue)}
+      .inst-plug-head .t{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;
+        white-space:nowrap}
+      .inst-plug-head .st{flex-shrink:0;font-size:12.5px;color:var(--dim);white-space:nowrap}
+      .inst-plug-head .st.is-error{color:#dc2626;font-weight:600}
+      .inst-plug-head .ch{display:inline-flex;color:var(--faint);transition:transform .18s ease}
+      .inst-plug.is-open .inst-plug-head .ch{transform:rotate(180deg)}
+      .inst-plug-body{padding:0 4px 10px;animation:inst-open .18s ease}
+      .inst-plug-body[hidden]{display:none}
+      @keyframes inst-open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+      .inst-part{position:relative;display:flex;align-items:center;gap:10px;padding:7px 8px;
+        border-radius:8px;cursor:pointer;font-size:13.5px;transition:background .12s}
+      .inst-part:hover{background:var(--bg-2)}
+      .inst-part.is-fixed{cursor:default}
+      .inst-part.is-fixed:hover{background:none}
+      /* A required part keeps its checked, disabled box for assistive tech; the eye sees the lock. */
+      .inst-part.is-fixed .inst-cbox{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+      .inst-part .lk{width:18px;height:18px;flex-shrink:0;display:grid;place-items:center;color:var(--faint)}
+      .inst-part .nm{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
+      .inst-part .nm .t{flex-shrink:0;font-weight:600;color:var(--ink)}
+      .inst-part .nm .ex{min-width:0;font-size:12.5px;color:var(--faint);overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap}
+      @media(max-width:560px){
+        .inst-part .nm{flex-direction:column;gap:1px}
+        .inst-part .nm .ex{white-space:normal}
+      }
+      .inst-ext-fields{margin:6px 8px 0;padding-top:12px;border-top:1px solid var(--line-2)}
       .inst-ext-fields .inst-field:last-child{margin-bottom:0}
+      @media(prefers-reduced-motion:reduce){
+        .inst-plug-body{animation:none}
+        .inst-plug-head .ch,.inst-plug-head,.inst-part{transition:none}
+      }
 
       /* component picker */
       .inst-comp-tools{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
@@ -1894,86 +1947,136 @@ defmodule MishkaCmsWeb.InstallLive do
   attr :scope, :string, required: true
   attr :plugins, :list, required: true
   attr :picks, :map, required: true
+  attr :open, :any, required: true
   attr :fields, :map, default: %{}
-  attr :open, :string, default: nil
+  attr :answers, :map, default: %{}
+  attr :errors, :map, default: %{}
 
-  # ONE ROW PER PLUGIN, ITS PARTS NESTED. A required part is ticked and disabled, so it says what
-  # the run does and submits nothing. An extension's install fields are asked only once one of its
-  # parts is ticked, and only one plugin's are open at a time, so a long list stays readable.
+  # ONE CLOSED ROW PER PLUGIN that says what it will do, opened to see and change its parts. A
+  # required part keeps a checked, disabled box for assistive tech and shows a lock instead. An
+  # extension's install fields are asked under its parts once one of them is ticked.
   defp parts_list(assigns) do
     ~H"""
-    <ul id={@id} data-testid={@id} class="inst-ext-list">
+    <ul id={@id} data-testid={@id} class="inst-plugs">
       <li
         :for={plugin <- @plugins}
         id={"#{@scope}-plugin-#{plugin.key}"}
         data-testid={"#{@scope}-plugin-#{plugin.key}"}
-        class={["inst-ext", any_part?(@picks, plugin) && "on"]}
+        class={["inst-plug", open?(@open, @scope, plugin.key) && "is-open"]}
       >
-        <div class="inst-ext-row">
-          <span class="nm"><span class="t">{Settings.text(plugin.label)}</span></span>
-        </div>
-
-        <label
-          :for={part <- plugin.parts}
-          id={"#{@scope}-part-#{plugin.key}-#{part.id}"}
-          class={["inst-smp-row", part.required && "is-fixed"]}
-        >
-          <input
-            type="checkbox"
-            data-testid={"#{@scope}-part-#{plugin.key}-#{part.id}"}
-            checked={part?(@picks, plugin.key, part)}
-            disabled={part.required}
-            aria-disabled={part.required && "true"}
-            phx-click="toggle_part"
-            phx-value-scope={@scope}
-            phx-value-key={plugin.key}
-            phx-value-part={part.id}
-            class="inst-cbox"
-          />
-          <span class="nm">
-            {Settings.text(part.label)}
-            <span :if={part.summary != ""} class="ex">{Settings.text(part.summary)}</span>
-          </span>
-        </label>
-
         <button
-          :if={Map.get(@fields, plugin.key, []) != [] and any_part?(@picks, plugin)}
           type="button"
-          id={"extension-fields-toggle-#{plugin.key}"}
-          data-testid={"extension-fields-toggle-#{plugin.key}"}
-          phx-click="toggle_extension_fields"
+          id={"#{@scope}-plugin-toggle-#{plugin.key}"}
+          data-testid={"#{@scope}-plugin-toggle-#{plugin.key}"}
+          phx-click="toggle_plugin"
+          phx-value-scope={@scope}
           phx-value-key={plugin.key}
-          class={["inst-mod-cust", @open == plugin.key && "open"]}
+          aria-expanded={to_string(open?(@open, @scope, plugin.key))}
+          aria-controls={"#{@scope}-plugin-parts-#{plugin.key}"}
+          class="inst-plug-head"
         >
-          {gettext("Settings")} <span class="ch"><.svg_chev /></span>
+          <span class="t">{Settings.text(plugin.label)}</span>
+          <span
+            id={"#{@scope}-plugin-state-#{plugin.key}"}
+            data-testid={"#{@scope}-plugin-state-#{plugin.key}"}
+            class={["st", Map.has_key?(@errors, plugin.key) && "is-error"]}
+          >
+            {plugin_state(@picks, plugin, @errors)}
+          </span>
+          <span class="ch"><.svg_chev /></span>
         </button>
 
         <div
-          :if={@open == plugin.key and any_part?(@picks, plugin)}
-          id={"extension-fields-#{plugin.key}"}
-          class="inst-ext-fields"
+          id={"#{@scope}-plugin-parts-#{plugin.key}"}
+          hidden={!open?(@open, @scope, plugin.key)}
+          class="inst-plug-body"
         >
-          <div :for={field <- Map.get(@fields, plugin.key, [])} class="inst-field">
-            <label for={"extension-#{plugin.key}-#{field_name(field)}"}>{field_label(field)}</label>
+          <label
+            :for={part <- plugin.parts}
+            id={"#{@scope}-part-#{plugin.key}-#{part.id}"}
+            class={["inst-part", part.required && "is-fixed"]}
+          >
             <input
-              type="text"
-              id={"extension-#{plugin.key}-#{field_name(field)}"}
-              data-testid={"extension-#{plugin.key}-#{field_name(field)}"}
-              name={"settings[extensions][#{plugin.key}][#{field_name(field)}]"}
-              class="inst-inp"
+              type="checkbox"
+              data-testid={"#{@scope}-part-#{plugin.key}-#{part.id}"}
+              checked={part?(@picks, plugin.key, part)}
+              disabled={part.required}
+              aria-disabled={part.required && "true"}
+              phx-click="toggle_part"
+              phx-value-scope={@scope}
+              phx-value-key={plugin.key}
+              phx-value-part={part.id}
+              class="inst-cbox"
             />
-            <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
-          </div>
+            <span :if={part.required} class="lk"><.svg_lock /></span>
+            <span class="nm">
+              <span class="t">{Settings.text(part.label)}</span>
+              <span :if={part.summary != ""} class="ex" title={Settings.text(part.summary)}>
+                {Settings.text(part.summary)}
+              </span>
+            </span>
+            <span :if={part.required} class="inst-required">{gettext("Required")}</span>
+          </label>
+
+          <form
+            :if={Map.get(@fields, plugin.key, []) != [] and any_part?(@picks, plugin)}
+            id={"extension-fields-#{plugin.key}"}
+            phx-change="extension_answers"
+            phx-submit="extension_answers"
+            class="inst-ext-fields"
+          >
+            <div :for={field <- Map.get(@fields, plugin.key, [])} class="inst-field">
+              <label for={"extension-#{plugin.key}-#{field_name(field)}"}>
+                {field_label(field)}
+              </label>
+              <input
+                type="text"
+                id={"extension-#{plugin.key}-#{field_name(field)}"}
+                data-testid={"extension-#{plugin.key}-#{field_name(field)}"}
+                name={"extensions[#{plugin.key}][#{field_name(field)}]"}
+                value={get_in(@answers, [plugin.key, field_name(field)])}
+                class={["inst-inp", missing?(@errors, plugin.key, field) && "has-error"]}
+              />
+              <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
+              <p :if={missing?(@errors, plugin.key, field)} class="inst-error">
+                {dgettext("errors", "is required")}
+              </p>
+            </div>
+          </form>
         </div>
       </li>
     </ul>
     """
   end
 
+  defp open?(open, scope, key), do: MapSet.member?(open, {scope, key})
+
+  # WHAT THE CLOSED ROW SAYS: how many parts it runs, counted from the ticks as they change.
+  defp plugin_state(_picks, %{key: key}, errors) when is_map_key(errors, key),
+    do: gettext("needs an answer")
+
+  defp plugin_state(picks, plugin, _errors) do
+    total = length(plugin.parts)
+    chosen = Enum.count(plugin.parts, &part?(picks, plugin.key, &1))
+
+    cond do
+      Enum.all?(plugin.parts, & &1.required) ->
+        ngettext("1 part · required", "%{count} parts · all required", total)
+
+      chosen == 0 ->
+        gettext("not chosen")
+
+      true ->
+        gettext("%{chosen} of %{total} chosen", chosen: chosen, total: total)
+    end
+  end
+
   defp part?(_picks, _key, %{required: true}), do: true
   defp part?(picks, key, %{id: id}), do: picks |> Map.get(key, MapSet.new()) |> MapSet.member?(id)
 
   defp any_part?(picks, plugin), do: Enum.any?(plugin.parts, &part?(picks, plugin.key, &1))
+
+  defp missing?(errors, key, field), do: field_name(field) in Map.get(errors, key, [])
 
   attr :id, :string, default: nil
   attr :field, Phoenix.HTML.FormField, required: true
@@ -2688,13 +2791,11 @@ defmodule MishkaCmsWeb.InstallLive do
         socket.assigns.config_axes
       )
 
-    {answers, settings} = Map.pop(settings, "extensions", %{})
-
     params =
       socket.assigns.config
-      |> bootstrap_params(selection, settings)
+      |> bootstrap_params(selection, Map.delete(settings, "extensions"))
       |> Map.put(:parts, picks_to_lists(socket.assigns.install_picks))
-      |> Map.put(:answers, extension_answers(answers))
+      |> Map.put(:answers, socket.assigns.extension_answers)
       |> Map.put(:languages, socket.assigns.languages)
       |> Map.put(:language_urls, socket.assigns.language_urls)
 
@@ -2789,10 +2890,34 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp field_key(_field, _key), do: nil
 
-  # WHAT THE TICKED EXTENSIONS WERE TOLD, keyed the way `Bootstrap` hands it to each of them. The
-  # form nests them under the extension's key, so an answer cannot reach the wrong one.
-  defp extension_answers(answers) when is_map(answers), do: answers
-  defp extension_answers(_absent), do: %{}
+  # WHAT THE EXTENSIONS WERE TOLD, keyed the way `Bootstrap` hands it to each of them: only the
+  # fields an extension asks for, under its own key, so an answer cannot reach the wrong one.
+  defp known_answers(fields, answers) when is_map(answers) do
+    for {key, asked} <- fields, typed = answers[key], is_map(typed), into: %{} do
+      names = Enum.map(asked, &field_name/1)
+      {key, Map.filter(Map.take(typed, names), fn {_name, value} -> is_binary(value) end)}
+    end
+  end
+
+  defp known_answers(_fields, _absent), do: %{}
+
+  # A REQUIRED FIELD LEFT EMPTY, by extension, for every extension with a part ticked.
+  defp missing_answers(assigns) do
+    for plugin <- assigns.install_plugins,
+        any_part?(assigns.install_picks, plugin),
+        missing = blank_fields(assigns, plugin.key),
+        missing != [],
+        into: %{},
+        do: {plugin.key, missing}
+  end
+
+  defp blank_fields(assigns, key) do
+    for field <- Map.get(assigns.extension_fields, key, []),
+        field_key(field, :required?) == true,
+        name = field_name(field),
+        assigns.extension_answers |> get_in([key, name]) |> trimmed() |> is_nil(),
+        do: name
+  end
 
   defp toggle(selected, name) do
     if MapSet.member?(selected, name),
@@ -2870,7 +2995,23 @@ defmodule MishkaCmsWeb.InstallLive do
       (is_nil(kit) or Map.get(entry, :kit) == kit)
   end
 
+  # THE KIT STEP IS LEFT ONLY WITH EVERY REQUIRED ANSWER GIVEN; otherwise it stays on screen, the
+  # rows missing one opened on the empty fields.
   defp to_settings_step(socket) do
+    case missing_answers(socket.assigns) do
+      missing when missing == %{} ->
+        settings_step(socket)
+
+      missing ->
+        socket
+        |> assign(step: :ui_kit, extension_errors: missing)
+        |> update(:open_plugins, fn open ->
+          Enum.reduce(Map.keys(missing), open, &MapSet.put(&2, {"install", &1}))
+        end)
+    end
+  end
+
+  defp settings_step(socket) do
     values =
       Map.new(install_settings(), fn definition ->
         {definition.key, install_default(definition, socket.assigns.config)}
@@ -3073,7 +3214,9 @@ defmodule MishkaCmsWeb.InstallLive do
       install_plugins: plugins,
       install_picks: start_picks(plugins),
       extension_fields: Map.new(Extensions.offered(), &{&1.key, &1.fields}),
-      open_extension: nil
+      extension_answers: %{},
+      extension_errors: %{},
+      open_plugins: MapSet.new()
     )
   end
 
