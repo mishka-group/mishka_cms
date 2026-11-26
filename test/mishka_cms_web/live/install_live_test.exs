@@ -581,6 +581,12 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#uikit-next[disabled]")
       refute has_element?(view, "#rail-step-0.can")
 
+      # THE HELD BUTTON SAYS WHY: busy, with a spinner and a label of its own, not just grey.
+      assert has_element?(
+               view,
+               ~s(#uikit-next.is-waiting[aria-busy="true"][data-loading="Loading components…"])
+             )
+
       # A version cannot change under a running download.
       render_hook(view, "kit_channel", %{"channel" => "master"})
       assert has_element?(view, "#uikit-channel-stable.on")
@@ -591,6 +597,9 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       refute has_element?(view, "#uikit-loading")
       refute has_element?(view, "#uikit-sections[inert]")
       refute has_element?(view, "#uikit-next[disabled]")
+      refute has_element?(view, "#uikit-next.is-waiting")
+      refute has_element?(view, "#uikit-next[data-loading]")
+      assert has_element?(view, ~s(#uikit-next[aria-busy="false"]), "Next: settings")
       refute has_element?(view, "#uikit-channel-stable[disabled]")
       assert has_element?(view, "#uikit-channel-stable.on")
       assert has_element?(view, "#rail-step-0.can")

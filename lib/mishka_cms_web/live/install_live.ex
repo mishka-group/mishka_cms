@@ -1198,14 +1198,19 @@ defmodule MishkaCmsWeb.InstallLive do
             <button id="uikit-back" type="button" phx-click="back" class={btn_ghost()}>
               <.svg_back /> {gettext("Back")}
             </button>
+            <%!-- While the kits load the button says so, with a spinner, rather than sitting
+                  greyed out with no reason given. --%>
             <button
               id="uikit-next"
+              data-testid="uikit-next"
               type="button"
               phx-click="to_settings"
               disabled={@bundle_status == :loading}
-              class={btn_primary()}
+              aria-busy={to_string(@bundle_status == :loading)}
+              data-loading={@bundle_status == :loading && gettext("Loading components…")}
+              class={[btn_primary(), @bundle_status == :loading && "is-waiting"]}
             >
-              {gettext("Next: settings")} <.svg_arrow />
+              <span class="lbl">{gettext("Next: settings")} <.svg_arrow /></span>
             </button>
           </div>
         </div>
@@ -1542,17 +1547,20 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-btn-ghost:hover{border-color:#cdd5e3;background:var(--bg-2)}
       .inst-btn-block{width:100%;justify-content:center;padding:14px}
       .inst-btn .lbl{display:inline-flex;align-items:center;gap:8px}
-      .inst-btn.phx-submit-loading,.inst-btn.phx-click-loading{pointer-events:none}
-      .inst-btn-primary.phx-submit-loading,.inst-btn-primary.phx-click-loading{
-        background:var(--blue);opacity:.85;box-shadow:none;transform:none}
+      .inst-btn.phx-submit-loading,.inst-btn.phx-click-loading,.inst-btn.is-waiting{pointer-events:none}
+      .inst-btn-primary.phx-submit-loading,.inst-btn-primary.phx-click-loading,.inst-btn-primary.is-waiting{
+        background:var(--blue);opacity:.85;box-shadow:none;transform:none;cursor:wait}
       .inst-btn[data-loading].phx-submit-loading .lbl,
-      .inst-btn[data-loading].phx-click-loading .lbl{display:none}
+      .inst-btn[data-loading].phx-click-loading .lbl,
+      .inst-btn[data-loading].is-waiting .lbl{display:none}
       .inst-btn[data-loading].phx-submit-loading::before,
-      .inst-btn[data-loading].phx-click-loading::before{content:"";width:14px;height:14px;
+      .inst-btn[data-loading].phx-click-loading::before,
+      .inst-btn[data-loading].is-waiting::before{content:"";width:14px;height:14px;
         flex-shrink:0;border-radius:50%;border:2px solid rgba(255,255,255,.35);
         border-top-color:#fff;animation:inst-spin .7s linear infinite}
       .inst-btn[data-loading].phx-submit-loading::after,
-      .inst-btn[data-loading].phx-click-loading::after{content:attr(data-loading)}
+      .inst-btn[data-loading].phx-click-loading::after,
+      .inst-btn[data-loading].is-waiting::after{content:attr(data-loading)}
       .inst-link-sub{display:block;text-align:center;margin-top:18px;background:none;border:none;
         color:var(--blue);font-size:13.5px;font-weight:600;cursor:pointer;width:100%}
       .inst-link-sub:hover{text-decoration:underline}
