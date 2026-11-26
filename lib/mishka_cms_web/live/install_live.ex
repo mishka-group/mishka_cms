@@ -117,6 +117,7 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(picker_open: false, config_axes: %{}, open_config: nil)
      |> assign_install_parts()
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
+     |> assign(settings_values: %{})
      |> assign(languages: Languages.default(), language_error: nil, language_query: "")
      |> assign(language_urls: hd(Languages.url_modes()))
      |> assign(install_steps: rows(Bootstrap.steps()), install_error: nil, install_done: false)
@@ -307,7 +308,12 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   def handle_event("validate_settings", %{"settings" => params}, socket) do
-    {:noreply, assign_settings_form(socket, params)}
+    new_socket =
+      socket
+      |> assign(settings_values: typed_settings(params, socket.assigns.config))
+      |> assign_settings_form(params)
+
+    {:noreply, new_socket}
   end
 
   def handle_event("search_languages", %{"language_query" => query}, socket) do
@@ -3011,11 +3017,10 @@ defmodule MishkaCmsWeb.InstallLive do
     end
   end
 
+  # WHAT WAS TYPED WINS over the defaults, so Back and Next bring an edited title back as it was; a
+  # value never edited still follows the site name and domain of the first step.
   defp settings_step(socket) do
-    values =
-      Map.new(install_settings(), fn definition ->
-        {definition.key, install_default(definition, socket.assigns.config)}
-      end)
+    values = Map.merge(install_defaults(socket.assigns.config), socket.assigns.settings_values)
 
     socket
     |> assign(step: :settings, settings_submitted?: false)
@@ -3102,6 +3107,20 @@ defmodule MishkaCmsWeb.InstallLive do
   defp install_settings do
     by_key = Map.new(Settings.definitions(), &{&1.key, &1})
     Enum.flat_map(@install_setting_keys, &List.wrap(Map.get(by_key, &1)))
+  end
+
+  defp install_defaults(config),
+    do: Map.new(install_settings(), &{&1.key, install_default(&1, config)})
+
+  # Only the curated keys, and only the values that differ from what the step would offer itself.
+  defp typed_settings(params, config) do
+    defaults = install_defaults(config)
+
+    for {key, value} <- Map.take(params, @install_setting_keys),
+        is_binary(value),
+        value != defaults[key],
+        into: %{},
+        do: {key, value}
   end
 
   defp install_default(%{key: "site.title"}, config), do: config["site_name"] || "MishkaCMS"

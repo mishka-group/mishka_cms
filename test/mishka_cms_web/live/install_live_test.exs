@@ -929,6 +929,32 @@ defmodule MishkaCmsWeb.InstallLiveTest do
              )
     end
 
+    # WHAT WAS TYPED COMES BACK. The step used to rebuild its form from the defaults on every visit,
+    # so an edited title turned back into the site name after Back then Next.
+    test "an edited title survives Back then Next, an untouched one follows the site name", %{
+      conn: conn
+    } do
+      view = to_settings(conn)
+
+      view
+      |> form("#install-settings-form", settings: %{"site.title" => "Acme Docs"})
+      |> render_change()
+
+      view |> element("#settings-back") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      assert has_element?(view, "#install-set-site-title[value='Acme Docs']")
+      assert has_element?(view, "#install-set-mailer-from[value='noreply@localhost.test']")
+
+      # The from address was never edited, so a new domain on the first step still reaches it.
+      view |> element("#rail-step-0") |> render_click()
+      view |> form("#install-form", install: %{@valid | "host" => "acme.com"}) |> render_submit()
+      view |> element("#uikit-next") |> render_click()
+
+      assert has_element?(view, "#install-set-site-title[value='Acme Docs']")
+      assert has_element?(view, "#install-set-mailer-from[value='noreply@acme.com']")
+    end
+
     # THE DOCUMENTED LOCAL DOMAIN. `noreply@localhost` has no dot, so the step offered an address
     # its own Install button refused, and nobody could finish without typing another one.
     test "a localhost install's pre-filled from address installs as offered", %{conn: conn} do
