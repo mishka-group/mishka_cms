@@ -51,6 +51,27 @@ defmodule MishkaCmsWeb.InstallLive do
   saves it to the new site's `site.language_urls`. The section sits outside the settings form, so
   the Install button submits that form through its `form` attribute.
 
+  What gets installed is the parts plugins declare on `installer:seed`
+  (`MishkaCmsCore.Install.Seeds`), drawn by `parts_list/1` as one closed row per plugin that names
+  it and counts what it will run ("3 of 4 chosen"); opening it (`toggle_plugin`, kept in
+  `:open_plugins` so a re-render leaves it open) shows its parts: the `:prod` parts at the end of the
+  `:ui_kit` screen, with the fields an extension's own install asks for under them, and the `:dev`
+  parts on the development-only `:seeds` screen. A required part is locked on and marked so, a
+  default one starts ticked. The fields' answers are kept as they are typed (`extension_answers`),
+  and the step is left only when every required one of a ticked extension is filled; otherwise its
+  row opens on the empty field. The forms' answers are the core's parts' `answers`, the fields'
+  answers each extension's own, and the choice reaches `Bootstrap.run/2` as `:parts`.
+
+  A reload keeps the wizard where it was. The step is in the address (`?step=config`, `components`,
+  `settings`, through `push_patch/2`), and the answers wait in the browser tab's `sessionStorage`:
+  after every render that changes them the page pushes `install-draft` to the `InstallDraft` hook
+  (`assets/js/install_draft.js`), which keeps them and hands them back as `restore_draft` when the
+  page mounts again. Nothing is written to the database before the last step, and the master
+  password is never among the answers kept, so after a reload it is the one thing asked again,
+  with a note: on the first step, or on the settings step when the reload landed past it. A draft
+  is read as untrusted input, every value checked as the step it belongs to checks it. Once the
+  install starts the draft is cleared.
+
   It is reachable only while the CMS is uninstalled: `MishkaCms.Plugs.InstallGate`
   responds `404` for this route once `MishkaCmsCore.Install.installed?/0` is true.
 
@@ -58,7 +79,7 @@ defmodule MishkaCmsWeb.InstallLive do
   """
   use MishkaCmsWeb, :live_view
 
-  alias MishkaCmsCore.Install.{Bootstrap, Extensions, UiKitCatalog}
+  alias MishkaCmsCore.Install.{Bootstrap, Extensions, Seeds, UiKitCatalog}
   alias MishkaCmsCore.Runtime.Handlers.UiKitHandler
   alias MishkaCmsCore.Runtime.Languages
   alias MishkaCmsCore.Runtime.Plugs.SiteLookupPlug
@@ -67,6 +88,12 @@ defmodule MishkaCmsWeb.InstallLive do
   @install_setting_keys ["site.title", "mailer.from"]
 
   @kit_channels %{"stable" => :stable, "prerelease" => :prerelease, "master" => :master}
+
+  # The steps a reload can come back to, by the name the address gives each.
+  @url_steps %{"config" => :config, "components" => :ui_kit, "settings" => :settings}
+
+  # What the first step keeps across a reload: every answer but the password and its confirmation.
+  @kept_config ["email", "site_name", "host"]
 
   # Where an operator is sent when no UI-kit package can be found anywhere.
   @support_url "https://github.com/mishka-group"
@@ -104,25 +131,42 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(selected: MapSet.new(), required: MapSet.new(), query: "")
      |> assign(kits: [], kit_filter: nil)
      |> assign(picker_open: false, config_axes: %{}, open_config: nil)
-     |> assign(
-       extensions: Extensions.offered(),
-       extensions_chosen: MapSet.new(),
-       open_extension: nil
-     )
+     |> assign_install_parts()
      |> assign(settings_form: to_form(%{}, as: :settings), settings_submitted?: false)
+     |> assign(settings_values: %{})
      |> assign(languages: Languages.default(), language_error: nil, language_query: "")
      |> assign(language_urls: hd(Languages.url_modes()))
-     |> assign(install_steps: init_steps(), install_error: nil, install_done: false)
+     |> assign(install_steps: rows(Bootstrap.steps()), install_error: nil, install_done: false)
      |> assign(install_total: 0, compiled_count: 0, install_origin: :settings)
-     |> assign(
-       dev_seeds: dev_seeds_allowed?(),
-       seed_categories: dev_seed_categories(),
-       seed_selected: default_seed_selected()
-     )
-     |> assign_form(%{})}
+     |> assign_seed_parts()
+     |> assign_form(%{})
+     |> assign(url_step: :config, restored?: false, saved_draft: nil, password_again?: false)
+     |> assign(pending_selected: nil)
+     |> attach_hook(:install_draft, :after_render, &remember_draft/1)}
   end
 
   @impl true
+  def handle_params(params, _uri, socket),
+    do: {:noreply, assign(socket, url_step: Map.get(@url_steps, params["step"], :config))}
+
+  @impl true
+  # ONCE, AND ONLY ON THE FIRST STEP: a second mount of the hook, or a draft arriving after the
+  # wizard has moved on, changes nothing.
+  def handle_event(
+        "restore_draft",
+        params,
+        %{assigns: %{restored?: false, step: :config}} = socket
+      ) do
+    new_socket =
+      socket
+      |> assign(restored?: true)
+      |> restore_draft(params["draft"])
+
+    {:noreply, new_socket}
+  end
+
+  def handle_event("restore_draft", _params, socket), do: {:noreply, socket}
+
   def handle_event("validate", %{"install" => params}, socket) do
     {:noreply, assign_form(socket, params)}
   end
@@ -131,7 +175,7 @@ defmodule MishkaCmsWeb.InstallLive do
     socket = assign(socket, submitted?: true)
 
     case errors(params) do
-      [] -> {:noreply, start_ui_kit(socket, params)}
+      [] -> {:noreply, socket |> assign_form(params) |> start_ui_kit(params)}
       _ -> {:noreply, assign_form(socket, params)}
     end
   end
@@ -243,15 +287,44 @@ defmodule MishkaCmsWeb.InstallLive do
 
   def handle_event("rail_nav", _params, socket), do: {:noreply, socket}
 
-  def handle_event("toggle_extension", %{"key" => key}, socket) do
-    {:noreply, assign(socket, extensions_chosen: toggle(socket.assigns.extensions_chosen, key))}
+  # A REQUIRED PART IS NOT A CHOICE, and a click on its locked box changes nothing here either:
+  # `MishkaCmsCore.Install.Seeds` runs it whatever arrives.
+  def handle_event("toggle_part", %{"scope" => scope, "key" => key, "part" => id}, socket)
+      when scope in ["install", "seed"] do
+    {plugins, picks} = parts_assigns(scope)
+    plugin = Enum.find(socket.assigns[plugins], &(&1.key == key))
+
+    case plugin && Enum.find(plugin.parts, &(&1.id == id)) do
+      %{required: false} ->
+        {:noreply,
+         update(
+           socket,
+           picks,
+           &Map.update(&1, key, MapSet.new([id]), fn set -> toggle(set, id) end)
+         )}
+
+      _locked_or_unknown ->
+        {:noreply, socket}
+    end
   end
 
-  # AN EXTENSION THAT WANTS NOTHING ASKED HAS NOTHING TO OPEN. Only one is open at a time, the way
-  # the component configuration above behaves, so a long list stays readable.
-  def handle_event("toggle_extension_fields", %{"key" => key}, socket) do
-    {:noreply,
-     assign(socket, open_extension: if(socket.assigns.open_extension == key, do: nil, else: key))}
+  # ONLY A PLUGIN THE LIST DRAWS opens, so an event naming anything else stores nothing.
+  def handle_event("toggle_plugin", %{"scope" => scope, "key" => key}, socket)
+      when scope in ["install", "seed"] do
+    {plugins, _picks} = parts_assigns(scope)
+
+    if Enum.any?(socket.assigns[plugins], &(&1.key == key)),
+      do: {:noreply, update(socket, :open_plugins, &toggle(&1, {scope, key}))},
+      else: {:noreply, socket}
+  end
+
+  def handle_event("extension_answers", params, socket) do
+    answers = known_answers(socket.assigns.extension_fields, params["extensions"])
+    new_socket = update(socket, :extension_answers, &Map.merge(&1, answers))
+
+    if new_socket.assigns.extension_errors == %{},
+      do: {:noreply, new_socket},
+      else: {:noreply, assign(new_socket, extension_errors: missing_answers(new_socket.assigns))}
   end
 
   def handle_event("to_settings", _params, socket) do
@@ -259,11 +332,11 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   def handle_event("back", _params, %{assigns: %{step: :settings}} = socket) do
-    {:noreply, assign(socket, step: :ui_kit)}
+    {:noreply, go(socket, :ui_kit)}
   end
 
   def handle_event("back", _params, %{assigns: %{step: :installing}} = socket) do
-    {:noreply, assign(socket, step: socket.assigns.install_origin)}
+    {:noreply, go(socket, socket.assigns.install_origin)}
   end
 
   def handle_event("finish", _params, socket) do
@@ -271,11 +344,16 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   def handle_event("back", _params, socket) do
-    {:noreply, assign(socket, step: :config)}
+    {:noreply, go(socket, :config)}
   end
 
   def handle_event("validate_settings", %{"settings" => params}, socket) do
-    {:noreply, assign_settings_form(socket, params)}
+    new_socket =
+      socket
+      |> assign(settings_values: typed_settings(params, socket.assigns.config))
+      |> assign_settings_form(params)
+
+    {:noreply, new_socket}
   end
 
   def handle_event("search_languages", %{"language_query" => query}, socket) do
@@ -304,12 +382,27 @@ defmodule MishkaCmsWeb.InstallLive do
       else: {:noreply, socket}
   end
 
+  # The kits are still loading after a reload: nothing to install from yet.
+  def handle_event("install", _params, %{assigns: %{catalog: nil}} = socket),
+    do: {:noreply, socket}
+
+  # A PASSWORD ASKED AGAIN HERE, after a reload dropped it, joins the first step's answers and is
+  # never handed to the settings.
   def handle_event("install", %{"settings" => params}, socket) do
     socket = assign(socket, settings_submitted?: true)
+    {password, settings} = Map.split(params, ["password", "password_confirmation"])
 
-    case settings_errors(params) do
-      [] -> {:noreply, commit(socket, params)}
-      _ -> {:noreply, assign_settings_form(socket, params)}
+    case settings_errors(params, socket.assigns.config) do
+      [] ->
+        new_socket =
+          socket
+          |> update(:config, &with_password(&1, password))
+          |> commit(settings)
+
+        {:noreply, new_socket}
+
+      _errors ->
+        {:noreply, assign_settings_form(socket, params)}
     end
   end
 
@@ -319,13 +412,9 @@ defmodule MishkaCmsWeb.InstallLive do
       else: {:noreply, socket}
   end
 
-  def handle_event("toggle_seed", %{"key" => key}, socket) do
-    {:noreply, assign(socket, seed_selected: toggle(socket.assigns.seed_selected, key))}
-  end
-
   def handle_event("run_seeds", _params, socket) do
     if dev_seeds_allowed?() do
-      selected = Enum.map(socket.assigns.seed_selected, &String.to_existing_atom/1)
+      picks = picks_to_lists(socket.assigns.seed_picks)
       lv = self()
 
       if connected?(socket),
@@ -333,12 +422,11 @@ defmodule MishkaCmsWeb.InstallLive do
 
       {:noreply,
        socket
-       |> assign(step: :installing, install_origin: :seeds, install_steps: seed_steps(selected))
+       |> assign(step: :installing, install_origin: :seeds)
+       |> assign(install_steps: rows(Seeds.steps(:dev, picks)))
        |> assign(install_error: nil, install_done: false, install_total: 0, compiled_count: 0)
        |> MishkaGervaz.Messages.start_async(:seeds, fn ->
-         MishkaCmsCore.Dev.Seeds.run(selected, fn message ->
-           send(lv, {:install_progress, message})
-         end)
+         Seeds.run(:dev, picks, progress: &send(lv, {:install_progress, &1}))
        end)}
     else
       {:noreply, socket}
@@ -366,11 +454,18 @@ defmodule MishkaCmsWeb.InstallLive do
        bundle_failures: failures,
        bundle_release: Map.get(result, :release)
      )
-     |> recompute(MapSet.new())}
+     |> recompute(restored_selection(socket.assigns.pending_selected, catalog))
+     |> assign(pending_selected: nil)}
   end
 
+  # The settings step a reload came back to cannot install without the kits, so a failed load goes
+  # back to the step that shows the error and its retry.
   def handle_async(:bundle, {:exit, reason}, socket) do
-    {:noreply, assign(socket, bundle_status: :error, bundle_error: inspect(reason))}
+    new_socket = assign(socket, bundle_status: :error, bundle_error: inspect(reason))
+
+    if new_socket.assigns.step == :settings,
+      do: {:noreply, go(new_socket, :ui_kit)},
+      else: {:noreply, new_socket}
   end
 
   def handle_async(:install, {:ok, {:ok, %{site: site}}}, socket) do
@@ -391,7 +486,7 @@ defmodule MishkaCmsWeb.InstallLive do
      |> assign(install_error: exit_message(reason))}
   end
 
-  def handle_async(:seeds, {:ok, core}, socket) do
+  def handle_async(:seeds, {:ok, {:ok, core}}, socket) do
     MishkaCmsCore.Install.mark_installed!()
     site = Enum.find(core.sites, &(&1.host == "localhost")) || hd(core.sites)
 
@@ -399,6 +494,10 @@ defmodule MishkaCmsWeb.InstallLive do
      socket
      |> assign(site: site, seeded?: true, install_done: true)
      |> assign(install_steps: all_done(socket.assigns.install_steps))}
+  end
+
+  def handle_async(:seeds, {:ok, {:error, reason}}, socket) do
+    {:noreply, assign(socket, install_error: Seeds.describe(reason))}
   end
 
   def handle_async(:seeds, {:exit, reason}, socket) do
@@ -515,7 +614,8 @@ defmodule MishkaCmsWeb.InstallLive do
       <ul id="install-progress" class="inst-steps-list">
         <li
           :for={step <- @install_steps}
-          id={"step-#{step.id}"}
+          id={"step-#{step.dom}"}
+          data-testid={"step-#{step.dom}"}
           class={["inst-istep", istep_class(step.status)]}
         >
           <div class="txt">
@@ -586,6 +686,35 @@ defmodule MishkaCmsWeb.InstallLive do
                 header and footer (`MishkaCmsCore.Runtime.SiteLayout`). Ticked and disabled, so it
                 says what the install does and submits nothing: `MishkaCmsCore.Install.Bootstrap`
                 writes it whatever arrives. --%>
+          <%!-- A RELOAD KEEPS EVERY ANSWER BUT THE PASSWORD, which is asked here when it landed past
+                the first step: it is never kept anywhere a reload could read it. --%>
+          <div :if={needs_password?(@config)} id="install-password-again">
+            <div class="inst-divider"></div>
+            <h3 class="inst-sec-h"><.svg_user /> {gettext("Master Admin password")}</h3>
+            <.password_again_note />
+            <.field
+              field={@settings_form["password"]}
+              id="install-set-password"
+              data-testid="install-set-password"
+              label={gettext("Password")}
+              type="password"
+              placeholder={gettext("At least 8 characters")}
+              autocomplete="new-password"
+            >
+              <:extra><.strength_meter password={@settings_form["password"].value} /></:extra>
+            </.field>
+            <.field
+              field={@settings_form["password_confirmation"]}
+              id="install-set-password-confirmation"
+              data-testid="install-set-password-confirmation"
+              label={gettext("Confirm password")}
+              type="password"
+              placeholder={gettext("Re-enter password")}
+              autocomplete="new-password"
+            />
+            <div class="inst-divider"></div>
+          </div>
+
           <label id="install-starter-content" class="inst-smp-row is-fixed">
             <input type="checkbox" checked disabled aria-disabled="true" class="inst-cbox" />
             <span class="nm">
@@ -610,12 +739,20 @@ defmodule MishkaCmsWeb.InstallLive do
           <button id="settings-back" type="button" phx-click="back" class={btn_ghost()}>
             <.svg_back /> {gettext("Back")}
           </button>
+          <%!-- After a reload onto this step the kits load again before anything can install. --%>
           <button
             id="install-settings-submit"
+            data-testid="install-settings-submit"
             type="submit"
             form="install-settings-form"
-            data-loading={gettext("Installing…")}
-            class={btn_primary()}
+            disabled={@bundle_status == :loading}
+            aria-busy={to_string(@bundle_status == :loading)}
+            data-loading={
+              if @bundle_status == :loading,
+                do: gettext("Loading components…"),
+                else: gettext("Installing…")
+            }
+            class={[btn_primary(), @bundle_status == :loading && "is-waiting"]}
           >
             <span class="lbl">{gettext("Install")} <.svg_arrow /></span>
           </button>
@@ -1125,81 +1262,34 @@ defmodule MishkaCmsWeb.InstallLive do
             </div>
           </div>
 
-          <%!-- EVERY EXTENSION THAT REGISTERED ITSELF, and nothing written down here. The list is
-                  `MishkaInstaller`'s own registry of plugins on `installer:extension:install`, so an
-                  extension that is installed offers itself and one that is not cannot appear. --%>
-          <div :if={@extensions != []} class="inst-mod">
+          <%!-- EVERY CHOICE A PLUGIN DECLARED, and nothing written down here. The list is
+                  `MishkaInstaller`'s own registry of plugins on `installer:seed`, read for the
+                  production install (`MishkaCmsCore.Install.Seeds.plugins/1`): the core's parts
+                  first, then each extension's, with the fields its install asks for. --%>
+          <div :if={@install_plugins != []} class="inst-mod">
             <div class="inst-mod-head">
               <div class="inst-mod-ico"><.svg_box /></div>
               <div>
-                <div class="t">{gettext("Extensions")}</div>
+                <div class="t">{gettext("What gets installed")}</div>
                 <div class="s">
                   {gettext(
-                    "Tick what this site should start with. Everything here can also be set up later, from its own menu."
+                    "Open a row to see and change what it installs. Required parts are always installed; an extension can also be set up later, from its own menu."
                   )}
                 </div>
               </div>
             </div>
 
             <div class="inst-mod-body">
-              <ul id="install-extensions" class="inst-ext-list">
-                <li
-                  :for={extension <- @extensions}
-                  id={"extension-#{extension.key}"}
-                  class={["inst-ext", MapSet.member?(@extensions_chosen, extension.key) && "on"]}
-                >
-                  <label class="inst-ext-row">
-                    <input
-                      type="checkbox"
-                      id={"toggle-extension-#{extension.key}"}
-                      checked={MapSet.member?(@extensions_chosen, extension.key)}
-                      phx-click="toggle_extension"
-                      phx-value-key={extension.key}
-                      class="inst-cbox"
-                    />
-                    <span class="nm">
-                      <span class="t">{Settings.text(extension.label)}</span>
-                      <span :if={extension.summary != ""} class="s">
-                        {Settings.text(extension.summary)}
-                      </span>
-                    </span>
-                  </label>
-
-                  <%!-- ASKED ONLY WHEN IT IS WANTED. An extension declaring no fields has nothing
-                          to open, and one that does is asked only once it has been ticked. --%>
-                  <button
-                    :if={extension.fields != [] and MapSet.member?(@extensions_chosen, extension.key)}
-                    type="button"
-                    phx-click="toggle_extension_fields"
-                    phx-value-key={extension.key}
-                    class={["inst-mod-cust", @open_extension == extension.key && "open"]}
-                  >
-                    {gettext("Settings")} <span class="ch"><.svg_chev /></span>
-                  </button>
-
-                  <div
-                    :if={
-                      @open_extension == extension.key and
-                        MapSet.member?(@extensions_chosen, extension.key)
-                    }
-                    id={"extension-fields-#{extension.key}"}
-                    class="inst-ext-fields"
-                  >
-                    <div :for={field <- extension.fields} class="inst-field">
-                      <label for={"extension-#{extension.key}-#{field_name(field)}"}>
-                        {field_label(field)}
-                      </label>
-                      <input
-                        type="text"
-                        id={"extension-#{extension.key}-#{field_name(field)}"}
-                        name={"settings[extensions][#{extension.key}][#{field_name(field)}]"}
-                        class="inst-inp"
-                      />
-                      <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
-                    </div>
-                  </div>
-                </li>
-              </ul>
+              <.parts_list
+                id="install-parts"
+                scope="install"
+                plugins={@install_plugins}
+                picks={@install_picks}
+                open={@open_plugins}
+                fields={@extension_fields}
+                answers={@extension_answers}
+                errors={@extension_errors}
+              />
             </div>
           </div>
 
@@ -1207,14 +1297,19 @@ defmodule MishkaCmsWeb.InstallLive do
             <button id="uikit-back" type="button" phx-click="back" class={btn_ghost()}>
               <.svg_back /> {gettext("Back")}
             </button>
+            <%!-- While the kits load the button says so, with a spinner, rather than sitting
+                  greyed out with no reason given. --%>
             <button
               id="uikit-next"
+              data-testid="uikit-next"
               type="button"
               phx-click="to_settings"
               disabled={@bundle_status == :loading}
-              class={btn_primary()}
+              aria-busy={to_string(@bundle_status == :loading)}
+              data-loading={@bundle_status == :loading && gettext("Loading components…")}
+              class={[btn_primary(), @bundle_status == :loading && "is-waiting"]}
             >
-              {gettext("Next: settings")} <.svg_arrow />
+              <span class="lbl">{gettext("Next: settings")} <.svg_arrow /></span>
             </button>
           </div>
         </div>
@@ -1237,24 +1332,20 @@ defmodule MishkaCmsWeb.InstallLive do
     >
       <div id="installer-seeds">
         <div class="inst-smp">
-          <label
-            :for={category <- @seed_categories}
-            id={"seed-#{category.key}"}
-            class="inst-smp-row"
-          >
-            <input
-              type="checkbox"
-              checked={MapSet.member?(@seed_selected, to_string(category.key))}
-              phx-click="toggle_seed"
-              phx-value-key={category.key}
-              class="inst-cbox"
-            />
-            <span class="nm">{category.label}</span>
-          </label>
+          <%!-- EVERY DEV PART A PLUGIN DECLARED (`MishkaCmsCore.Install.Seeds.plugins(:dev)`).
+                A required part is ticked and locked: `MishkaCmsCore.Install.Seeds.run/3` runs it
+                whatever arrives, so the list says what will be loaded. --%>
+          <.parts_list
+            id="seed-parts"
+            scope="seed"
+            plugins={@seed_plugins}
+            picks={@seed_picks}
+            open={@open_plugins}
+          />
           <p class="inst-smp-note">
             {raw(
               gettext(
-                "Core data (sites, users, permissions) and every UI-kit component are %{included}.",
+                "Core data (sites, users, permissions) is %{included}.",
                 included: strong(gettext("always included"))
               )
             )}<br />
@@ -1268,11 +1359,18 @@ defmodule MishkaCmsWeb.InstallLive do
         </div>
 
         <div class="inst-actions">
-          <button id="seeds-back" type="button" phx-click="back" class={btn_ghost()}>
+          <button
+            id="seeds-back"
+            data-testid="seeds-back"
+            type="button"
+            phx-click="back"
+            class={btn_ghost()}
+          >
             <.svg_back /> {gettext("Back")}
           </button>
           <button
             id="seeds-run"
+            data-testid="seeds-run"
             type="button"
             phx-click="run_seeds"
             data-loading={gettext("Seeding…")}
@@ -1314,7 +1412,10 @@ defmodule MishkaCmsWeb.InstallLive do
           placeholder={gettext("At least 8 characters")}
           autocomplete="new-password"
         >
-          <:extra><.strength_meter password={@form[:password].value} /></:extra>
+          <:extra>
+            <.strength_meter password={@form[:password].value} />
+            <.password_again_note :if={@password_again? and needs_password?(@form.params)} />
+          </:extra>
         </.field>
         <.field
           field={@form[:password_confirmation]}
@@ -1548,17 +1649,20 @@ defmodule MishkaCmsWeb.InstallLive do
       .inst-btn-ghost:hover{border-color:#cdd5e3;background:var(--bg-2)}
       .inst-btn-block{width:100%;justify-content:center;padding:14px}
       .inst-btn .lbl{display:inline-flex;align-items:center;gap:8px}
-      .inst-btn.phx-submit-loading,.inst-btn.phx-click-loading{pointer-events:none}
-      .inst-btn-primary.phx-submit-loading,.inst-btn-primary.phx-click-loading{
-        background:var(--blue);opacity:.85;box-shadow:none;transform:none}
+      .inst-btn.phx-submit-loading,.inst-btn.phx-click-loading,.inst-btn.is-waiting{pointer-events:none}
+      .inst-btn-primary.phx-submit-loading,.inst-btn-primary.phx-click-loading,.inst-btn-primary.is-waiting{
+        background:var(--blue);opacity:.85;box-shadow:none;transform:none;cursor:wait}
       .inst-btn[data-loading].phx-submit-loading .lbl,
-      .inst-btn[data-loading].phx-click-loading .lbl{display:none}
+      .inst-btn[data-loading].phx-click-loading .lbl,
+      .inst-btn[data-loading].is-waiting .lbl{display:none}
       .inst-btn[data-loading].phx-submit-loading::before,
-      .inst-btn[data-loading].phx-click-loading::before{content:"";width:14px;height:14px;
+      .inst-btn[data-loading].phx-click-loading::before,
+      .inst-btn[data-loading].is-waiting::before{content:"";width:14px;height:14px;
         flex-shrink:0;border-radius:50%;border:2px solid rgba(255,255,255,.35);
         border-top-color:#fff;animation:inst-spin .7s linear infinite}
       .inst-btn[data-loading].phx-submit-loading::after,
-      .inst-btn[data-loading].phx-click-loading::after{content:attr(data-loading)}
+      .inst-btn[data-loading].phx-click-loading::after,
+      .inst-btn[data-loading].is-waiting::after{content:attr(data-loading)}
       .inst-link-sub{display:block;text-align:center;margin-top:18px;background:none;border:none;
         color:var(--blue);font-size:13.5px;font-weight:600;cursor:pointer;width:100%}
       .inst-link-sub:hover{text-decoration:underline}
@@ -1583,16 +1687,46 @@ defmodule MishkaCmsWeb.InstallLive do
         background:#fffbeb;border:1px solid #fde68a;padding:4px 10px;border-radius:99px}
       .inst-mod-body{border-top:1px solid var(--line-2);padding:16px 18px 18px;animation:inst-rise .3s}
 
-      /* extensions */
-      .inst-ext-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
-      .inst-ext{border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}
-      .inst-ext.on{border-color:var(--blue);background:var(--blue-l)}
-      .inst-ext-row{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
-      .inst-ext-row .nm{display:flex;flex-direction:column;gap:2px}
-      .inst-ext-row .t{font-weight:700;font-size:14px}
-      .inst-ext-row .s{font-size:12.5px;color:var(--dim)}
-      .inst-ext-fields{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}
+      /* what gets installed: one closed row per plugin, its parts under it when opened */
+      .inst-plugs{list-style:none;margin:0;padding:0}
+      .inst-plug{border-bottom:1px solid var(--line-2)}
+      .inst-plug:last-child{border-bottom:none}
+      .inst-plug-head{display:flex;align-items:center;gap:10px;width:100%;padding:12px;border:none;
+        background:none;border-radius:10px;cursor:pointer;text-align:left;color:var(--ink);
+        font-size:14px;transition:background .15s}
+      .inst-plug-head:hover{background:var(--bg-2)}
+      .inst-plug-head:focus-visible{outline:none;box-shadow:0 0 0 2px var(--blue)}
+      .inst-plug-head .t{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;
+        white-space:nowrap}
+      .inst-plug-head .st{flex-shrink:0;font-size:12.5px;color:var(--dim);white-space:nowrap}
+      .inst-plug-head .st.is-error{color:#dc2626;font-weight:600}
+      .inst-plug-head .ch{display:inline-flex;color:var(--faint);transition:transform .18s ease}
+      .inst-plug.is-open .inst-plug-head .ch{transform:rotate(180deg)}
+      .inst-plug-body{padding:0 4px 10px;animation:inst-open .18s ease}
+      .inst-plug-body[hidden]{display:none}
+      @keyframes inst-open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+      .inst-part{position:relative;display:flex;align-items:center;gap:10px;padding:7px 8px;
+        border-radius:8px;cursor:pointer;font-size:13.5px;transition:background .12s}
+      .inst-part:hover{background:var(--bg-2)}
+      .inst-part.is-fixed{cursor:default}
+      .inst-part.is-fixed:hover{background:none}
+      /* A required part keeps its checked, disabled box for assistive tech; the eye sees the lock. */
+      .inst-part.is-fixed .inst-cbox{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+      .inst-part .lk{width:18px;height:18px;flex-shrink:0;display:grid;place-items:center;color:var(--faint)}
+      .inst-part .nm{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
+      .inst-part .nm .t{flex-shrink:0;font-weight:600;color:var(--ink)}
+      .inst-part .nm .ex{min-width:0;font-size:12.5px;color:var(--faint);overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap}
+      @media(max-width:560px){
+        .inst-part .nm{flex-direction:column;gap:1px}
+        .inst-part .nm .ex{white-space:normal}
+      }
+      .inst-ext-fields{margin:6px 8px 0;padding-top:12px;border-top:1px solid var(--line-2)}
       .inst-ext-fields .inst-field:last-child{margin-bottom:0}
+      @media(prefers-reduced-motion:reduce){
+        .inst-plug-body{animation:none}
+        .inst-plug-head .ch,.inst-plug-head,.inst-part{transition:none}
+      }
 
       /* component picker */
       .inst-comp-tools{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
@@ -1832,7 +1966,7 @@ defmodule MishkaCmsWeb.InstallLive do
         .inst-actions .inst-btn{padding:12px 16px;font-size:13.5px}
       }
     </style>
-    <div class="inst-shell">
+    <div id="install-wizard" phx-hook="InstallDraft" class="inst-shell">
       <aside class="inst-aside">
         <div class="inst-brand">
           <div class="inst-logo-tile"><img src="/images/mishka-logo.svg" alt="Mishka" /></div>
@@ -1914,7 +2048,7 @@ defmodule MishkaCmsWeb.InstallLive do
   defp rail_open?(2, %{config: config, catalog: catalog}), do: config != %{} and catalog != nil
   defp rail_open?(_i, _assigns), do: false
 
-  defp rail_nav(socket, "0"), do: assign(socket, step: :config)
+  defp rail_nav(socket, "0"), do: go(socket, :config)
 
   defp rail_nav(%{assigns: %{config: config}} = socket, "1") when map_size(config) > 0,
     do: start_ui_kit(socket, config)
@@ -1924,6 +2058,141 @@ defmodule MishkaCmsWeb.InstallLive do
        do: to_settings_step(socket)
 
   defp rail_nav(socket, _index), do: socket
+
+  attr :id, :string, required: true
+  attr :scope, :string, required: true
+  attr :plugins, :list, required: true
+  attr :picks, :map, required: true
+  attr :open, :any, required: true
+  attr :fields, :map, default: %{}
+  attr :answers, :map, default: %{}
+  attr :errors, :map, default: %{}
+
+  # ONE CLOSED ROW PER PLUGIN that says what it will do, opened to see and change its parts. A
+  # required part keeps a checked, disabled box for assistive tech and shows a lock instead. An
+  # extension's install fields are asked under its parts once one of them is ticked.
+  defp parts_list(assigns) do
+    ~H"""
+    <ul id={@id} data-testid={@id} class="inst-plugs">
+      <li
+        :for={plugin <- @plugins}
+        id={"#{@scope}-plugin-#{plugin.key}"}
+        data-testid={"#{@scope}-plugin-#{plugin.key}"}
+        class={["inst-plug", open?(@open, @scope, plugin.key) && "is-open"]}
+      >
+        <button
+          type="button"
+          id={"#{@scope}-plugin-toggle-#{plugin.key}"}
+          data-testid={"#{@scope}-plugin-toggle-#{plugin.key}"}
+          phx-click="toggle_plugin"
+          phx-value-scope={@scope}
+          phx-value-key={plugin.key}
+          aria-expanded={to_string(open?(@open, @scope, plugin.key))}
+          aria-controls={"#{@scope}-plugin-parts-#{plugin.key}"}
+          class="inst-plug-head"
+        >
+          <span class="t">{Settings.text(plugin.label)}</span>
+          <span
+            id={"#{@scope}-plugin-state-#{plugin.key}"}
+            data-testid={"#{@scope}-plugin-state-#{plugin.key}"}
+            class={["st", Map.has_key?(@errors, plugin.key) && "is-error"]}
+          >
+            {plugin_state(@picks, plugin, @errors)}
+          </span>
+          <span class="ch"><.svg_chev /></span>
+        </button>
+
+        <div
+          id={"#{@scope}-plugin-parts-#{plugin.key}"}
+          hidden={!open?(@open, @scope, plugin.key)}
+          class="inst-plug-body"
+        >
+          <label
+            :for={part <- plugin.parts}
+            id={"#{@scope}-part-#{plugin.key}-#{part.id}"}
+            class={["inst-part", part.required && "is-fixed"]}
+          >
+            <input
+              type="checkbox"
+              data-testid={"#{@scope}-part-#{plugin.key}-#{part.id}"}
+              checked={part?(@picks, plugin.key, part)}
+              disabled={part.required}
+              aria-disabled={part.required && "true"}
+              phx-click="toggle_part"
+              phx-value-scope={@scope}
+              phx-value-key={plugin.key}
+              phx-value-part={part.id}
+              class="inst-cbox"
+            />
+            <span :if={part.required} class="lk"><.svg_lock /></span>
+            <span class="nm">
+              <span class="t">{Settings.text(part.label)}</span>
+              <span :if={part.summary != ""} class="ex" title={Settings.text(part.summary)}>
+                {Settings.text(part.summary)}
+              </span>
+            </span>
+            <span :if={part.required} class="inst-required">{gettext("Required")}</span>
+          </label>
+
+          <form
+            :if={Map.get(@fields, plugin.key, []) != [] and any_part?(@picks, plugin)}
+            id={"extension-fields-#{plugin.key}"}
+            phx-change="extension_answers"
+            phx-submit="extension_answers"
+            class="inst-ext-fields"
+          >
+            <div :for={field <- Map.get(@fields, plugin.key, [])} class="inst-field">
+              <label for={"extension-#{plugin.key}-#{field_name(field)}"}>
+                {field_label(field)}
+              </label>
+              <input
+                type="text"
+                id={"extension-#{plugin.key}-#{field_name(field)}"}
+                data-testid={"extension-#{plugin.key}-#{field_name(field)}"}
+                name={"extensions[#{plugin.key}][#{field_name(field)}]"}
+                value={get_in(@answers, [plugin.key, field_name(field)])}
+                class={["inst-inp", missing?(@errors, plugin.key, field) && "has-error"]}
+              />
+              <p :if={field_hint(field) != ""} class="inst-hint">{field_hint(field)}</p>
+              <p :if={missing?(@errors, plugin.key, field)} class="inst-error">
+                {dgettext("errors", "is required")}
+              </p>
+            </div>
+          </form>
+        </div>
+      </li>
+    </ul>
+    """
+  end
+
+  defp open?(open, scope, key), do: MapSet.member?(open, {scope, key})
+
+  # WHAT THE CLOSED ROW SAYS: how many parts it runs, counted from the ticks as they change.
+  defp plugin_state(_picks, %{key: key}, errors) when is_map_key(errors, key),
+    do: gettext("needs an answer")
+
+  defp plugin_state(picks, plugin, _errors) do
+    total = length(plugin.parts)
+    chosen = Enum.count(plugin.parts, &part?(picks, plugin.key, &1))
+
+    cond do
+      Enum.all?(plugin.parts, & &1.required) ->
+        ngettext("1 part · required", "%{count} parts · all required", total)
+
+      chosen == 0 ->
+        gettext("not chosen")
+
+      true ->
+        gettext("%{chosen} of %{total} chosen", chosen: chosen, total: total)
+    end
+  end
+
+  defp part?(_picks, _key, %{required: true}), do: true
+  defp part?(picks, key, %{id: id}), do: picks |> Map.get(key, MapSet.new()) |> MapSet.member?(id)
+
+  defp any_part?(picks, plugin), do: Enum.any?(plugin.parts, &part?(picks, plugin.key, &1))
+
+  defp missing?(errors, key, field), do: field_name(field) in Map.get(errors, key, [])
 
   attr :id, :string, default: nil
   attr :field, Phoenix.HTML.FormField, required: true
@@ -2106,6 +2375,14 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   attr :password, :any, default: nil
+
+  defp password_again_note(assigns) do
+    ~H"""
+    <p id="install-password-note" data-testid="install-password-note" class="inst-hint">
+      {gettext("A reload keeps every answer except the password. Please enter it again.")}
+    </p>
+    """
+  end
 
   defp strength_meter(assigns) do
     password = to_string(assigns.password || "")
@@ -2475,7 +2752,7 @@ defmodule MishkaCmsWeb.InstallLive do
   end
 
   defp start_ui_kit(socket, config) do
-    socket = assign(socket, step: :ui_kit, config: config)
+    socket = socket |> assign(config: config) |> go(:ui_kit)
 
     if socket.assigns.catalog, do: socket, else: load_bundle(socket)
   end
@@ -2638,13 +2915,11 @@ defmodule MishkaCmsWeb.InstallLive do
         socket.assigns.config_axes
       )
 
-    {answers, settings} = Map.pop(settings, "extensions", %{})
-
     params =
       socket.assigns.config
-      |> bootstrap_params(selection, settings)
-      |> Map.put(:extensions, MapSet.to_list(socket.assigns.extensions_chosen))
-      |> Map.put(:extension_answers, extension_answers(answers))
+      |> bootstrap_params(selection, Map.delete(settings, "extensions"))
+      |> Map.put(:parts, picks_to_lists(socket.assigns.install_picks))
+      |> Map.put(:answers, socket.assigns.extension_answers)
       |> Map.put(:languages, socket.assigns.languages)
       |> Map.put(:language_urls, socket.assigns.language_urls)
 
@@ -2654,7 +2929,8 @@ defmodule MishkaCmsWeb.InstallLive do
       do: Phoenix.PubSub.subscribe(MishkaCmsCore.PubSub, "runtime:bulk_compile")
 
     socket
-    |> assign(step: :installing, install_origin: :settings, install_steps: init_steps())
+    |> assign(step: :installing, install_origin: :settings)
+    |> assign(install_steps: rows(Bootstrap.steps(params.parts)))
     |> assign(install_error: nil, install_done: false)
     |> assign(install_total: length(Map.get(selection, :components, [])), compiled_count: 0)
     |> MishkaGervaz.Messages.start_async(:install, fn ->
@@ -2673,9 +2949,11 @@ defmodule MishkaCmsWeb.InstallLive do
     }
   end
 
-  defp init_steps do
-    Enum.map(Bootstrap.steps(), fn {id, label} ->
-      %{id: id, label: label, status: :pending, logs: []}
+  # ONE ROW PER PART, keyed by `{plugin, part}` as the progress messages are, and drawn under
+  # `step-<plugin>-<part>`.
+  defp rows(steps) do
+    Enum.map(steps, fn {{key, id} = row, label} ->
+      %{id: row, dom: "#{key}-#{id}", label: Settings.text(label), status: :pending, logs: []}
     end)
   end
 
@@ -2736,10 +3014,34 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp field_key(_field, _key), do: nil
 
-  # WHAT THE TICKED EXTENSIONS WERE TOLD, keyed the way `Bootstrap` hands it to each of them. The
-  # form nests them under the extension's key, so an answer cannot reach the wrong one.
-  defp extension_answers(answers) when is_map(answers), do: answers
-  defp extension_answers(_absent), do: %{}
+  # WHAT THE EXTENSIONS WERE TOLD, keyed the way `Bootstrap` hands it to each of them: only the
+  # fields an extension asks for, under its own key, so an answer cannot reach the wrong one.
+  defp known_answers(fields, answers) when is_map(answers) do
+    for {key, asked} <- fields, typed = answers[key], is_map(typed), into: %{} do
+      names = Enum.map(asked, &field_name/1)
+      {key, Map.filter(Map.take(typed, names), fn {_name, value} -> is_binary(value) end)}
+    end
+  end
+
+  defp known_answers(_fields, _absent), do: %{}
+
+  # A REQUIRED FIELD LEFT EMPTY, by extension, for every extension with a part ticked.
+  defp missing_answers(assigns) do
+    for plugin <- assigns.install_plugins,
+        any_part?(assigns.install_picks, plugin),
+        missing = blank_fields(assigns, plugin.key),
+        missing != [],
+        into: %{},
+        do: {plugin.key, missing}
+  end
+
+  defp blank_fields(assigns, key) do
+    for field <- Map.get(assigns.extension_fields, key, []),
+        field_key(field, :required?) == true,
+        name = field_name(field),
+        assigns.extension_answers |> get_in([key, name]) |> trimmed() |> is_nil(),
+        do: name
+  end
 
   defp toggle(selected, name) do
     if MapSet.member?(selected, name),
@@ -2817,14 +3119,31 @@ defmodule MishkaCmsWeb.InstallLive do
       (is_nil(kit) or Map.get(entry, :kit) == kit)
   end
 
+  # THE KIT STEP IS LEFT ONLY WITH EVERY REQUIRED ANSWER GIVEN; otherwise it stays on screen, the
+  # rows missing one opened on the empty fields.
   defp to_settings_step(socket) do
-    values =
-      Map.new(install_settings(), fn definition ->
-        {definition.key, install_default(definition, socket.assigns.config)}
-      end)
+    case missing_answers(socket.assigns) do
+      missing when missing == %{} ->
+        settings_step(socket)
+
+      missing ->
+        socket
+        |> go(:ui_kit)
+        |> assign(extension_errors: missing)
+        |> update(:open_plugins, fn open ->
+          Enum.reduce(Map.keys(missing), open, &MapSet.put(&2, {"install", &1}))
+        end)
+    end
+  end
+
+  # WHAT WAS TYPED WINS over the defaults, so Back and Next bring an edited title back as it was; a
+  # value never edited still follows the site name and domain of the first step.
+  defp settings_step(socket) do
+    values = Map.merge(install_defaults(socket.assigns.config), socket.assigns.settings_values)
 
     socket
-    |> assign(step: :settings, settings_submitted?: false)
+    |> go(:settings)
+    |> assign(settings_submitted?: false)
     |> assign(settings_form: to_form(values, as: :settings))
   end
 
@@ -2910,6 +3229,20 @@ defmodule MishkaCmsWeb.InstallLive do
     Enum.flat_map(@install_setting_keys, &List.wrap(Map.get(by_key, &1)))
   end
 
+  defp install_defaults(config),
+    do: Map.new(install_settings(), &{&1.key, install_default(&1, config)})
+
+  # Only the curated keys, and only the values that differ from what the step would offer itself.
+  defp typed_settings(params, config) do
+    defaults = install_defaults(config)
+
+    for {key, value} <- Map.take(params, @install_setting_keys),
+        is_binary(value),
+        value != defaults[key],
+        into: %{},
+        do: {key, value}
+  end
+
   defp install_default(%{key: "site.title"}, config), do: config["site_name"] || "MishkaCMS"
 
   # OFFERED THROUGH THE SAME CHECK IT IS SUBMITTED THROUGH, or the step refuses its own default: a
@@ -2928,15 +3261,22 @@ defmodule MishkaCmsWeb.InstallLive do
   defp install_default(definition, _config), do: definition.default
 
   defp assign_settings_form(socket, params) do
-    errors = if socket.assigns.settings_submitted?, do: settings_errors(params), else: []
+    errors =
+      if socket.assigns.settings_submitted?,
+        do: settings_errors(params, socket.assigns.config),
+        else: []
+
     assign(socket, settings_form: to_form(params, as: :settings, errors: errors))
   end
 
-  defp settings_errors(params) do
+  # The password fields are checked only when the settings step shows them.
+  defp settings_errors(params, config) do
     title = trimmed(params["site.title"])
     from = trimmed(params["mailer.from"])
 
-    []
+    errors = password_errors(params, config)
+
+    errors
     |> error_if(is_nil(title), "site.title", dgettext_noop("errors", "is required"))
     |> error_if(is_nil(from), "mailer.from", dgettext_noop("errors", "is required"))
     |> error_if(
@@ -2944,6 +3284,24 @@ defmodule MishkaCmsWeb.InstallLive do
       "mailer.from",
       dgettext_noop("errors", "must be a valid email")
     )
+  end
+
+  # THE FIRST STEP'S OWN PASSWORD CHECKS, under the settings form's names, for a password a reload
+  # dropped; none when the first step's answers still hold one.
+  defp password_errors(params, config) do
+    if needs_password?(config) do
+      for {field, error} <- errors(params),
+          field in [:password, :password_confirmation],
+          do: {Atom.to_string(field), error}
+    else
+      []
+    end
+  end
+
+  defp needs_password?(config), do: (config["password"] || "") == ""
+
+  defp with_password(config, password) do
+    if needs_password?(config), do: Map.merge(config, password), else: config
   end
 
   defp assign_form(socket, params) do
@@ -3011,17 +3369,198 @@ defmodule MishkaCmsWeb.InstallLive do
 
   defp dev_seeds_allowed?, do: Application.get_env(:mishka_cms_core, :env_dev?, false)
 
-  defp dev_seed_categories do
-    if dev_seeds_allowed?(), do: MishkaCmsCore.Dev.Seeds.categories(), else: []
+  # THE PRODUCTION INSTALL'S PARTS, read once from `installer:seed`, with the required and default
+  # ones ticked, and the fields each extension's own install asks for, by key.
+  defp assign_install_parts(socket) do
+    plugins = Seeds.plugins(:prod)
+
+    assign(socket,
+      install_plugins: plugins,
+      install_picks: start_picks(plugins),
+      extension_fields: Map.new(Extensions.offered(), &{&1.key, &1.fields}),
+      extension_answers: %{},
+      extension_errors: %{},
+      open_plugins: MapSet.new()
+    )
   end
 
-  defp default_seed_selected do
-    MapSet.new(dev_seed_categories(), &to_string(&1.key))
+  # THE DEV PARTS, and only in development: a production build offers no sample data at all, and
+  # `MishkaCmsCore.Install.Seeds.run/3` refuses it there too.
+  defp assign_seed_parts(socket) do
+    plugins = if dev_seeds_allowed?(), do: Seeds.plugins(:dev), else: []
+
+    assign(socket,
+      dev_seeds: dev_seeds_allowed?(),
+      seed_plugins: plugins,
+      seed_picks: start_picks(plugins)
+    )
   end
 
-  defp seed_steps(selected) do
-    Enum.map(MishkaCmsCore.Dev.Seeds.steps(selected), fn {id, label} ->
-      %{id: id, label: Settings.text(label), status: :pending, logs: []}
+  defp start_picks(plugins) do
+    Map.new(plugins, fn plugin ->
+      {plugin.key, MapSet.new(for part <- plugin.parts, part.default, do: part.id)}
     end)
   end
+
+  defp picks_to_lists(picks), do: Map.new(picks, fn {key, ids} -> {key, MapSet.to_list(ids)} end)
+
+  # THE WIZARD'S OWN STEPS ARE IN THE ADDRESS, replaced rather than pushed, so a reload lands on the
+  # same step and the browser's Back still leaves the wizard as before. The others are not: an
+  # install cannot be resumed, and sample data is a detour from the first step.
+  defp go(socket, step) do
+    socket = assign(socket, step: step)
+
+    case Enum.find(@url_steps, fn {_name, url_step} -> url_step == step end) do
+      {name, _step} -> push_patch(socket, to: ~p"/install?#{[step: name]}", replace: true)
+      nil -> socket
+    end
+  end
+
+  # AFTER EVERY RENDER, the answers as they now stand go to the tab, but only once its own draft has
+  # been read back, so the empty first render cannot wipe it, and only when they changed.
+  defp remember_draft(%{assigns: %{restored?: false}} = socket), do: socket
+
+  defp remember_draft(socket) do
+    case draft(socket.assigns) do
+      unchanged when unchanged == socket.assigns.saved_draft ->
+        socket
+
+      draft ->
+        socket
+        |> assign(saved_draft: draft)
+        |> push_event("install-draft", %{draft: draft})
+    end
+  end
+
+  defp draft(%{step: step}) when step in [:installing, :done], do: nil
+
+  defp draft(assigns) do
+    %{
+      "config" => Map.take(assigns.form.params, @kept_config),
+      "kit_channel" => Atom.to_string(assigns.kit_channel),
+      "selected" => MapSet.to_list(assigns.pending_selected || assigns.selected),
+      "config_axes" =>
+        Map.new(assigns.config_axes, fn {name, axes} ->
+          {name, Map.new(axes, fn {axis, values} -> {axis, MapSet.to_list(values)} end)}
+        end),
+      "picks" => picks_to_lists(assigns.install_picks),
+      "answers" => assigns.extension_answers,
+      "settings" => assigns.settings_values,
+      "languages" => assigns.languages,
+      "language_urls" => assigns.language_urls
+    }
+  end
+
+  # A DRAFT IS THE CLIENT'S, so each value is taken only in the shape its step would accept and
+  # anything else keeps the fresh wizard's value. A password a reconnect's form recovery brought
+  # back is kept; the draft never carries one.
+  defp restore_draft(socket, draft) when is_map(draft) do
+    kept = strings(draft["config"], @kept_config)
+    config = Map.merge(socket.assigns.form.params, kept)
+    %{install_plugins: plugins, install_picks: picks, extension_fields: fields} = socket.assigns
+
+    socket
+    |> assign(password_again?: needs_password?(config) and Enum.any?(kept, &(elem(&1, 1) != "")))
+    |> assign(kit_channel: Map.get(@kit_channels, draft["kit_channel"], :stable))
+    |> assign(pending_selected: restored_names(draft["selected"]))
+    |> assign(config_axes: restored_axes(draft["config_axes"]))
+    |> assign(install_picks: restored_picks(plugins, picks, draft["picks"]))
+    |> assign(extension_answers: known_answers(fields, draft["answers"]))
+    |> assign(settings_values: strings(draft["settings"], @install_setting_keys))
+    |> assign(languages: restored_languages(draft["languages"]))
+    |> assign(language_urls: restored_url_mode(draft["language_urls"]))
+    |> assign_form(config)
+    |> resume(config)
+  end
+
+  defp restore_draft(socket, _no_draft), do: go(socket, :config)
+
+  # Back to the step the address names, as far as the answers reach: the first step's answers must
+  # pass its own checks, the password aside, to go further. The kits load again on the way; one
+  # step change, so one address.
+  defp resume(%{assigns: %{url_step: step}} = socket, config) when step in [:ui_kit, :settings] do
+    if config_ready?(config),
+      do: socket |> assign(config: config) |> load_bundle() |> resume_at(step),
+      else: go(socket, :config)
+  end
+
+  defp resume(socket, _config), do: go(socket, :config)
+
+  defp resume_at(socket, :settings), do: to_settings_step(socket)
+  defp resume_at(socket, :ui_kit), do: go(socket, :ui_kit)
+
+  defp config_ready?(config) do
+    Enum.all?(errors(config), fn {field, _error} ->
+      field in [:password, :password_confirmation]
+    end)
+  end
+
+  defp strings(map, keys) when is_map(map),
+    do: for({key, value} <- Map.take(map, keys), is_binary(value), into: %{}, do: {key, value})
+
+  defp strings(_absent, _keys), do: %{}
+
+  # Component names, kept until the kits are in to be checked against them.
+  defp restored_names(names) when is_list(names),
+    do: names |> Enum.filter(&is_binary/1) |> MapSet.new()
+
+  defp restored_names(_absent), do: MapSet.new()
+
+  defp restored_selection(nil, _catalog), do: MapSet.new()
+  defp restored_selection(names, catalog), do: MapSet.intersection(names, catalog.names)
+
+  # The catalogue narrows each component's axes to the ones it offers when it installs.
+  defp restored_axes(axes) when is_map(axes) do
+    for {name, by_axis} <- axes,
+        is_binary(name) and is_map(by_axis),
+        values = restored_axis_values(by_axis),
+        values != %{},
+        into: %{},
+        do: {name, values}
+  end
+
+  defp restored_axes(_absent), do: %{}
+
+  defp restored_axis_values(by_axis) do
+    for {axis, values} <- by_axis,
+        is_binary(axis) and is_list(values),
+        set = values |> Enum.filter(&is_binary/1) |> MapSet.new(),
+        MapSet.size(set) > 0,
+        into: %{},
+        do: {axis, set}
+  end
+
+  # Only parts a drawn plugin declares; a plugin the draft does not name keeps its defaults.
+  defp restored_picks(plugins, picks, saved) when is_map(saved) do
+    Map.new(plugins, fn plugin ->
+      case saved[plugin.key] do
+        ids when is_list(ids) ->
+          {plugin.key, MapSet.new(for part <- plugin.parts, part.id in ids, do: part.id)}
+
+        _absent ->
+          {plugin.key, Map.fetch!(picks, plugin.key)}
+      end
+    end)
+  end
+
+  defp restored_picks(_plugins, picks, _absent), do: picks
+
+  # The same codes `add_language/2` would accept, each once, or the fresh list.
+  defp restored_languages(codes) when is_list(codes) do
+    known = Languages.known()
+    codes = Enum.uniq(codes)
+
+    if Languages.valid?(codes) and Enum.all?(codes, &(&1 in known)),
+      do: codes,
+      else: Languages.default()
+  end
+
+  defp restored_languages(_absent), do: Languages.default()
+
+  defp restored_url_mode(mode) do
+    if mode in Languages.url_modes(), do: mode, else: hd(Languages.url_modes())
+  end
+
+  defp parts_assigns("install"), do: {:install_plugins, :install_picks}
+  defp parts_assigns("seed"), do: {:seed_plugins, :seed_picks}
 end

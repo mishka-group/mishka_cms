@@ -27,8 +27,11 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
   alias MishkaCmsCore.Runtime.Compilers.Helpers
   alias MishkaCmsCore.Runtime.States.{SettingsState, SiteState, WebRunTimeMetaDataState}
   alias MishkaCmsCore.Settings
+  alias MishkaCmsCoreWeb.ReturnTo
 
   require Ash.Query
+
+  @password "Password123!"
 
   setup context do
     dir = Path.join(System.tmp_dir!(), "starter_home_#{System.unique_integer([:positive])}")
@@ -103,7 +106,7 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
 
     [logo] = Ash.read!(Media, tenant: site.id, authorize?: false)
 
-    %{site: site, logo: logo}
+    %{site: site, logo: logo, layout: layout}
   end
 
   test "answers `/` with the layout's header and footer around the home page", %{site: site} do
@@ -174,6 +177,36 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
       assert html =~ ~r/<a href="\/auth"[^>]*>\s*Sign in\s*<\/a>/
       refute html =~ "site-user-menu"
       refute html =~ "site-sign-out"
+    end
+
+    # THE PAGE BEING VIEWED TRAVELS AS A SIGNED `return_to` (`ReturnTo.returning/2`), so a visitor
+    # who signs in from the header lands back on the page they were reading.
+    test "Sign in on another page brings the visitor back to it once signed in", %{
+      site: site,
+      layout: layout
+    } do
+      seed_auth_pages!(site)
+      routed_page!(site, layout, "/buy/x")
+      user = create_user!(site_id: site.id)
+
+      {:ok, _view, html} = live(on_site(), "/buy/x")
+
+      [href] =
+        Regex.run(~r/<a href="([^"]*)"[^>]*>\s*Sign in\s*<\/a>/, html, capture: :all_but_first)
+
+      sign_in = String.replace(href, "&amp;", "&")
+      assert %URI{path: "/auth", query: query} = URI.parse(sign_in)
+      assert %{"return_to" => token} = URI.decode_query(query)
+      assert ReturnTo.verify(@endpoint, token) == "/buy/x"
+
+      {:ok, view, _html} = live(on_site(), sign_in)
+
+      {:error, {:redirect, %{to: handoff}}} =
+        view
+        |> form("#auth-sign-in-form", user: %{email: to_string(user.email), password: @password})
+        |> render_submit()
+
+      assert on_site() |> get(handoff) |> redirected_to() == "/buy/x"
     end
 
     test "shows a signed-in visitor their email in place of Sign in", %{site: site} do
@@ -596,6 +629,38 @@ defmodule MishkaCmsWeb.StarterHomePageTest do
       {:ok, nil} -> create_permission!(name: name)
       {:ok, permission} -> permission
     end
+  end
+
+  # A page of the site at `path` in the starter layout, in the routing table the way a boot puts it,
+  # and gone from it when the test exits.
+  defp routed_page!(site, layout, path) do
+    page =
+      create_page!(
+        site_id: site.id,
+        path: path,
+        layout_id: layout.id,
+        template: ~S(<div id="page-body">page</div>)
+      )
+
+    :ok =
+      WebRunTimeMetaDataState.save(%{
+        id: page.id,
+        site: site.name,
+        path: page.path,
+        title: page.name,
+        created_at: DateTime.utc_now(),
+        section: "Page",
+        priority: 0
+      })
+
+    on_exit(fn ->
+      WebRunTimeMetaDataState.delete(page.id)
+      module = Helpers.module_name(page.id, site.name, "Page")
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    page
   end
 
   defp with_site_host(conn) do

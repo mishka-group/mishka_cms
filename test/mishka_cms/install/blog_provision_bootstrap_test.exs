@@ -8,7 +8,7 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
 
   `MishkaCmsCore.Install.Bootstrap` knows nothing about this extension — its `:components` step
   offers Chelekom and stops there. What puts blog components in that site's palette is its
-  `:extensions` step, firing `installer:extension:install` for each key it was given, and
+  "pages" part on `installer:seed`, chosen in `:parts`, firing `installer:extension:install`, and
   `MishkaBlog.Plugins.Installer` answering to its own.
 
   Nothing short of running the installer proves the two meet: the plugin is written against an
@@ -22,7 +22,7 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
 
   alias MishkaBlog.Plugins.Installer
   alias MishkaBlog.Provision
-  alias MishkaCmsCore.Install.Bootstrap
+  alias MishkaCmsCore.Install.{Bootstrap, Seeds}
   alias MishkaCmsCore.Runtime.Component
   alias MishkaInstaller.Event.EventHandler
 
@@ -70,6 +70,19 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   # asked: `MishkaCmsCore.Install.StarterContent`.
   @starter ["site-footer", "site-header"]
 
+  # EVERY OTHER PLUGIN IS NAMED, WITH NO PART. A choice that does not name a plugin runs the parts it
+  # starts with ticked, and every extension's pages start ticked, so a choice of one extension alone
+  # would install every other extension the host links as well.
+  defp only(key, ids) do
+    others =
+      for %{key: other} <- Seeds.plugins(:prod),
+          other != Seeds.core_key(),
+          into: %{},
+          do: {other, []}
+
+    Map.put(others, key, ids)
+  end
+
   defp stored_names(provision) do
     names = Enum.map(provision.manifest().permissions, &elem(&1, 0))
 
@@ -91,7 +104,8 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   end
 
   test "the first site gets the blog when the operator ticked it" do
-    assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :extensions, ["mishka_blog"]))
+    assert {:ok, %{site: site}} =
+             Bootstrap.run(Map.put(@params, :parts, only("mishka_blog", ["pages"])))
 
     installed = components(site)
 
@@ -106,7 +120,7 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   # nothing of the extension, and the extension's own menu is where they change their mind — see
   # `MishkaCmsCore.Install.Extensions`.
   test "and gets none of it when they did not" do
-    assert {:ok, %{site: site}} = Bootstrap.run(@params)
+    assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :parts, only("mishka_blog", [])))
 
     assert components(site) == @starter
     assert stored_names(Provision) == []
@@ -115,7 +129,8 @@ defmodule MishkaCms.Install.BlogProvisionBootstrapTest do
   # AN EXTENSION NOBODY SHIPS IS NOT A FAILED INSTALL. The step logs it and carries on, because an
   # operator left without an admin at all over a key that answered nothing is the worse outcome.
   test "an unknown key does not stop the install" do
-    assert {:ok, %{site: site}} = Bootstrap.run(Map.put(@params, :extensions, ["mishka_nothing"]))
+    assert {:ok, %{site: site}} =
+             Bootstrap.run(Map.put(@params, :parts, only("mishka_nothing", ["pages"])))
 
     assert components(site) == @starter
     assert MishkaCmsCore.Install.installed?()

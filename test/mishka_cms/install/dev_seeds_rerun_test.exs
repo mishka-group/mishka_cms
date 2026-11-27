@@ -17,17 +17,27 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   pass that and fill the database a little more on every run.
 
   THE FIRST RUN IS MADE ONCE FOR THE MODULE, in `setup_all`: every test below starts from the
-  database a developer has after one `Seeds.run([])`, and it is the second run that each one is
+  database a developer has after one core-only `Seeds.run/3`, and it is the second run that each one is
   about. A test that edits the seeded rows or runs the seeds again is put back by
   `MishkaCms.DataCase.setup_module_sandbox/0`, which gives each test a savepoint to roll back to.
   """
   use MishkaCms.DataCase, async: false
 
   alias MishkaCmsCore.Accounts.User
-  alias MishkaCmsCore.Dev.Seeds
+  alias MishkaCmsCore.Install.Seeds
   alias MishkaCmsCore.Runtime.{Component, ErrorPage, JsHook, Layout, Media, MediaCategory, Page}
 
   require Ash.Query
+
+  # THE CORE'S DEV PARTS ALONE: every other plugin is given no part, the core's components stay
+  # ticked as they start.
+  defp run_core! do
+    picks =
+      for %{key: key} <- Seeds.plugins(:dev), key != Seeds.core_key(), into: %{}, do: {key, []}
+
+    {:ok, core} = Seeds.run(:dev, picks)
+    core
+  end
 
   @counted [Layout, Page, Component, JsHook, ErrorPage, Media, MediaCategory]
 
@@ -36,7 +46,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   # what goes is named, because that directory is the developer's own server's uploads.
   setup_all do
     context = MishkaCms.DataCase.setup_module_sandbox()
-    core = Seeds.run([])
+    core = run_core!()
 
     on_exit(fn ->
       Enum.each(core.sites, &File.rm_rf!(Path.join(uploads_directory(), &1.id)))
@@ -52,7 +62,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
   test "a second run of the core seed adds nothing, changes nothing, and says the library is complete",
        %{core: core} do
     before = census(core.sites)
-    said = announced(fn -> Seeds.run([]) end)
+    said = announced(fn -> run_core!() end)
 
     assert census(core.sites) == before
     assert said =~ "Media library already complete"
@@ -76,7 +86,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
     edit!(page, site.id, %{description: "Rewritten by the admin"})
     edit!(component, site.id, %{description: "Rewritten by the admin"})
 
-    Seeds.run([])
+    run_core!()
 
     assert one(Page, site.id, &(&1.id == page.id)).description == "Rewritten by the admin"
 
@@ -101,7 +111,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
     edit!(moved, site.id, %{path: "/:lang/about-us"})
 
     before = census(core.sites)
-    said = announced(fn -> Seeds.run([]) end)
+    said = announced(fn -> run_core!() end)
 
     assert one(Page, site.id, &(&1.id == moved.id)).path == "/:lang/about-us"
 
@@ -127,7 +137,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
     # would add `about-3`, `about-4` and a row per reseed for ever — which is the one thing this
     # file counts everything to catch.
     renamed = census(core.sites)
-    said_again = announced(fn -> Seeds.run([]) end)
+    said_again = announced(fn -> run_core!() end)
 
     assert census(core.sites) == renamed
     refute said_again =~ "Named /:lang/about"
@@ -148,7 +158,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
     tenant_account!("master@example.com", site.id)
 
     before = census(core.sites)
-    Seeds.run([])
+    run_core!()
 
     assert census(core.sites) == before
 
@@ -202,7 +212,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
     edit!(page, site.id, %{error_pages: kept})
     pages = length(all(ErrorPage))
 
-    Seeds.run([])
+    run_core!()
 
     reseeded = one(ErrorPage, site.id, &(&1.id == page.id))
 
@@ -229,7 +239,7 @@ defmodule MishkaCms.Install.DevSeedsRerunTest do
     crowd!(site.id, "console-logger", length(hooks))
 
     before = census(core.sites)
-    Seeds.run([])
+    run_core!()
 
     assert census(core.sites) == before
   end

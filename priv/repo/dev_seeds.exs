@@ -15,25 +15,10 @@ IO.puts("====================================================")
 IO.puts("  MishkaCMS Dev Seeds — realistic production data")
 IO.puts("====================================================\n")
 
-# Step 1: Seed core foundation data (sites, users, permissions, components, layouts, etc.)
-core = MishkaCmsCore.Dev.Seeds.dev_seed()
-
-# Step 2: Seed extension data per site
-Enum.each(core.sites, fn site ->
-  IO.puts("\n>> Processing site: #{site.name} (#{String.slice(site.id, 0, 8)}...)")
-
-  all_users = core.users.master ++ Map.get(core.users.tenant, site.id, [])
-
-  # Blog extension
-  if Code.ensure_loaded?(MishkaBlog.Dev.Seeds) do
-    MishkaBlog.Dev.Seeds.dev_seed(site.id, all_users)
-  end
-
-  # Document extension
-  if Code.ensure_loaded?(MishkaDocument.Dev.Seeds) do
-    MishkaDocument.Dev.Seeds.dev_seed(site.id, all_users)
-  end
-end)
+# Every dev part declared on core's `installer:seed` event: the core's own (sites, users,
+# permissions, components, layouts, …), then each extension's, on every site — see
+# `MishkaCmsCore.Install.Seeds`.
+MishkaCmsCore.Install.Seeds.run_all(:normal)
 
 IO.puts("\n====================================================")
 IO.puts("  Dev seeds complete!")

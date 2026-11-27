@@ -35,7 +35,10 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
 
   # EVERY RUN WRITES THE STARTER, and its logo is a file of the master site's media library: this
   # test's own folder, not `priv/static`.
+  #
+  # THE CORE'S PARTS ALONE: every extension's pages start ticked, and these tests are about the core.
   setup do
+    :ok = MishkaCms.Test.SeedProbe.extensions_off!()
     :persistent_term.erase(:mishka_installed)
     dir = Path.join(System.tmp_dir!(), "bootstrap_media_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -200,10 +203,10 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
     test "is one of the ordered phases, before the compile" do
       ids = Bootstrap.steps() |> Enum.map(&elem(&1, 0))
 
-      assert :starter_content in ids
+      assert {"mishka_cms_core", "starter_content"} in ids
 
-      assert Enum.find_index(ids, &(&1 == :starter_content)) <
-               Enum.find_index(ids, &(&1 == :compile)),
+      assert Enum.find_index(ids, &(&1 == {"mishka_cms_core", "starter_content"})) <
+               Enum.find_index(ids, &(&1 == {"mishka_cms_core", "compile"})),
              "content has to be written before the step that compiles it"
     end
 
@@ -221,7 +224,7 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
 
       # ONE PAGE: about, contact and privacy are the dev seeds', not a first install's.
       assert starter_pages(site) |> Enum.map(& &1.path) == ["/:lang"]
-      assert_received {:starter_content, :log, "1 page, 2 components"}
+      assert_received {{"mishka_cms_core", "starter_content"}, :log, "1 page, 2 components"}
 
       assert names(Component, site) == ["site-footer", "site-header"]
       assert names(Layout, site) == ["auth", "site-main"]
@@ -298,11 +301,11 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
 
     test "runs once the site exists and before any page is written" do
       ids = Bootstrap.steps() |> Enum.map(&elem(&1, 0))
-      at = fn id -> Enum.find_index(ids, &(&1 == id)) end
+      at = fn id -> Enum.find_index(ids, &(&1 == {"mishka_cms_core", id})) end
 
-      assert at.(:site) < at.(:languages)
-      assert at.(:languages) < at.(:starter_content)
-      assert at.(:languages) < at.(:extensions)
+      assert at.("site") < at.("languages")
+      assert at.("languages") < at.("starter_content")
+      assert at.("languages") < at.("compile")
     end
 
     test "saves the chosen languages as the new site's own list, the first as its primary" do
@@ -317,7 +320,7 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
       assert Settings.get_own("site.languages", nil, site.id) == ["en", "fa"]
       assert Languages.site(site.id) == ["en", "fa"]
       assert Languages.primary(site.id) == "en"
-      assert_received {:progress, {:languages, :log, "English and Persian"}}
+      assert_received {:progress, {{"mishka_cms_core", "languages"}, :log, "English and Persian"}}
     end
 
     test "leaves the site reading the global list when given none" do
@@ -388,11 +391,11 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
     test "is one of the ordered phases, after the starter content and before the compile" do
       ids = Bootstrap.steps() |> Enum.map(&elem(&1, 0))
 
-      assert Enum.find_index(ids, &(&1 == :starter_content)) <
-               Enum.find_index(ids, &(&1 == :auth_pages))
+      assert Enum.find_index(ids, &(&1 == {"mishka_cms_core", "starter_content"})) <
+               Enum.find_index(ids, &(&1 == {"mishka_cms_core", "auth_pages"}))
 
-      assert Enum.find_index(ids, &(&1 == :auth_pages)) <
-               Enum.find_index(ids, &(&1 == :compile))
+      assert Enum.find_index(ids, &(&1 == {"mishka_cms_core", "auth_pages"})) <
+               Enum.find_index(ids, &(&1 == {"mishka_cms_core", "compile"}))
     end
 
     test "writes the sign-in layout and pages, and says so" do
@@ -402,8 +405,11 @@ defmodule MishkaCmsCore.Install.BootstrapTest do
 
       assert names(Layout, site) == ["auth", "site-main"]
       assert length(auth_pages(site)) == 8
-      assert_received {:auth_pages, :log, "8 sign-in pages, 0 translated words"}
-      assert_received {:auth_pages, :done, nil}
+
+      assert_received {{"mishka_cms_core", "auth_pages"}, :log,
+                       "8 sign-in pages, 0 translated words"}
+
+      assert_received {{"mishka_cms_core", "auth_pages"}, :done, nil}
     end
 
     # IT WRITES THEM ITSELF, so the site it creates enqueues no job to write them again.

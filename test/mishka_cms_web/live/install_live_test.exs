@@ -52,7 +52,10 @@ defmodule MishkaCmsWeb.InstallLiveTest do
   # Chelekom's real styled bundle. Nothing ships one; this project keeps a copy for its tests.
   @chelekom Path.expand("../../fixtures/cms_ui_kits/chelekom.json", __DIR__)
 
+  # THE CORE'S PARTS AND THE PROBE'S ALONE: every extension's pages start ticked, and the wizard
+  # is tested with the probe standing in for an extension (`MishkaCms.Test.SeedProbe`).
   setup do
+    :ok = MishkaCms.Test.SeedProbe.extensions_off!()
     :persistent_term.put(:mishka_installed, false)
     official = Application.fetch_env!(:mishka_cms_core, :official_ui_kits)
     Application.put_env(:mishka_cms_core, :official_ui_kits, @offline_kits)
@@ -317,6 +320,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert html =~ "<style"
       assert html =~ ".inst-aside"
       refute html =~ "@tailwindcss/browser"
+
       # The installer is the first page a user ever sees — it renders no Phoenix flash at all.
       refute html =~ "flash-group"
     end
@@ -577,6 +581,12 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert has_element?(view, "#uikit-next[disabled]")
       refute has_element?(view, "#rail-step-0.can")
 
+      # THE HELD BUTTON SAYS WHY: busy, with a spinner and a label of its own, not just grey.
+      assert has_element?(
+               view,
+               ~s(#uikit-next.is-waiting[aria-busy="true"][data-loading="Loading components…"])
+             )
+
       # A version cannot change under a running download.
       render_hook(view, "kit_channel", %{"channel" => "master"})
       assert has_element?(view, "#uikit-channel-stable.on")
@@ -587,6 +597,9 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       refute has_element?(view, "#uikit-loading")
       refute has_element?(view, "#uikit-sections[inert]")
       refute has_element?(view, "#uikit-next[disabled]")
+      refute has_element?(view, "#uikit-next.is-waiting")
+      refute has_element?(view, "#uikit-next[data-loading]")
+      assert has_element?(view, ~s(#uikit-next[aria-busy="false"]), "Next: settings")
       refute has_element?(view, "#uikit-channel-stable[disabled]")
       assert has_element?(view, "#uikit-channel-stable.on")
       assert has_element?(view, "#rail-step-0.can")
@@ -925,6 +938,32 @@ defmodule MishkaCmsWeb.InstallLiveTest do
              )
     end
 
+    # WHAT WAS TYPED COMES BACK. The step used to rebuild its form from the defaults on every visit,
+    # so an edited title turned back into the site name after Back then Next.
+    test "an edited title survives Back then Next, an untouched one follows the site name", %{
+      conn: conn
+    } do
+      view = to_settings(conn)
+
+      view
+      |> form("#install-settings-form", settings: %{"site.title" => "Acme Docs"})
+      |> render_change()
+
+      view |> element("#settings-back") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      assert has_element?(view, "#install-set-site-title[value='Acme Docs']")
+      assert has_element?(view, "#install-set-mailer-from[value='noreply@localhost.test']")
+
+      # The from address was never edited, so a new domain on the first step still reaches it.
+      view |> element("#rail-step-0") |> render_click()
+      view |> form("#install-form", install: %{@valid | "host" => "acme.com"}) |> render_submit()
+      view |> element("#uikit-next") |> render_click()
+
+      assert has_element?(view, "#install-set-site-title[value='Acme Docs']")
+      assert has_element?(view, "#install-set-mailer-from[value='noreply@acme.com']")
+    end
+
     # THE DOCUMENTED LOCAL DOMAIN. `noreply@localhost` has no dot, so the step offered an address
     # its own Install button refused, and nobody could finish without typing another one.
     test "a localhost install's pre-filled from address installs as offered", %{conn: conn} do
@@ -966,6 +1005,227 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       assert html =~ "must be a valid email"
       assert has_element?(view, "#installer-settings")
       refute Install.installed?()
+    end
+  end
+
+  # A RELOAD CARRIES ON WHERE IT STOPPED. The step is in the address and the answers in the tab's
+  # `sessionStorage`, through the `InstallDraft` hook: these tests play the hook, handing the page
+  # back what it pushed, as the browser would after a reload. The password is never in it.
+  describe "a reload" do
+    # The answers the page pushed last, as the hook would have kept them.
+    defp kept_draft(view) do
+      render(view)
+      drafts = for {:push_event, "install-draft", %{draft: draft}} <- pushed(view), do: draft
+      List.last(drafts)
+    end
+
+    # Every event the page pushed so far, in order. Call `render/1` first, so they have arrived.
+    defp pushed(%{proxy: {ref, _topic, _pid}}) do
+      fn ->
+        receive do
+          {^ref, {:push_event, event, payload}} -> {:push_event, event, payload}
+        after
+          0 -> nil
+        end
+      end
+      |> Stream.repeatedly()
+      |> Enum.take_while(& &1)
+    end
+
+    # A page as the browser opens it: the hook hands back what the tab holds as soon as it mounts.
+    defp reload(conn, path, draft) do
+      {:ok, view, _html} = live(conn, path)
+      render_hook(view, "restore_draft", %{"draft" => draft})
+      view
+    end
+
+    defp to_kept_ui_kit(conn) do
+      view = reload(conn, "/install", nil)
+      view |> form("#install-form", install: @valid) |> render_submit()
+      render_async(view, 15_000)
+      view |> element("#uikit-toggle") |> render_click()
+      view
+    end
+
+    test "every step names itself in the address", %{conn: conn} do
+      view = reload(conn, "/install", nil)
+      assert_patch(view, "/install?step=config")
+
+      view |> form("#install-form", install: @valid) |> render_submit()
+      assert_patch(view, "/install?step=components")
+      render_async(view, 15_000)
+
+      view |> element("#uikit-next") |> render_click()
+      assert_patch(view, "/install?step=settings")
+
+      view |> element("#settings-back") |> render_click()
+      assert_patch(view, "/install?step=components")
+    end
+
+    test "the kept answers hold everything typed but the password", %{conn: conn} do
+      view = reload(conn, "/install", nil)
+      view |> form("#install-form", install: @valid) |> render_change()
+
+      assert kept_draft(view)["config"] == Map.drop(@valid, ["password", "password_confirmation"])
+
+      view |> form("#install-form", install: @valid) |> render_submit()
+      render_async(view, 15_000)
+      view |> element("#uikit-toggle") |> render_click()
+      view |> element("#toggle-chelekom-button") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      draft = kept_draft(view)
+      assert "chelekom-button" in draft["selected"]
+      refute inspect(draft) =~ @valid["password"]
+    end
+
+    test "before the page has read the tab's answers back, it keeps nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/install")
+      view |> form("#install-form", install: @valid) |> render_change()
+
+      assert pushed(view) == []
+    end
+
+    test "a reload on the components step comes back to it, the answers and picks kept", %{
+      conn: conn
+    } do
+      view = to_kept_ui_kit(conn)
+      view |> element("#toggle-chelekom-button") |> render_click()
+      draft = kept_draft(view)
+
+      view = reload(conn, "/install?step=components", draft)
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#installer-uikit")
+      view |> element("#uikit-toggle") |> render_click()
+      assert has_element?(view, "#toggle-chelekom-button[checked]")
+      refute Install.installed?()
+
+      # The first step has its answers, and asks for the password again.
+      view |> element("#uikit-back") |> render_click()
+
+      assert has_element?(
+               view,
+               "#install-form input[name='install[email]'][value='owner@example.com']"
+             )
+
+      assert has_element?(view, "#install-form input[name='install[host]'][value='localhost']")
+      assert has_element?(view, "[data-testid=install-password-note]")
+    end
+
+    test "a reload on the settings step keeps what was typed and asks only for the password", %{
+      conn: conn
+    } do
+      own_media_dir!()
+      view = to_kept_ui_kit(conn)
+      view |> element("#toggle-chelekom-button") |> render_click()
+      view |> element("#uikit-next") |> render_click()
+
+      view
+      |> form("#install-settings-form", settings: %{"site.title" => "Acme Docs"})
+      |> render_change()
+
+      draft = kept_draft(view)
+
+      view = reload(conn, "/install?step=settings", draft)
+      render_async(view, 15_000)
+
+      assert has_element?(view, "#installer-settings")
+      assert has_element?(view, "#install-set-site-title[value='Acme Docs']")
+      assert has_element?(view, "[data-testid=install-password-note]")
+      assert has_element?(view, "[data-testid=install-set-password]")
+
+      # Without it nothing installs.
+      view |> form("#install-settings-form") |> render_submit()
+      assert has_element?(view, "#install-password-again", "is required")
+      refute has_element?(view, "#install-progress")
+      refute Install.installed?()
+
+      view
+      |> form("#install-settings-form",
+        settings: %{"password" => "Another123!", "password_confirmation" => "Another123!"}
+      )
+      |> render_submit()
+
+      assert_push_event(view, "install-draft", %{draft: nil})
+      render_async(view, 15_000)
+      assert has_element?(view, "#install-complete")
+
+      assert [user] = User |> Ash.Query.filter(is_nil(site_id)) |> Ash.read!(authorize?: false)
+      assert to_string(user.email) == "owner@example.com"
+      assert Bcrypt.verify_pass("Another123!", user.hashed_password)
+      assert Settings.get("site.title") == "Acme Docs"
+      refute Settings.get("password")
+    end
+
+    test "while the kits load again, Install waits and says so", %{conn: conn} do
+      test = self()
+
+      github_releases!([kit_release("v1.9", false, ["chelekom.json"])],
+        download: fn conn ->
+          send(test, {:fetching, self()})
+          receive do: (:go -> :ok)
+          named_bundle(conn)
+        end
+      )
+
+      view = reload(conn, "/install?step=settings", %{"config" => Map.drop(@valid, ["password"])})
+      # credo:disable-for-next-line Jump.CredoChecks.AssertReceiveTimeout
+      assert_receive {:fetching, download}, 5_000
+
+      assert has_element?(
+               view,
+               ~s(#install-settings-submit.is-waiting[disabled][data-loading="Loading components…"])
+             )
+
+      send(download, :go)
+      render_async(view, 15_000)
+
+      refute has_element?(view, "#install-settings-submit[disabled]")
+      assert has_element?(view, ~s(#install-settings-submit[data-loading="Installing…"]))
+    end
+
+    test "a draft is checked like the steps check what is typed", %{conn: conn} do
+      draft = %{
+        "config" => %{"email" => "not-an-email", "password" => "Leaked123!", "host" => 7},
+        "kit_channel" => "nightly",
+        "languages" => ["zz-not-a-code", 1],
+        "language_urls" => "everywhere",
+        "picks" => "all"
+      }
+
+      view = reload(conn, "/install?step=settings", draft)
+
+      # The first step's answers do not pass its checks, so the wizard stays there.
+      assert has_element?(view, "#install-form")
+      assert_patch(view, "/install?step=config")
+
+      assert has_element?(
+               view,
+               "#install-form input[name='install[email]'][value='not-an-email']"
+             )
+
+      refute render(view) =~ "Leaked123!"
+
+      saved = kept_draft(view)
+      assert saved["config"] == %{"email" => "not-an-email"}
+      assert saved["kit_channel"] == "stable"
+      assert saved["languages"] == Languages.default()
+      assert saved["language_urls"] == hd(Languages.url_modes())
+    end
+
+    test "a reload of an untouched wizard asks for nothing again", %{conn: conn} do
+      view = reload(conn, "/install?step=components", %{"config" => %{"email" => ""}})
+
+      assert has_element?(view, "#install-form")
+      refute has_element?(view, "[data-testid=install-password-note]")
+    end
+
+    test "a second hand-back after the wizard moved on changes nothing", %{conn: conn} do
+      view = to_ui_kit(conn)
+      render_hook(view, "restore_draft", %{"draft" => %{"config" => %{"email" => "x@y.test"}}})
+
+      assert has_element?(view, "#installer-uikit")
     end
   end
 
@@ -1156,7 +1416,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       view |> element("#install-language-primary-fa") |> render_click()
       view |> form("#install-settings-form") |> render_submit()
 
-      assert has_element?(view, "#step-languages")
+      assert has_element?(view, "#step-mishka_cms_core-languages")
       render_async(view, 15_000)
       assert has_element?(view, "#install-complete")
 
@@ -1233,8 +1493,8 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
       # The install runs asynchronously behind a live progress checklist.
       assert has_element?(view, "#install-progress")
-      assert has_element?(view, "#step-permissions")
-      assert has_element?(view, "#step-components")
+      assert has_element?(view, "#step-mishka_cms_core-permissions")
+      assert has_element?(view, "#step-mishka_cms_core-components")
       render_async(view, 15_000)
 
       # Every phase finished — the all-green checklist stays up with a Continue CTA, THEN the done screen.
@@ -1305,10 +1565,37 @@ defmodule MishkaCmsWeb.InstallLiveTest do
     end
   end
 
+  # EVERY CHOICE IS A PART ON `installer:seed`. The core's own plugin and the probe are registered
+  # by hand, so the lists do not depend on what the boot got to register before the first test.
+  defp register_seed_plugins!(probe_parts) do
+    {:ok, _registered} = MishkaCmsCore.Install.CoreSeed.register()
+    {:ok, _started} = MishkaCmsCore.Install.CoreSeed.start()
+
+    MishkaCmsCore.Test.Installer.register!(MishkaCms.Test.SeedProbe, "installer:seed", %{
+      extension: :mishka_seed_probe,
+      priority: 90,
+      extra: probe_parts
+    })
+  end
+
+  @probe_parts [
+    %{id: "pages", label: "Probe pages", summary: "The blog", envs: [:dev, :prod], default: true},
+    %{
+      id: "samples",
+      label: "Probe samples",
+      summary: "Nothing written",
+      envs: [:dev],
+      default: true
+    },
+    %{id: "extra", label: "Probe extra", envs: [:dev, :prod]}
+  ]
+
   describe "dev sample-data step" do
     setup do
       Application.put_env(:mishka_cms_core, :env_dev?, true)
       on_exit(fn -> Application.delete_env(:mishka_cms_core, :env_dev?) end)
+
+      register_seed_plugins!(@probe_parts)
       :ok
     end
 
@@ -1318,40 +1605,72 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       refute has_element?(view, "#install-dev-seeds")
     end
 
-    test "in dev, offers the dev-seed entry and its extension categories", %{conn: conn} do
+    test "in dev, lists every plugin's dev parts, the required ones locked on", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/install")
-      assert has_element?(view, "#install-dev-seeds")
-
       view |> element("#install-dev-seeds") |> render_click()
       assert has_element?(view, "#installer-seeds")
 
-      # The extension seeds, all checked by default. Every UI-kit component is always installed, so
-      # there is nothing to choose for the kits.
-      refute has_element?(view, "#seed-chelekom")
-      assert has_element?(view, "#seed-blog input[checked]")
-      assert has_element?(view, "#seed-document input[checked]")
+      core = "#seed-plugin-mishka_cms_core"
+      assert has_element?(view, core, "Mishka CMS")
 
-      # Extensions are labelled by their name, not "Blog content".
-      html = render(view)
-      assert html =~ "Mishka Blog"
-      assert html =~ "Mishka Document"
+      for part <- ~w(permissions master_user site languages starter_content auth_pages samples) do
+        assert has_element?(
+                 view,
+                 ~s([data-testid="seed-part-mishka_cms_core-#{part}"][checked][disabled])
+               )
+      end
+
+      # The components start ticked and can be unticked; the settings are the production form's.
+      assert has_element?(view, ~s([data-testid="seed-part-mishka_cms_core-components"][checked]))
+
+      refute has_element?(
+               view,
+               ~s([data-testid="seed-part-mishka_cms_core-components"][disabled])
+             )
+
+      refute has_element?(view, ~s([data-testid="seed-part-mishka_cms_core-settings"]))
+
+      # A default part starts ticked, any other unticked; each is named with what it writes.
+      assert has_element?(view, ~s([data-testid="seed-part-mishka_seed_probe-samples"][checked]))
+      refute has_element?(view, ~s([data-testid="seed-part-mishka_seed_probe-extra"][checked]))
+      assert has_element?(view, "#seed-part-mishka_seed_probe-samples .ex", "Nothing written")
     end
 
-    test "loads the core sample data behind a live checklist, then the done screen", %{conn: conn} do
+    test "a locked part cannot be unticked", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/install")
       view |> element("#install-dev-seeds") |> render_click()
 
-      # Trim to the core only (deselect the extension seeds) for a fast test.
-      view |> element("#seed-blog input") |> render_click()
-      view |> element("#seed-document input") |> render_click()
+      render_click(view, "toggle_part", %{
+        "scope" => "seed",
+        "key" => "mishka_cms_core",
+        "part" => "samples"
+      })
 
+      assert has_element?(
+               view,
+               ~s([data-testid="seed-part-mishka_cms_core-samples"][checked][disabled])
+             )
+    end
+
+    test "loads the core and the ticked parts behind a live checklist, then the done screen", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(conn, "/install")
+      view |> element("#install-dev-seeds") |> render_click()
+
+      # Only the probe's samples, for a fast test: its pages part would install the blog.
+      view |> element(~s([data-testid="seed-part-mishka_seed_probe-pages"])) |> render_click()
       view |> element("#seeds-run") |> render_click()
 
-      # Runs async behind the same checklist the real install uses.
+      # Runs async behind the same checklist the real install uses, one row per part it runs.
       assert has_element?(view, "#install-progress")
-      assert has_element?(view, "#step-core")
-      render_async(view, 30_000)
+      assert has_element?(view, "#step-mishka_cms_core-samples")
+      assert has_element?(view, "#step-mishka_seed_probe-samples")
+      refute has_element?(view, "#step-mishka_seed_probe-pages")
+      refute has_element?(view, "#step-mishka_seed_probe-extra")
+      render_async(view, 60_000)
 
+      refute has_element?(view, "#install-error")
       assert has_element?(view, "#install-complete")
       view |> element("#install-finish") |> render_click()
 
@@ -1364,7 +1683,7 @@ defmodule MishkaCmsWeb.InstallLiveTest do
 
   # THE PICKER IS THE INSTALLER'S OWN REGISTRY DRAWN. Nothing in the wizard names an extension, so
   # these register a plugin the way a real one registers itself and assert the screen follows.
-  describe "the extensions step" do
+  describe "the parts list of the production install" do
     setup do
       {:ok, _registered} = MishkaBlog.Plugins.Installer.register()
 
@@ -1375,23 +1694,39 @@ defmodule MishkaCmsWeb.InstallLiveTest do
           false
         )
 
+      register_seed_plugins!(@probe_parts)
       :ok
     end
 
-    test "offers every registered extension, with the label the plugin declared", %{conn: conn} do
+    test "offers every plugin's production parts, the core's required ones locked", %{conn: conn} do
       view = to_ui_kit(conn)
 
-      assert has_element?(view, "#install-extensions")
-      assert has_element?(view, "#extension-mishka_blog")
-      assert render(view) =~ "Blog"
+      assert has_element?(view, "#install-parts")
+      assert has_element?(view, "#install-plugin-mishka_cms_core", "Mishka CMS")
+
+      assert has_element?(
+               view,
+               ~s([data-testid="install-part-mishka_cms_core-settings"][checked][disabled])
+             )
+
+      assert has_element?(
+               view,
+               ~s([data-testid="install-part-mishka_cms_core-components"][checked])
+             )
+
+      assert has_element?(view, ~s([data-testid="install-part-mishka_seed_probe-pages"][checked]))
+      refute has_element?(view, ~s([data-testid="install-part-mishka_seed_probe-extra"][checked]))
+
+      # A dev part is never offered to a real install.
+      refute has_element?(view, ~s([data-testid="install-part-mishka_cms_core-samples"]))
+      refute has_element?(view, ~s([data-testid="install-part-mishka_seed_probe-samples"]))
     end
 
-    test "installs the one that was ticked", %{conn: conn} do
+    test "installs the ticked extension part through the extension's own install", %{conn: conn} do
       view = to_ui_kit(conn)
 
       view |> element("#uikit-clear-all") |> render_click()
       view |> element("#toggle-chelekom-button") |> render_click()
-      view |> element("#toggle-extension-mishka_blog") |> render_click()
       view |> element("#uikit-next") |> render_click()
 
       view
@@ -1400,15 +1735,23 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       )
       |> render_submit()
 
+      assert has_element?(view, "#step-mishka_seed_probe-pages")
+      refute has_element?(view, "#step-mishka_seed_probe-extra")
       render_async(view, 30_000)
 
       assert has_element?(view, "#install-complete")
       assert "blog-post-list" in installed_components()
+
+      # RECORDED AS SET UP, so the blog's menu opens on its dashboard rather than its installer.
+      [site] = Site |> Ash.read!(authorize?: false)
+      assert MishkaCmsCore.Install.Extensions.installed?(site.id, :mishka_blog)
     end
 
-    # TICKING NOTHING IS AN ANSWER, and the step still runs — it just has nothing to install.
-    test "installs none of it when none was ticked", %{conn: conn} do
-      view = to_settings(conn)
+    # UNTICKING IS AN ANSWER, and the install still runs — it just has nothing of it to install.
+    test "installs none of it when it was unticked", %{conn: conn} do
+      view = to_ui_kit(conn)
+      view |> element(~s([data-testid="install-part-mishka_seed_probe-pages"])) |> render_click()
+      view |> element("#uikit-next") |> render_click()
 
       view
       |> form("#install-settings-form",
@@ -1416,10 +1759,185 @@ defmodule MishkaCmsWeb.InstallLiveTest do
       )
       |> render_submit()
 
+      refute has_element?(view, "#step-mishka_seed_probe-pages")
       render_async(view, 30_000)
 
       assert has_element?(view, "#install-complete")
       refute "blog-post-list" in installed_components()
+    end
+  end
+
+  # EACH PLUGIN IS ONE CLOSED ROW that counts what it will run, opened to change its parts.
+  describe "the plugin rows of the parts list" do
+    setup do
+      register_seed_plugins!(@probe_parts)
+      :ok
+    end
+
+    test "start closed and open and close on their toggle, staying open as parts are ticked", %{
+      conn: conn
+    } do
+      view = to_ui_kit(conn)
+
+      for key <- ~w(mishka_cms_core mishka_seed_probe) do
+        assert has_element?(view, ~s(#install-plugin-toggle-#{key}[aria-expanded="false"]))
+        assert has_element?(view, "#install-plugin-parts-#{key}[hidden]")
+      end
+
+      view |> element("#install-plugin-toggle-mishka_seed_probe") |> render_click()
+
+      assert has_element?(
+               view,
+               ~s(#install-plugin-toggle-mishka_seed_probe[aria-expanded="true"])
+             )
+
+      refute has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#install-plugin-parts-mishka_cms_core[hidden]")
+
+      view |> element(~s([data-testid="install-part-mishka_seed_probe-extra"])) |> render_click()
+      refute has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+
+      view |> element("#install-plugin-toggle-mishka_seed_probe") |> render_click()
+      assert has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+    end
+
+    test "say how many parts they run, counted as parts are ticked", %{conn: conn} do
+      view = to_ui_kit(conn)
+      state = "#install-plugin-state-mishka_seed_probe"
+
+      assert has_element?(view, state, "1 of 2 chosen")
+      view |> element(~s([data-testid="install-part-mishka_seed_probe-extra"])) |> render_click()
+      assert has_element?(view, state, "2 of 2 chosen")
+
+      for part <- ~w(pages extra) do
+        view
+        |> element(~s([data-testid="install-part-mishka_seed_probe-#{part}"]))
+        |> render_click()
+      end
+
+      assert has_element?(view, state, "not chosen")
+    end
+
+    test "mark a required part with a lock, and it cannot be unticked", %{conn: conn} do
+      view = to_ui_kit(conn)
+      settings = "#install-part-mishka_cms_core-settings"
+
+      assert has_element?(view, "#{settings} .lk svg")
+      assert has_element?(view, "#{settings} .inst-required", "Required")
+      refute has_element?(view, "#install-part-mishka_cms_core-components .inst-required")
+
+      render_click(view, "toggle_part", %{
+        "scope" => "install",
+        "key" => "mishka_cms_core",
+        "part" => "settings"
+      })
+
+      assert has_element?(
+               view,
+               ~s([data-testid="install-part-mishka_cms_core-settings"][checked][disabled])
+             )
+    end
+
+    test "the same rows draw the dev sample data", %{conn: conn} do
+      Application.put_env(:mishka_cms_core, :env_dev?, true)
+      on_exit(fn -> Application.delete_env(:mishka_cms_core, :env_dev?) end)
+
+      {:ok, view, _html} = live(conn, "/install")
+      view |> element("#install-dev-seeds") |> render_click()
+
+      assert has_element?(view, "#seed-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#seed-plugin-state-mishka_seed_probe", "2 of 3 chosen")
+
+      view |> element("#seed-plugin-toggle-mishka_seed_probe") |> render_click()
+      view |> element(~s([data-testid="seed-part-mishka_seed_probe-extra"])) |> render_click()
+
+      refute has_element?(view, "#seed-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#seed-plugin-state-mishka_seed_probe", "3 of 3 chosen")
+    end
+  end
+
+  describe "a plugin whose parts are all required" do
+    setup do
+      register_seed_plugins!([
+        %{id: "base", label: "Probe base", envs: [:prod], required: true},
+        %{id: "more", label: "Probe more", envs: [:prod], required: true}
+      ])
+
+      :ok
+    end
+
+    test "is counted as such on its closed row", %{conn: conn} do
+      view = to_ui_kit(conn)
+
+      assert has_element?(
+               view,
+               "#install-plugin-state-mishka_seed_probe",
+               "2 parts · all required"
+             )
+    end
+  end
+
+  # AN EXTENSION'S OWN INSTALL ASKS FOR A KEY, so the wizard draws the field under its parts.
+  defmodule FieldsProbe do
+    @moduledoc false
+    use MishkaInstaller.Event.Hook, event: "installer:extension:install"
+
+    @impl true
+    def call(payload), do: {:reply, payload}
+  end
+
+  describe "an extension's install fields" do
+    setup do
+      register_seed_plugins!(@probe_parts)
+
+      MishkaCmsCore.Test.Installer.register!(FieldsProbe, "installer:extension:install", %{
+        extension: :mishka_seed_probe,
+        extra: [
+          %{
+            label: "Probe",
+            fields: [%{name: "api_key", label: "API key", type: :string, required?: true}]
+          }
+        ]
+      })
+
+      :ok
+    end
+
+    test "show under a ticked part once the row is open", %{conn: conn} do
+      view = to_ui_kit(conn)
+      view |> element("#install-plugin-toggle-mishka_seed_probe") |> render_click()
+
+      assert has_element?(
+               view,
+               ~s(#install-plugin-parts-mishka_seed_probe [data-testid="extension-mishka_seed_probe-api_key"])
+             )
+
+      view |> element(~s([data-testid="install-part-mishka_seed_probe-pages"])) |> render_click()
+      refute has_element?(view, ~s([data-testid="extension-mishka_seed_probe-api_key"]))
+    end
+
+    test "a required one left empty keeps the step and opens its row on the error", %{conn: conn} do
+      view = to_ui_kit(conn)
+      assert has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+
+      view |> element("#uikit-next") |> render_click()
+
+      refute has_element?(view, "#install-settings-form")
+      refute has_element?(view, "#install-plugin-parts-mishka_seed_probe[hidden]")
+      assert has_element?(view, "#install-plugin-state-mishka_seed_probe", "needs an answer")
+      assert has_element?(view, "#extension-fields-mishka_seed_probe .inst-error", "is required")
+
+      view
+      |> form("#extension-fields-mishka_seed_probe",
+        extensions: %{mishka_seed_probe: %{api_key: "k-1"}}
+      )
+      |> render_change()
+
+      refute has_element?(view, "#extension-fields-mishka_seed_probe .inst-error")
+      assert has_element?(view, "#install-plugin-state-mishka_seed_probe", "1 of 2 chosen")
+
+      view |> element("#uikit-next") |> render_click()
+      assert has_element?(view, "#install-settings-form")
     end
   end
 

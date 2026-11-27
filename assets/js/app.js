@@ -24,8 +24,9 @@
 
 import { boot } from "./boot";
 import SharedHooks from "./shared_hooks";
+import InstallHooks from "./install_draft";
 import CoreHooks from "mishka_cms_core";
 import BuilderHooks from "mishka_cms_builder";
 import { hooks as GervazHooks } from "phoenix-colocated/mishka_gervaz";
 
-boot({ ...GervazHooks, ...SharedHooks, ...CoreHooks, ...BuilderHooks });
+boot({ ...GervazHooks, ...SharedHooks, ...InstallHooks, ...CoreHooks, ...BuilderHooks });
