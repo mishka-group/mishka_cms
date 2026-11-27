@@ -213,6 +213,40 @@ defmodule MishkaCmsWeb.PagePermissionsTest do
     end
   end
 
+  describe "signing in at an address that carries a plain path to come back to" do
+    test "lands back on a page of this site", %{site: site, members: members} do
+      seed_auth_pages!(site)
+      user = member!(site, ["members:read"])
+      asked = members.path <> "?tab=2"
+
+      assert sign_in_returning(user, asked) == asked
+    end
+
+    test "lands home for an address off this site", %{site: site} do
+      seed_auth_pages!(site)
+
+      for elsewhere <- ["//evil.example", "https://evil.example/x", "/\\evil.example"] do
+        user = member!(site, [])
+
+        assert sign_in_returning(user, elsewhere) == "/", "signing in went on to #{elsewhere}"
+      end
+    end
+  end
+
+  # Signs `user` in on the sign-in page asked for with `?return_to=<return_to>`, and gives back
+  # where the browser is sent once the password is right.
+  defp sign_in_returning(user, return_to) do
+    sign_in_page = "/auth?" <> URI.encode_query(%{"return_to" => return_to})
+    {:ok, view, _html} = live(on_site(), sign_in_page)
+
+    {:error, {:redirect, %{to: handoff}}} =
+      view
+      |> form("#auth-sign-in-form", user: %{email: to_string(user.email), password: @password})
+      |> render_submit()
+
+    on_site() |> get(handoff) |> redirected_to()
+  end
+
   defp published!(site, permissions) do
     page =
       create_page!(
